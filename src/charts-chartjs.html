@@ -1,0 +1,239 @@
+@@include("partials/main.html")
+
+<head>
+
+    @@include("partials/title-meta.html", {"title": "Chartjs Charts"})
+
+    @@include("partials/head-css.html")
+
+</head>
+
+@@include("partials/body.html")
+
+<!-- Begin page -->
+<div id="layout-wrapper">
+
+    @@include("partials/menu.html")
+
+    <!-- ============================================================== -->
+    <!-- Start right Content here -->
+    <!-- ============================================================== -->
+    <div class="main-content">
+
+        <div class="page-content">
+            <div class="container-fluid">
+
+                @@include("partials/page-title.html", {"pagetitle": "Charts", "title": "Chartjs Charts"})
+
+                <div class="row">
+                    <div class="col-xl-6">
+                        <div class="card m-b-30">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Line Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">A line chart is a way of plotting data
+                                    points on a line. Often, it is used to show trend data, and the
+                                    comparison of two data sets.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+
+                                <canvas id="lineChart" height="300"></canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+
+                    <div class="col-xl-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Bar Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">A bar chart is a way of showing data as
+                                    bars. It is sometimes used to show trend data, and the comparison of
+                                    multiple data sets side by side.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+                                <canvas id="bar" height="300"></canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+                </div> <!-- end row -->
+
+
+                <div class="row">
+                    <div class="col-xl-6">
+                        <div class="card m-b-30">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Pie Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">Pie and doughnut charts are probably
+                                    the most commonly used chart there are. They are divided into segments,
+                                    the arc of each segment shows the proportional value of each piece of
+                                    data.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+
+                                <canvas id="pie" height="260"></canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+
+                    <div class="col-xl-6">
+                        <div class="card m-b-30">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Donut Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">Pie and doughnut charts are probably
+                                    the most commonly used chart there are. They are divided into segments,
+                                    the arc of each segment shows the proportional value of each piece of
+                                    data.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+
+                                <canvas id="doughnut" height="260"></canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+                </div> <!-- end row -->
+
+                <div class="row">
+                    <div class="col-xl-6">
+                        <div class="card m-b-30">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Polar Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">Polar area charts are similar to pie
+                                    charts, but each segment has the same angle - the radius of the segment
+                                    differs depending on the value.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+
+                                <canvas id="polarArea" height="300"> </canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+
+                    <div class="col-xl-6">
+                        <div class="card m-b-30">
+                            <div class="card-body">
+
+                                <h4 class="mt-0 header-title">Radar Chart</h4>
+                                <p class="sub-title d-inline-block text-truncate w-100">A radar chart is a way of showing
+                                    multiple data points and the variation between them. They are often
+                                    useful for comparing the points of two or more different data sets.</p>
+
+                                <div class="row text-center my-4">
+                                    <div class="col-lg-4">
+                                        <h5>3654</h5>
+                                        <p class="text-muted">Marketplace</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>954</h5>
+                                        <p class="text-muted">Last week</p>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <h5>8462</h5>
+                                        <p class="text-muted">Last Month</p>
+                                    </div>
+                                </div>
+
+                                <canvas id="radar" height="300"></canvas>
+
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+                </div> <!-- end row -->
+            </div> <!-- container-fluid -->
+        </div>
+        <!-- End Page-content -->
+
+        @@include("partials/footer.html")
+
+    </div>
+    <!-- end main content-->
+
+</div>
+<!-- END layout-wrapper -->
+
+
+@@include("partials/vendor-scripts.html")
+
+<!-- Chart JS -->
+<script src="assets/libs/chart.js/Chart.bundle.min.js"></script>
+<script src="assets/js/pages/chartjs.init.js"></script>
+
+
+<script src="assets/js/app.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,125 @@
+/* =============
+   Nestable
+============= */
+
+.custom-dd {
+    .dd-list {
+        list-style-type: none;
+
+        .dd-item {
+            .dd-handle {
+                background: var(--#{$prefix}tertiary-bg);
+                border: 1px solid var(--#{$prefix}border-color);
+                padding: 10px 16px;
+                height: auto;
+                font-size: 14px;
+                font-weight: normal;
+                border-radius: 3px;
+                margin: 5px 0;
+
+                &:hover {
+                    color: $primary;
+                }
+            }
+
+            button {
+                display: block;
+                position: relative;
+                cursor: pointer;
+                float: left;
+                width: 25px;
+                height: 20px;
+                margin: 5px 0;
+                padding: 0;
+                text-indent: 100%;
+                white-space: nowrap;
+                overflow: hidden;
+                border: 0;
+                background: transparent;
+                font-size: 12px;
+                line-height: 1;
+                text-align: center;
+                font-weight: bold;
+
+
+                &:before {
+                    content: '-';
+                    top: 11px;
+                    display: block;
+                    position: absolute;
+                    width: 100%;
+                    text-align: center;
+                    text-indent: 0;
+                }
+            }
+        }
+    }
+}
+
+.custom-dd-empty {
+    .dd-list {
+        .dd3-handle {
+            border: none;
+            background: var(--#{$prefix}tertiary-bg);
+            height: 36px !important;
+            width: 36px !important;
+
+            &:before {
+                color: inherit;
+                top: 7px;
+            }
+
+            &:hover {
+                color: $primary;
+            }
+        }
+
+        .dd3-content {
+            height: auto;
+            border: none;
+            padding: 8px 16px 8px 46px;
+            background: var(--#{$prefix}tertiary-bg);
+
+            &:hover {
+                color: $primary;
+            }
+        }
+
+        button {
+            width: 26px;
+            height: 26px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+    }
+}
+
+.dd-dragel>.dd-item .dd-handle {
+    padding: 8px 16px !important;
+    background:  var(--#{$prefix}tertiary-bg);
+    height: auto;
+}
+
+.dd-placeholder,
+.dd-empty {
+    background:  var(--#{$prefix}tertiary-bg);
+    border: 1px dashed var(--#{$prefix}border-color);
+}
+
+.dd-dragel>.dd3-item>.dd3-handle {
+    border: none;
+    background:  var(--#{$prefix}tertiary-bg);
+    height: 36px !important;
+    width: 36px !important;
+
+    &:before {
+        color: inherit;
+        top: 7px;
+    }
+}
+
+.dd-dragel>.dd3-item>.dd3-content {
+    padding: 8px 16px 8px 46px;
+    background:  var(--#{$prefix}tertiary-bg);
+    height: auto;
+}

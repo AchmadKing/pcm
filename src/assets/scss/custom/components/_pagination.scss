@@ -1,0 +1,19 @@
+// 
+// _pagination.scss
+// 
+
+// Pagination rounded (Custom)
+.page-link {
+    color: $primary;
+}
+
+.page-item.active .page-link {
+    background-color: $primary;
+    border-color: $primary;
+}
+
+.page-link:focus,
+.page-link:hover {
+    color: var(--#{$prefix}emphasis-color);
+    background-color: var(--#{$prefix}tertiary-bg);
+}

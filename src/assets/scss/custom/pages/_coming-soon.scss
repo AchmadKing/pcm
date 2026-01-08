@@ -1,0 +1,94 @@
+// 
+// coming-soon.scss
+//
+
+.counter-number {
+    font-size: 24px;
+    font-weight: $font-weight-bold;
+    font-family: $font-family-secondary;
+    text-align: center;
+    display: flex;
+    span {
+        font-size: 14px;
+        font-weight: $font-weight-normal;
+        display: block;
+        padding-top: 5px;
+    }
+}
+
+.coming-box {
+    width: 25%;
+}
+
+.comingsoon-bg{
+    background-image: url("../images/comingsoon-bg.jpg");
+}
+
+
+  // COUNDOWN PAGE 
+
+  .account-pages {
+      margin: 10.5% auto;
+      position: relative;
+  }
+
+  .comming-watch {
+      div {
+          display: inline-block;
+
+          .card {
+              margin: 0px 15px 15px 15px;
+              background-color: var(--#{$prefix}tertiary-bg);
+
+              .countdown-num {
+                  font-weight: 600;
+                  color: $primary;
+              }
+          }
+
+          span {
+              width: 150px;
+              display: block;
+
+              &:first-child {
+                  height: 60px;
+                  font-weight: 300;
+                  font-size: 3em;
+                  line-height: 48px;
+              }
+
+              &:last-child {
+                  padding-top: 14px;
+                  font-size: 0.9em;
+              }
+          }
+      }
+  }
+
+  .coming-soon-search-form {
+      input {
+          padding: 15px 20px;
+          width: 100%;
+          color: $gray-800;
+          border: 2px solid var(--#{$prefix}border-color);
+          outline: none !important;
+          padding-right: 180px;
+          padding-left: 30px;
+          border-radius: 30px;
+      }
+
+      button {
+          position: absolute;
+          top: 7px;
+          right: 8px;
+          outline: none !important;
+          border-radius: 30px;
+          padding: 9px 30px;
+      }
+
+      form {
+          position: relative;
+          max-width: 600px;
+          margin: 0px auto;
+      }
+  }
