@@ -1,0 +1,420 @@
+﻿[AHSP];1 m2 Pembersihan Lahan;m2
+Pekerja;0.1;
+Mandor;0.01;
+[AHSP];1 m' Pengukuran dan Bouwplank;m
+Kayu Kaso - 5/7 ngawur;0.025;
+Kayu Papan - 2/20;0.015;
+Paku - 3 inch;0.05;
+Pekerja;0.12;
+Tukang Kayu;0.08;
+Kepala Tukang;0.008;
+Mandor;0.01;
+Surveyor;0.015;
+[AHSP];1 ls Mobilisasi dan Demobilisasi Alat;ls
+Pekerja;8;
+Mandor;2;
+Operator Alat Berat;4;
+Supir Truk;4;
+Trailer;16;
+[AHSP];1 m2 Pembuatan Bangunan Sementara (Direksi Keet);m2
+Kayu Kaso - 5/7;0.035;
+Kayu Usuk - 4/6;0.025;
+Plywood - 9mm;0.55;
+Seng Gelombang;0.6;
+Paku - 3 inch;0.25;
+Pekerja;0.35;
+Tukang Kayu;0.25;
+Kepala Tukang;0.025;
+Mandor;0.02;
+[AHSP];1 m2 Pembuatan Gudang Material;m2
+Kayu Kaso - 5/7;0.03;
+Kayu Usuk - 4/6;0.02;
+Plywood - 9mm;0.45;
+Seng Gelombang;0.5;
+Paku - 3 inch;0.2;
+Pekerja;0.3;
+Tukang Kayu;0.2;
+Kepala Tukang;0.02;
+Mandor;0.018;
+[AHSP];1 m3 Pekerjaan Pasangan Batu Kali;m3
+Batu Kali - Belah 20-30;1.2;
+Pasir - Pasang;0.52;
+Semen Portland;2.88;
+Pekerja;0.75;
+Tukang Batu;0.25;
+Kepala Tukang;0.025;
+Mandor;0.08;
+[AHSP];1 m3 Pekerjaan Sloof Beton Bertulang K-250;m3
+Besi Beton - D10;63.2;
+Besi Beton - D13;95.5;
+Kawat Bendrat;1.15;
+Semen Portland;9.28;
+Pasir - Beton;0.52;
+Kerikil - Split 2-3;0.76;
+Kayu Bekisting - 5/7;0.28;
+Paku - 3 inch;2.8;
+Pekerja;5.5;
+Tukang Batu;0.65;
+Tukang Besi;0.65;
+Kepala Tukang;0.065;
+Mandor;0.275;
+Molen - 350 ltr;2.5;
+Vibrator Beton;1.5;
+[AHSP];1 m3 Pekerjaan Kolom Beton Bertulang K-300;m3
+Besi Beton - D16;125.5;
+Besi Beton - D10;42.3;
+Kawat Bendrat;2.15;
+Semen Portland;10.85;
+Pasir - Beton;0.45;
+Kerikil - Split 1-2;0.78;
+Kayu Bekisting - 5/7;0.48;
+Plywood - 12mm;0.85;
+Paku - 3 inch;4.5;
+Pekerja;6.2;
+Tukang Batu;0.85;
+Tukang Besi;0.75;
+Kepala Tukang;0.085;
+Mandor;0.31;
+Molen - 350 ltr;3.0;
+Vibrator Beton;2.0;
+[AHSP];1 m3 Pekerjaan Balok Beton Bertulang K-300;m3
+Besi Beton - D19;135.8;
+Besi Beton - D10;48.5;
+Kawat Bendrat;2.45;
+Semen Portland;10.85;
+Pasir - Beton;0.45;
+Kerikil - Split 1-2;0.78;
+Kayu Bekisting - 5/7;0.55;
+Plywood - 12mm;1.15;
+Paku - 3 inch;5.2;
+Pekerja;7.5;
+Tukang Batu;0.95;
+Tukang Besi;0.85;
+Kepala Tukang;0.095;
+Mandor;0.375;
+Molen - 350 ltr;3.5;
+Vibrator Beton;2.5;
+[AHSP];1 m2 Pekerjaan Plat Lantai t=12cm K-300;m2
+Besi Beton - D10;14.2;
+Besi Beton - D8;12.5;
+Kawat Bendrat;0.35;
+Semen Portland;1.42;
+Pasir - Beton;0.054;
+Kerikil - Split 1-2;0.095;
+Kayu Bekisting - 5/7;0.065;
+Multiplex - 12mm;0.12;
+Paku - 3 inch;0.65;
+Pekerja;0.85;
+Tukang Batu;0.12;
+Tukang Besi;0.095;
+Kepala Tukang;0.012;
+Mandor;0.045;
+Molen - 350 ltr;0.4;
+Vibrator Beton;0.3;
+[AHSP];1 m2 Pasang Dinding Bata Merah 1/2 Bata;m2
+Bata Merah - Press;70;
+Pasir - Pasang;0.052;
+Semen Portland;0.165;
+Pekerja;0.25;
+Tukang Batu;0.12;
+Kepala Tukang;0.012;
+Mandor;0.018;
+[AHSP];1 m2 Pasang Dinding Bata Ringan Hebel 10cm;m2
+Bata Ringan - Hebel 10cm;8.5;
+Lem Bata Ringan;0.125;
+Pekerja;0.18;
+Tukang Batu;0.095;
+Kepala Tukang;0.0095;
+Mandor;0.012;
+[AHSP];1 m2 Plesteran Dinding 1:4;m2
+Pasir - Pasang;0.024;
+Semen Portland;0.065;
+Pekerja;0.22;
+Tukang Plester;0.15;
+Kepala Tukang;0.015;
+Mandor;0.018;
+[AHSP];1 m2 Acian Dinding;m2
+Semen Portland;0.025;
+Semen Putih;0.015;
+Pekerja;0.12;
+Tukang Plester;0.095;
+Kepala Tukang;0.0095;
+Mandor;0.012;
+[AHSP];1 m2 Rangka Atap Baja Ringan;m2
+Rangka Atap Baja Ringan - C75;1.8;
+Reng Baja Ringan;3.5;
+Sekrup - 1.5 inch;0.25;
+Dynabolt - M10;0.15;
+Pekerja;0.35;
+Tukang Rangka Atap;0.18;
+Kepala Tukang;0.018;
+Mandor;0.025;
+[AHSP];1 m2 Penutup Atap Genteng Metal;m2
+Genteng Metal - Pasir;1.15;
+Nok Genteng Metal;0.45;
+Sekrup - 1.5 inch;0.12;
+Pekerja;0.18;
+Tukang Rangka Atap;0.095;
+Kepala Tukang;0.0095;
+Mandor;0.012;
+[AHSP];1 m2 Pasang Lantai Keramik 60x60;m2
+Keramik Lantai - 60x60;1.05;
+Semen Portland;0.18;
+Pasir - Pasang;0.045;
+Semen Nat;0.35;
+Pekerja;0.35;
+Tukang Keramik;0.22;
+Kepala Tukang;0.022;
+Mandor;0.025;
+[AHSP];1 m2 Pasang Lantai Granit 60x60;m2
+Granit Tile - 60x60;1.05;
+Lem Keramik;0.25;
+Semen Nat - Epoxy;0.45;
+Pekerja;0.45;
+Tukang Granit;0.32;
+Kepala Tukang;0.032;
+Mandor;0.035;
+[AHSP];1 m2 Plafon Gypsum 9mm Rangka Hollow;m2
+Gypsum Board - 9mm;1.05;
+Hollow Plafon - 2x4;2.5;
+Hollow Plafon - 4x4;0.8;
+Sekrup - 1.5 inch;0.15;
+Dynabolt - M10;0.08;
+Pekerja;0.22;
+Tukang Gypsum;0.12;
+Kepala Tukang;0.012;
+Mandor;0.015;
+[AHSP];1 m' List Gypsum Profil;m
+List Gypsum;1.05;
+Sekrup - 1 inch;0.045;
+Pekerja;0.085;
+Tukang Gypsum;0.045;
+Kepala Tukang;0.0045;
+Mandor;0.0065;
+[AHSP];1 unit Pasang Pintu Panel Kayu 90x210 + Kusen;unit
+Pintu Panel Kayu - 90x210;1;
+Kusen Kayu - 6/12;5.5;
+Engsel Pintu - 4 inch;1;
+Handle Pintu;1;
+Kunci Pintu;1;
+Paku - 3 inch;0.35;
+Pekerja;1.5;
+Tukang Kayu;2.5;
+Kepala Tukang;0.25;
+Mandor;0.15;
+[AHSP];1 unit Pasang Jendela Aluminium 100x150;unit
+Jendela Aluminium - 100x150;1;
+Kusen Aluminium - 4 inch;5.8;
+Kaca Bening - 5mm;1.5;
+Silicone Sealant;0.5;
+Fischer - S8;8;
+Sekrup - 1.5 inch;0.25;
+Pekerja;1.2;
+Tukang Aluminium;1.8;
+Kepala Tukang;0.18;
+Mandor;0.12;
+[AHSP];1 unit Pasang Closet Duduk Standard;unit
+Closet Duduk - Standard;1;
+Pipa PVC - 4 inch;1.5;
+Fitting PVC - Elbow;2;
+Ball Valve - 0.5 inch;1;
+Pekerja;0.5;
+Tukang Pipa;1.2;
+Kepala Tukang;0.12;
+Mandor;0.075;
+[AHSP];1 unit Pasang Wastafel Counter;unit
+Wastafel - Counter;1;
+Pipa PVC - 1.5 inch;2.5;
+Fitting PVC - Elbow;3;
+Fitting PVC - Tee;1;
+Kran Air - Standar;1;
+Afur - Wastafel;1;
+Silicone Sealant;0.35;
+Pekerja;0.65;
+Tukang Pipa;1.5;
+Kepala Tukang;0.15;
+Mandor;0.095;
+[AHSP];"1 m' Pasang Pipa PVC 4""";m
+Pipa PVC - 4 inch;1.05;
+Fitting PVC - Socket;0.12;
+Lem PVC;0.015;
+Bracket Pipa;0.25;
+Pekerja;0.12;
+Tukang Pipa;0.085;
+Kepala Tukang;0.0085;
+Mandor;0.008;
+[AHSP];1 titik Instalasi Listrik Titik Lampu;ttk
+Kabel NYA - 2.5mm;8;
+Konduit PVC - 16mm;3;
+Fitting Lampu - E27;1;
+Saklar - Single;0.35;
+T-dus;2;
+Isolasi;0.5;
+Pekerja;0.35;
+Tukang Listrik;0.55;
+Kepala Tukang;0.055;
+Mandor;0.045;
+[AHSP];1 titik Instalasi Stop Kontak;ttk
+Kabel NYA - 2.5mm;6;
+Konduit PVC - 16mm;2.5;
+Stop Kontak - Arde;1;
+T-dus;1.5;
+Isolasi;0.35;
+Pekerja;0.28;
+Tukang Listrik;0.45;
+Kepala Tukang;0.045;
+Mandor;0.035;
+[AHSP];1 unit Pasang Lampu LED Downlight 9W;unit
+Lampu Downlight - 9W;1;
+Kabel NYA - 1.5mm;1.5;
+Pekerja;0.15;
+Tukang Listrik;0.25;
+Kepala Tukang;0.025;
+Mandor;0.02;
+[AHSP];1 unit Pasang AC Split 1 PK;unit
+AC Split - 1 PK;1;
+Pipa AC - 1/4 + 3/8;5;
+Kabel NYY - 3x2.5mm;8;
+Bracket AC;1;
+Isolasi;1.5;
+Pekerja;1.5;
+Teknisi AC;2.5;
+Kepala Tukang;0.25;
+Mandor;0.15;
+[AHSP];1 m2 Cat Dinding Interior 3x;m2
+Cat Interior;0.125;
+Cat Dasar - Alkali Resisting;0.085;
+Plamir Tembok;0.15;
+Amplas - Halus;0.12;
+Pekerja;0.065;
+Tukang Cat;0.095;
+Kepala Tukang;0.0095;
+Mandor;0.008;
+[AHSP];1 m2 Cat Dinding Exterior 3x;m2
+Cat Exterior;0.145;
+Cat Dasar - Alkali Resisting;0.095;
+Plamir Tembok;0.18;
+Amplas - Halus;0.15;
+Pekerja;0.085;
+Tukang Cat;0.115;
+Kepala Tukang;0.0115;
+Mandor;0.0095;
+[AHSP];1 m3 Galian Tanah Pondasi;m3
+Pekerja;0.75;
+Mandor;0.025;
+Excavator - PC 75;0.015;
+[AHSP];1 m3 Urugan Pasir Bawah Pondasi;m3
+Pasir - Urug;1.15;
+Pekerja;0.35;
+Mandor;0.015;
+Stamper;0.085;
+[AHSP];1 m2 Pemadatan Tanah dengan Stamper;m2
+Pekerja;0.085;
+Mandor;0.0065;
+Stamper;0.055;
+[AHSP];1 unit Septictank Biotech 2000 Liter;unit
+Septictank Biotech - 2000 ltr;1;
+Pasir - Urug;0.5;
+Batu Kali - Pecah 15/20;0.35;
+Pipa PVC - 4 inch;3;
+Fitting PVC - Elbow;4;
+Pekerja;3.5;
+Tukang Batu;1.5;
+Tukang Pipa;1.0;
+Kepala Tukang;0.15;
+Mandor;0.25;
+Excavator - PC 75;0.5;
+[AHSP];1 m2 Waterproofing Membrane;m2
+Waterproofing - Membrane;1.1;
+Pekerja;0.12;
+Tukang Waterproofing;0.085;
+Kepala Tukang;0.0085;
+Mandor;0.008;
+[AHSP];1 m2 Pasang Paving Block 8cm;m2
+Paving Block - 8cm;1.05;
+Pasir - Urug;0.045;
+Semen Portland;0.025;
+Pekerja;0.22;
+Tukang Batu;0.12;
+Kepala Tukang;0.012;
+Mandor;0.015;
+Stamper;0.035;
+[AHSP];"1 m' Pasang Talang PVC 4""";m
+Talang - PVC 4 inch;1.05;
+Pipa Talang - PVC 3 inch;0.35;
+Bracket Talang;0.55;
+Sekrup - 1.5 inch;0.12;
+Pekerja;0.15;
+Tukang Batu;0.095;
+Kepala Tukang;0.0095;
+Mandor;0.012;
+[AHSP];1 m' Pasang Listplank Kalsiboard;m
+Listplank Kalsiboard;1.05;
+Hollow Galvalum - 4x4;0.45;
+Sekrup - 1.5 inch;0.18;
+Cat Exterior;0.085;
+Pekerja;0.18;
+Tukang Kayu;0.12;
+Kepala Tukang;0.012;
+Mandor;0.015;
+[AHSP];1 m' Railing Tangga Stainless;m
+Railing Tangga - Stainless;1;
+Dynabolt - M12;4;
+Welding Stainless;0.25;
+Pekerja;0.55;
+Tukang Las;0.85;
+Kepala Tukang;0.085;
+Mandor;0.065;
+[AHSP];1 m2 Canopy Polycarbonate 10mm;m2
+Polycarbonate - 10mm;1.1;
+Hollow Galvalum - 4x6;3.5;
+Hollow Galvalum - 4x4;2.5;
+Sekrup - 1.5 inch;0.25;
+Dynabolt - M10;0.2;
+Cat Besi;0.12;
+Pekerja;0.65;
+Tukang Las;0.45;
+Kepala Tukang;0.045;
+Mandor;0.055;
+[AHSP];1 unit Panel Listrik Utama;unit
+Panel Listrik - Utama;1;
+MCCB - 250A;1;
+MCB - 3 Phase 63A;3;
+MCB - 3 Phase 32A;4;
+MCB - 1 Phase 25A;8;
+Kabel NYFGBY - 4x16mm;15;
+Grounding;1;
+Pekerja;5;
+Teknisi Listrik;8;
+Kepala Tukang;0.8;
+Mandor;0.5;
+[AHSP];1 unit Fire Alarm System per Zone;unit
+Fire Alarm - Detector;8;
+Fire Alarm - Sounder;2;
+Kabel NYA - 1.5mm;85;
+Konduit PVC - 16mm;25;
+T-dus;15;
+Pekerja;3;
+Teknisi Listrik;5;
+Kepala Tukang;0.5;
+Mandor;0.35;
+[AHSP];1 unit Hydrant Box Indoor;unit
+Hydrant Box;1;
+Pipa GIP - 2 inch;8;
+Ball Valve - 2 inch;1;
+Gate Valve - 2 inch;1;
+Fitting GIP - Elbow;4;
+Fitting GIP - Tee;2;
+Pekerja;2.5;
+Tukang Pipa;3.5;
+Kepala Tukang;0.35;
+Mandor;0.25;
+[AHSP];1 m' Pagar BRC tinggi 1.5m;m
+Pagar BRC;1.5;
+Hollow Besi - 4x6;1.85;
+Dynabolt - M12;0.35;
+Cat Besi;0.25;
+Pekerja;0.35;
+Tukang Las;0.25;
+Kepala Tukang;0.025;
+Mandor;0.025;

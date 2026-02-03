@@ -1,0 +1,21 @@
+Kode;Nama Utama;Jenis;Merk;Kategori;Satuan;Harga PU;Harga Aktual
+MTR-001;Batu Kali;Belah 20-30;;material;m3;300000;
+MTR-002;Batu Kali;Pecah 15/20;;material;m3;185000;180000
+MTR-003;Batu Kali;Pecah 10/15;;material;m3;155000;
+MTR-004;Batu Kali;Pecah 5/7;;material;m3;135400;
+MTR-005;Batu Kali;Pecah 3/5;;material;m3;150000;
+MTR-006;Kerikil;Koral;;material;m3;206000;
+MTR-007;Kerikil;Beton 0,5/1;;material;m3;304000;
+MTR-008;Kerikil;Beton 1/2;;material;m3;299000;
+MTR-009;Kerikil;Beton 2/3;;material;m3;285000;
+MTR-010;Pasir;Urug;;material;m3;154500;
+MTR-011;Pasir;Pasang;;material;m3;250000;
+MTR-012;Pasir;Beton;;material;m3;300000;
+MTR-013;Semen Portland;;;material;zak;65000;62000
+UPH-001;Pekerja;;;upah;OH;75000;
+UPH-002;Tukang Batu;;;upah;OH;85000;
+UPH-003;Tukang Kayu;;;upah;OH;85000;
+UPH-004;Kepala Tukang;;;upah;OH;95000;
+UPH-005;Mandor;;;upah;OH;105000;
+ALT-001;Molen;;;alat;jam;25000;
+ALT-002;Vibrator;;;alat;jam;20000;
