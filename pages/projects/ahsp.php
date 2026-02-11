@@ -175,6 +175,11 @@ foreach ($details as $detail) {
 }
 $grandTotal = array_sum($totals);
 
+// Calculate overhead for header display
+$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadAmount = $grandTotal * ($overheadPct / 100);
+$totalWithOverhead = $grandTotal + $overheadAmount;
+
 $pageTitle = 'AHSP - ' . $subcategory['name'];
 require_once __DIR__ . '/../../includes/header.php';
 ?>
@@ -212,7 +217,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 </p>
                 <p class="mb-0">
                     <span class="text-muted">Harga Satuan:</span> 
-                    <strong class="text-primary fs-5"><?= formatRupiah($subcategory['unit_price']) ?></strong>
+                    <strong class="text-primary fs-5"><?= formatRupiah($totalWithOverhead) ?></strong>
                 </p>
             </div>
         </div>
@@ -225,11 +230,7 @@ require_once __DIR__ . '/../../includes/header.php';
         <h5 class="mb-0">Rincian AHSP</h5>
     </div>
     <div class="card-body p-0">
-        <?php 
-        $overheadPct = $project['overhead_percentage'] ?? 10;
-        $overheadAmount = $grandTotal * ($overheadPct / 100);
-        $totalWithOverhead = $grandTotal + $overheadAmount;
-        ?>
+        <?php // Overhead already calculated above ?>
         <div class="table-responsive">
             <table class="table table-bordered mb-0">
                 <thead>

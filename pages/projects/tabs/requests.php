@@ -112,6 +112,7 @@ $requests = dbGetAll("
 ", [$projectId]);
 
 $canMakeRequest = ($project['status'] === 'on_progress');
+$canManageTeam = ($project['status'] === 'on_progress');
 ?>
 
 <style>
@@ -168,6 +169,12 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                 
                 <!-- Section 1: Available Users (Pilih tim yang ditugaskan) -->
                 <div class="mb-4">
+                    <?php if (!$canManageTeam): ?>
+                    <div class="alert alert-warning py-2 mb-2">
+                        <small><i class="mdi mdi-lock"></i> Penugasan tim hanya dapat dikelola saat proyek <strong>ON PROGRESS</strong>.</small>
+                    </div>
+                    <?php endif; ?>
+                    
                     <p class="text-muted small mb-2">
                         <i class="mdi mdi-account-plus"></i> Pilih tim yang ditugaskan:
                     </p>
@@ -194,7 +201,8 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                             <div>
                                 <input class="form-check-input available-checkbox" type="checkbox" 
                                        value="<?= $user['id'] ?>" 
-                                       id="avail_<?= $user['id'] ?>">
+                                       id="avail_<?= $user['id'] ?>"
+                                       <?= !$canManageTeam ? 'disabled' : '' ?>>
                                 <label class="form-check-label" for="avail_<?= $user['id'] ?>">
                                     <strong><?= sanitize($user['username']) ?></strong>
                                     <small class="text-muted d-block"><?= sanitize($user['full_name']) ?></small>
@@ -205,7 +213,7 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                         <?php endif; ?>
                     </div>
                     
-                    <button type="button" class="btn btn-primary btn-sm w-100" id="btnTambahTim" onclick="showAddConfirmModal()">
+                    <button type="button" class="btn btn-primary btn-sm w-100" id="btnTambahTim" onclick="showAddConfirmModal()" <?= !$canManageTeam ? 'disabled' : '' ?>>
                         <i class="mdi mdi-plus"></i> Tambah
                     </button>
                 </div>
@@ -232,7 +240,8 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                                 <small class="text-muted d-block"><?= sanitize($user['full_name']) ?></small>
                             </div>
                             <button type="button" class="btn btn-sm btn-outline-danger" 
-                                    onclick="showRemoveConfirmModal(<?= $user['id'] ?>, '<?= sanitize($user['username']) ?>')">
+                                    onclick="showRemoveConfirmModal(<?= $user['id'] ?>, '<?= sanitize($user['username']) ?>')"
+                                    <?= !$canManageTeam ? 'disabled' : '' ?>>
                                 <i class="mdi mdi-close"></i>
                             </button>
                         </div>
@@ -278,6 +287,7 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                             <tr>
                                 <th>No. Pengajuan</th>
                                 <th>Tanggal</th>
+                                <th>Minggu Ke</th>
                                 <th>Deskripsi</th>
                                 <th class="text-end">Jumlah</th>
                                 <th class="text-center">Status</th>
@@ -296,6 +306,7 @@ $canMakeRequest = ($project['status'] === 'on_progress');
                             <tr>
                                 <td><code><?= sanitize($req['request_number'] ?: 'REQ-' . $req['id']) ?></code></td>
                                 <td><?= formatDate($req['request_date']) ?></td>
+                                <td class="text-center"><?= $req['target_week'] ?? $req['week_number'] ?? '-' ?></td>
                                 <td><?= sanitize($req['description'] ?: '-') ?></td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
                                 <td class="text-center"><?= $statusBadges[$req['status']] ?? $req['status'] ?></td>

@@ -11,14 +11,14 @@ $isEditable = ($project['status'] === 'draft' && !$project['rab_submitted'] && !
 // Get available AHSP for this project
 $ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY work_name", [$projectId]);
 
-// Function to get AHSP component breakdown (tenaga, bahan, peralatan)
+// Function to get AHSP component breakdown (tenaga, bahan, peralatan) and total
 function getAhspComponentBreakdown($ahspId) {
-    $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
+    $result = ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
     
     if (!$ahspId) return $result;
     
     $totals = dbGetAll("
-        SELECT i.category, SUM(d.coefficient * i.price) as total 
+        SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
         FROM project_ahsp_details d 
         JOIN project_items i ON d.item_id = i.id 
         WHERE d.ahsp_id = ?
@@ -29,6 +29,7 @@ function getAhspComponentBreakdown($ahspId) {
         if (isset($result[$row['category']])) {
             $result[$row['category']] = $row['total'];
         }
+        $result['total'] += $row['total'];
     }
     
     return $result;
@@ -56,16 +57,19 @@ foreach ($categories as $cat) {
     // Enrich subcategories with component breakdown
     $enrichedSubcats = [];
     foreach ($subcats as $sub) {
-        // Calculate unit price with overhead
-        $baseUnitPrice = $sub['unit_price'];
+        // Get AHSP component breakdown (includes total calculated from details)
+        $components = getAhspComponentBreakdown($sub['ahsp_id']);
+        
+        // Use AHSP calculated total as base price (not from rab_subcategories.unit_price)
+        // This ensures AHSP and RAB prices are always in sync
+        $baseUnitPrice = $components['total'];
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $sub['unit_price_display'] = $unitPriceWithOverhead;
         
         $subTotal = $sub['volume'] * $unitPriceWithOverhead;
         $catTotal += $subTotal;
         
-        // Get AHSP component breakdown
-        $components = getAhspComponentBreakdown($sub['ahsp_id']);
+        // Component breakdown for tenaga/bahan/alat columns
         $sub['anggaran_tenaga'] = $components['upah'] * $sub['volume'];
         $sub['anggaran_bahan'] = $components['material'] * $sub['volume'];
         $sub['anggaran_alat'] = $components['alat'] * $sub['volume'];
@@ -164,9 +168,26 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
             <i class="mdi mdi-plus"></i> Tambah Kategori
         </button>
         <?php endif; ?>
-        <a href="export_rab.php?id=<?= $projectId ?>" class="btn btn-success btn-sm text-nowrap">
-            <i class="mdi mdi-microsoft-excel"></i> Export CSV
-        </a>
+        <!-- Export Dropdown -->
+        <div class="dropdown">
+            <button class="btn btn-success btn-sm dropdown-toggle text-nowrap" type="button" data-bs-toggle="dropdown">
+                <i class="mdi mdi-microsoft-excel"></i> Export CSV
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                    <a class="dropdown-item" href="export_rab.php?id=<?= $projectId ?>&format=report">
+                        <i class="mdi mdi-file-document-outline"></i> Export Laporan
+                        <small class="d-block text-muted">Format lengkap dengan header dan total</small>
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="export_rab.php?id=<?= $projectId ?>&format=import">
+                        <i class="mdi mdi-upload"></i> Export untuk Import
+                        <small class="d-block text-muted">Format sederhana (Kategori | Kode AHSP | Volume)</small>
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -516,39 +537,45 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
     </div>
 </div>
 
+<?php 
+// Scripts to be loaded after jQuery (in footer.php)
+ob_start(); 
+?>
 <script>
-// Initialize Select2 for AHSP dropdown when modal is shown
-$('#addSubcategoryModal').on('shown.bs.modal', function () {
-    // Initialize Select2 inside modal
-    $('.select2-ahsp').select2({
-        placeholder: '-- Ketik untuk mencari AHSP --',
-        allowClear: true,
-        width: '100%',
-        dropdownParent: $('#addSubcategoryModal'),
-        language: {
-            noResults: function() {
-                return 'AHSP tidak ditemukan';
-            },
-            searching: function() {
-                return 'Mencari...';
+$(document).ready(function() {
+    // Initialize Select2 for AHSP dropdown when modal is shown
+    $('#addSubcategoryModal').on('shown.bs.modal', function () {
+        // Initialize Select2 inside modal
+        $('.select2-ahsp').select2({
+            placeholder: '-- Ketik untuk mencari AHSP --',
+            allowClear: true,
+            width: '100%',
+            dropdownParent: $('#addSubcategoryModal'),
+            language: {
+                noResults: function() {
+                    return 'AHSP tidak ditemukan';
+                },
+                searching: function() {
+                    return 'Mencari...';
+                }
             }
+        });
+    });
+
+    // Reset Select2 when modal is closed
+    $('#addSubcategoryModal').on('hidden.bs.modal', function () {
+        $('.select2-ahsp').val('').trigger('change');
+        // Destroy and let it reinitialize on next open
+        if ($('.select2-ahsp').data('select2')) {
+            $('.select2-ahsp').select2('destroy');
         }
     });
-});
 
-// Reset Select2 when modal is closed
-$('#addSubcategoryModal').on('hidden.bs.modal', function () {
-    $('.select2-ahsp').val('').trigger('change');
-    // Destroy and let it reinitialize on next open
-    if ($('.select2-ahsp').data('select2')) {
-        $('.select2-ahsp').select2('destroy');
-    }
-});
-
-// Add Subcategory Modal - set category ID
-$('#addSubcategoryModal').on('show.bs.modal', function (e) {
-    var categoryId = $(e.relatedTarget).data('category-id');
-    $('#add_subcat_category_id').val(categoryId);
+    // Add Subcategory Modal - set category ID
+    $('#addSubcategoryModal').on('show.bs.modal', function (e) {
+        var categoryId = $(e.relatedTarget).data('categoryId');
+        $('#add_subcat_category_id').val(categoryId);
+    });
 });
 
 // Delete Subcategory Function
@@ -584,4 +611,7 @@ function deleteSnapshot(snapshotId) {
     });
 }
 </script>
+<?php 
+$extraScripts = ob_get_clean();
+?>
 

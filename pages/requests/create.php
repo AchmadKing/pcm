@@ -94,6 +94,79 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_type' && isset($_GET
     exit;
 }
 
+// AJAX: Get RAP pekerjaan for checkbox selection (grouped by category)
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_rap_pekerjaan' && $projectId) {
+    header('Content-Type: application/json');
+    
+    // Get RAP data: categories + subcategories (representing work items)
+    $rapItems = dbGetAll("
+        SELECT 
+            rc.id as category_id,
+            rc.code as category_code,
+            rc.name as category_name,
+            rs.id as subcategory_id,
+            rs.code as item_code,
+            rs.name as item_name
+        FROM rab_categories rc
+        JOIN rab_subcategories rs ON rs.category_id = rc.id
+        JOIN rap_items rap ON rap.subcategory_id = rs.id
+        WHERE rc.project_id = ?
+        ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+    ", [$projectId]);
+    
+    echo json_encode(['success' => true, 'data' => $rapItems]);
+    exit;
+}
+
+// AJAX: Get items from selected RAP pekerjaan (by subcategory IDs and item type)
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && isset($_GET['subcategory_ids']) && isset($_GET['item_type'])) {
+    header('Content-Type: application/json');
+    
+    $subcategoryIds = array_filter(array_map('intval', explode(',', $_GET['subcategory_ids'])));
+    $itemType = $_GET['item_type'];
+    
+    // Validate item_type
+    if (!in_array($itemType, ['upah', 'material', 'alat'])) {
+        echo json_encode(['success' => false, 'message' => 'Invalid item type']);
+        exit;
+    }
+    
+    if (empty($subcategoryIds)) {
+        echo json_encode(['success' => true, 'data' => []]);
+        exit;
+    }
+    
+    // Build placeholders for IN clause
+    $placeholders = implode(',', array_fill(0, count($subcategoryIds), '?'));
+    
+    // Get items from rap_ahsp_details for selected subcategories and item type
+    // Include rap_qty and used_qty for remaining (sisa) calculation
+    $params = array_merge($subcategoryIds, [$itemType]);
+    $items = dbGetAll("
+        SELECT DISTINCT rad.id, rad.category as item_type, pi.item_code, pi.name, pi.unit, 
+               rad.coefficient, rad.unit_price, pi.actual_price,
+               rs.id as subcategory_id, rs.code as subcat_code, rs.name as subcat_name,
+               ri.volume as rap_volume,
+               (rad.coefficient * COALESCE(ri.volume, 0)) as rap_qty,
+               (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+                FROM request_items reqi2 
+                JOIN requests r ON reqi2.request_id = r.id 
+                WHERE reqi2.item_code = pi.item_code 
+                  AND reqi2.subcategory_id = rs.id
+                  AND r.status IN ('approved','pending')
+               ) as used_qty
+        FROM rap_ahsp_details rad
+        JOIN project_items pi ON rad.item_id = pi.id
+        JOIN rap_items ri ON rad.rap_item_id = ri.id
+        JOIN rab_subcategories rs ON ri.subcategory_id = rs.id
+        WHERE ri.subcategory_id IN ($placeholders) AND rad.category = ?
+        ORDER BY rs.code, pi.name
+    ", $params);
+    
+    echo json_encode(['success' => true, 'data' => $items]);
+    exit;
+}
+
 // Get on-progress projects
 $projects = dbGetAll("SELECT id, name FROM projects WHERE status = 'on_progress' ORDER BY name");
 
@@ -150,6 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $categoryId = intval($item['category_id'] ?? 0);
             $subcategoryId = intval($item['subcategory_id'] ?? 0);
             $itemCode = trim($item['item_code'] ?? '');
+            $itemType = trim($item['item_type'] ?? '');
             $itemName = trim($item['item_name'] ?? '');
             $unit = trim($item['unit'] ?? '');
             $unitPrice = floatval($item['unit_price'] ?? 0);
@@ -161,13 +235,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 
                 dbInsert("
                     INSERT INTO request_items 
-                    (request_id, category_id, subcategory_id, item_code, item_name, unit, unit_price, quantity, coefficient, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (request_id, category_id, subcategory_id, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ", [
                     $requestId, 
                     $categoryId ?: null, 
                     $subcategoryId ?: null, 
                     $itemCode ?: null, 
+                    $itemType ?: null,
                     $itemName, 
                     $unit, 
                     $unitPrice,
@@ -330,31 +405,26 @@ require_once __DIR__ . '/../../includes/header.php';
                     
                     <hr class="my-3">
                     
-                    <!-- Row 1: Category & Sub-Category -->
+                    <!-- RAP Pekerjaan Checkbox Section -->
                     <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Kategori Pekerjaan <span class="text-danger">*</span></label>
-                            <select class="form-select" id="categorySelect">
-                                <option value="">-- Pilih Kategori --</option>
-                                <?php foreach ($categories as $cat): ?>
-                                <option value="<?= $cat['id'] ?>"><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Sub-Kategori <span class="text-danger">*</span></label>
-                            <select class="form-select" id="subcategorySelect" disabled>
-                                <option value="">-- Pilih Kategori dahulu --</option>
-                            </select>
+                        <div class="col-12 mb-3">
+                            <label class="form-label"><strong>Pilih Pekerjaan</strong> <span class="text-danger">*</span></label>
+                            <div class="border rounded" style="max-height: 300px; overflow-y: auto;" id="rapPekerjaanContainer">
+                                <div class="text-center text-muted py-4">
+                                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                                    Memuat data RAP...
+                                </div>
+                            </div>
+                            <small class="text-muted">Centang pekerjaan yang akan diajukan dana-nya</small>
                         </div>
                     </div>
                     
-                    <!-- Row 2: Item Type & Item Selection -->
+                    <!-- Row: Item Type & Item Selection (based on selected RAP checkboxes) -->
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Jenis Item <span class="text-danger">*</span></label>
                             <select class="form-select" id="itemTypeSelect" disabled>
-                                <option value="">-- Pilih Sub-Kategori dahulu --</option>
+                                <option value="">-- Pilih Pekerjaan dahulu --</option>
                                 <option value="upah">Upah</option>
                                 <option value="material">Material</option>
                                 <option value="alat">Alat</option>
@@ -385,7 +455,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <input type="text" class="form-control form-control-sm text-end" id="previewPrice" placeholder="0">
                             </div>
                             <div class="col-md-2 mb-2">
-                                <label class="form-label mb-1"><small>Koefisien <span class="text-danger">*</span></small></label>
+                                <label class="form-label mb-1" id="previewCoefLabel"><small>Koefisien <span class="text-danger">*</span></small></label>
                                 <input type="text" class="form-control form-control-sm text-end" id="previewCoef" placeholder="0">
                             </div>
                             <div class="col-md-2 mb-2">
@@ -414,7 +484,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <th>Nama Item</th>
                                     <th width="80">Satuan</th>
                                     <th width="130">Harga Satuan</th>
-                                    <th width="100">Koefisien</th>
+                                    <th width="100" id="tableCoefHeader">Koefisien</th>
                                     <th width="140">Total Harga</th>
                                     <th width="150">Catatan</th>
                                     <th width="50">Aksi</th>
@@ -488,9 +558,17 @@ require_once __DIR__ . '/../../includes/header.php';
 </div>
 
 
+<?php 
+// Store script in $extraScripts to load AFTER jQuery in footer
+ob_start();
+?>
 <script>
 $(document).ready(function() {
+    console.log('=== CREATE.PHP SCRIPT LOADED ===');
+    
     const projectId = <?= $projectId ?>;
+    console.log('Project ID:', projectId);
+    
     let itemIndex = 0;
     let selectedCategoryId = null;
     let selectedSubcategoryId = null;
@@ -529,100 +607,149 @@ $(document).ready(function() {
     }
     
     // =====================================
-    // CATEGORY/SUBCATEGORY HANDLERS
+    // RAP PEKERJAAN CHECKBOX HANDLERS
     // =====================================
     
-    // Use event delegation for better stability
-    $(document).on('change', '#categorySelect', function() {
-        const catId = $(this).val();
-        selectedCategoryId = catId;
+    // Load RAP Pekerjaan checkboxes on page load
+    function loadRapPekerjaan() {
+        console.log('Loading RAP pekerjaan for project:', projectId);
         
-        console.log('Category changed:', catId);
-        
-        // Disable dependent fields
-        $('#subcategorySelect').html('<option value="">Memuat...</option>').prop('disabled', true);
-        $('#itemTypeSelect').html('<option value="">-- Pilih Sub-Kategori dahulu --</option>').prop('disabled', true);
-        $('#itemSelect').html('<option value="">-- Pilih Jenis Item dahulu --</option>').prop('disabled', true);
-        $('#itemPreviewBox').hide();
-        
-        if (!catId) {
-            $('#subcategorySelect').html('<option value="">-- Pilih Kategori dahulu --</option>');
-            return;
-        }
-        
-        // Fetch subcategories
         $.ajax({
             url: 'create.php',
             data: {
                 project_id: projectId,
-                ajax: 'get_subcategories',
-                category_id: catId
+                ajax: 'get_rap_pekerjaan'
             },
             method: 'GET',
             dataType: 'json',
+            timeout: 30000, // 30 second timeout
             success: function(res) {
-                if (res.success) {
-                    let options = '<option value="">-- Pilih Sub-Kategori --</option>';
-                    if (res.data.length === 0) {
-                        options = '<option value="">Tidak ada sub-kategori</option>';
-                    } else {
-                        res.data.forEach(function(sub) {
-                            options += '<option value="' + sub.id + '" data-name="' + sub.name + '" data-code="' + sub.code + '">' 
-                                    + sub.code + '. ' + sub.name + '</option>';
-                        });
-                    }
-                    $('#subcategorySelect').html(options).prop('disabled', false);
+                console.log('RAP data response:', res);
+                if (res.success && res.data.length > 0) {
+                    renderRapCheckboxes(res.data);
                 } else {
-                    alert('Gagal memuat sub-kategori: ' + (res.message || 'Unknown error'));
-                    $('#subcategorySelect').html('<option value="">Error memuat data</option>');
+                    $('#rapPekerjaanContainer').html(
+                        '<div class="text-center text-muted py-4"><i class="mdi mdi-alert-circle-outline"></i> Tidak ada data RAP untuk proyek ini.</div>'
+                    );
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX Error:', error);
-                console.log(xhr.responseText);
-                alert('Terjadi kesalahan server saat memuat sub-kategori. Cek koneksi atau hubungi admin.');
-                $('#subcategorySelect').html('<option value="">Gagal memuat</option>');
+                console.error('RAP loading error:', status, error, xhr.responseText);
+                $('#rapPekerjaanContainer').html(
+                    '<div class="text-center text-danger py-4"><i class="mdi mdi-alert"></i> Gagal memuat data RAP. <br><small>Error: ' + (error || status) + '</small></div>'
+                );
             }
         });
+    }
+    
+    // Render RAP checkboxes table
+    function renderRapCheckboxes(items) {
+        let html = '<table class="table table-sm table-hover mb-0">';
+        html += '<thead class="table-dark"><tr>';
+        html += '<th width="40" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllRap" title="Pilih Semua"></th>';
+        html += '<th width="60">No</th>';
+        html += '<th>Uraian Pekerjaan</th></tr></thead>';
+        html += '<tbody>';
+        
+        let currentCategory = null;
+        items.forEach(function(item) {
+            // Category header row
+            if (item.category_code !== currentCategory) {
+                currentCategory = item.category_code;
+                html += '<tr class="table-primary">';
+                html += '<td class="text-center"><input type="checkbox" class="form-check-input rap-category-check" data-category="' + item.category_id + '" title="Pilih Kategori"></td>';
+                html += '<td colspan="2"><strong>' + item.category_code + '. ' + escapeHtml(item.category_name) + '</strong></td>';
+                html += '</tr>';
+            }
+            // Item row
+            html += '<tr>';
+            html += '<td class="text-center">';
+            html += '<input type="checkbox" class="form-check-input rap-item-check" ';
+            html += 'data-subcategory-id="' + item.subcategory_id + '" ';
+            html += 'data-category-id="' + item.category_id + '">';
+            html += '</td>';
+            html += '<td>' + escapeHtml(item.item_code) + '</td>';
+            html += '<td>' + escapeHtml(item.item_name) + '</td>';
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        $('#rapPekerjaanContainer').html(html);
+    }
+    
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text.replace(/&/g, "&amp;")
+                   .replace(/</g, "&lt;")
+                   .replace(/>/g, "&gt;")
+                   .replace(/"/g, "&quot;")
+                   .replace(/'/g, "&#039;");
+    }
+    
+    // Get selected subcategory IDs from checkboxes
+    function getSelectedSubcategoryIds() {
+        let ids = [];
+        $('.rap-item-check:checked').each(function() {
+            ids.push($(this).data('subcategory-id'));
+        });
+        return ids;
+    }
+    
+    // Handle "Select All" checkbox
+    $(document).on('change', '#selectAllRap', function() {
+        const isChecked = $(this).prop('checked');
+        $('.rap-category-check, .rap-item-check').prop('checked', isChecked);
+        onRapSelectionChange();
     });
     
-    // Subcategory change - enable item type
-    $(document).on('change', '#subcategorySelect', function() {
-        const subId = $(this).val();
-        selectedSubcategoryId = subId;
-        selectedSubcatName = $(this).find(':selected').data('name') || '';
-        selectedSubcatCode = $(this).find(':selected').data('code') || '';
-        
-        console.log('Subcategory selected:', subId);
-        
-        // Reset item type and item
-        $('#itemTypeSelect').val('').prop('disabled', !subId);
-        $('#itemSelect').html('<option value="">-- Pilih Jenis Item dahulu --</option>').prop('disabled', true);
-        $('#itemPreviewBox').hide();
-        
-        // Enable choices in item type
-        if (subId) {
+    // Handle category checkbox - select/deselect all items in category
+    $(document).on('change', '.rap-category-check', function() {
+        const catId = $(this).data('category');
+        const isChecked = $(this).prop('checked');
+        $('.rap-item-check[data-category-id="' + catId + '"]').prop('checked', isChecked);
+        onRapSelectionChange();
+    });
+    
+    // Handle individual item checkbox
+    $(document).on('change', '.rap-item-check', function() {
+        const catId = $(this).data('category-id');
+        // Update category checkbox state based on items
+        const allInCat = $('.rap-item-check[data-category-id="' + catId + '"]').length;
+        const checkedInCat = $('.rap-item-check[data-category-id="' + catId + '"]:checked').length;
+        $('.rap-category-check[data-category="' + catId + '"]').prop('checked', allInCat === checkedInCat);
+        onRapSelectionChange();
+    });
+    
+    // When selection changes, enable/disable item type dropdown
+    function onRapSelectionChange() {
+        const selectedIds = getSelectedSubcategoryIds();
+        if (selectedIds.length > 0) {
             $('#itemTypeSelect').html(`
                 <option value="">-- Pilih Jenis Item --</option>
                 <option value="upah">Upah</option>
                 <option value="material">Material</option>
                 <option value="alat">Alat</option>
-            `);
+            `).prop('disabled', false);
         } else {
-            $('#itemTypeSelect').html('<option value="">-- Pilih Sub-Kategori dahulu --</option>');
+            $('#itemTypeSelect').html('<option value="">-- Pilih Pekerjaan dahulu --</option>').prop('disabled', true);
         }
-    });
+        // Reset item dropdown
+        $('#itemSelect').html('<option value="">-- Pilih Jenis Item dahulu --</option>').prop('disabled', true);
+        $('#itemPreviewBox').hide();
+    }
     
-    // Item Type change - load items
+    // Item Type change - load items from selected RAP pekerjaan
     $(document).on('change', '#itemTypeSelect', function() {
         const itemType = $(this).val();
+        const selectedIds = getSelectedSubcategoryIds();
         
-        console.log('Item Type selected:', itemType);
+        console.log('Item Type selected:', itemType, 'Selected subcategories:', selectedIds);
         
         $('#itemSelect').html('<option value="">Memuat...</option>').prop('disabled', true);
         $('#itemPreviewBox').hide();
         
-        if (!itemType || !selectedSubcategoryId) {
+        if (!itemType || selectedIds.length === 0) {
             $('#itemSelect').html('<option value="">-- Pilih Jenis Item dahulu --</option>');
             return;
         }
@@ -631,8 +758,8 @@ $(document).ready(function() {
             url: 'create.php',
             data: {
                 project_id: projectId,
-                ajax: 'get_items_by_type',
-                subcategory_id: selectedSubcategoryId,
+                ajax: 'get_items_by_selected_rap',
+                subcategory_ids: selectedIds.join(','),
                 item_type: itemType
             },
             method: 'GET',
@@ -643,19 +770,29 @@ $(document).ready(function() {
                         let options = '<option value="">-- Pilih Item --</option>';
                         res.data.forEach(function(item) {
                             const price = item.actual_price || item.unit_price;
+                            const rapQty = parseFloat(item.rap_qty) || 0;
+                            const usedQty = parseFloat(item.used_qty) || 0;
+                            const sisaQty = rapQty - usedQty;
                             options += '<option value="' + item.id + '" ' +
                                     'data-code="' + (item.item_code || '') + '" ' +
-                                    'data-name="' + item.name + '" ' +
+                                    'data-name="' + escapeHtml(item.name) + '" ' +
                                     'data-unit="' + item.unit + '" ' +
                                     'data-price="' + price + '" ' +
-                                    'data-coef="' + (item.coefficient || 1) + '">' +
+                                    'data-coef="' + (item.coefficient || 1) + '" ' +
+                                    'data-subcat-id="' + item.subcategory_id + '" ' +
+                                    'data-subcat-code="' + item.subcat_code + '" ' +
+                                    'data-rap-qty="' + rapQty + '" ' +
+                                    'data-used-qty="' + usedQty + '" ' +
+                                    'data-sisa-qty="' + sisaQty + '" ' +
+                                    'data-item-type="' + item.item_type + '">' +
+                                    '[' + item.subcat_code + '] ' +
                                     (item.item_code ? item.item_code + ' - ' : '') + item.name + 
                                     ' (' + item.unit + ')' +
                                     '</option>';
                         });
                         $('#itemSelect').html(options).prop('disabled', false);
                     } else {
-                        $('#itemSelect').html('<option value="">Tidak ada item</option>');
+                        $('#itemSelect').html('<option value="">Tidak ada item ' + itemType + '</option>');
                     }
                 } else {
                     alert('Gagal memuat item: ' + res.message);
@@ -682,20 +819,40 @@ $(document).ready(function() {
         const unit = selected.data('unit');
         const price = selected.data('price');
         const coef = selected.data('coef') || 1;
+        const sisaQty = parseFloat(selected.data('sisa-qty')) || 0;
+        const itemType = selected.data('item-type') || '';
+        
+        // Update koefisien label based on item type and show sisa
+        const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+        if (itemType === 'upah') {
+            const sisaOrang = Math.floor(sisaQty / 6);
+            $('#previewCoefLabel').html('<small>Jml Orang <span class="text-info">(sisa: ' + sisaOrang + ')</span> <span class="text-danger">*</span></small>');
+            $('#previewCoef').attr('placeholder', 'Jml Orang');
+        } else {
+            $('#previewCoefLabel').html('<small>Koefisien <span class="text-info">(sisa: ' + sisaText + ')</span> <span class="text-danger">*</span></small>');
+            $('#previewCoef').attr('placeholder', '0');
+        }
         
         $('#previewItemCode').text(code || '-');
         $('#previewItemName').text(name);
         $('#previewUnit').val(unit);
-        $('#previewPrice').val(formatNumber(price));
-        $('#previewCoef').val(coef.toString().replace('.', ','));
+        $('#previewPrice').val('');
+        $('#previewCoef').val('');
         
-        // Store selected item data for adding
+        // Store selected item data for adding (include subcategory info)
+        const subcatId = selected.data('subcat-id');
+        const subcatCode = selected.data('subcat-code');
+        
         $('#itemPreviewBox').data('item', {
             code: code,
             name: name,
             unit: unit,
             defaultPrice: price,
-            defaultCoef: coef
+            defaultCoef: coef,
+            subcategory_id: subcatId,
+            subcategory_code: subcatCode,
+            item_type: itemType,
+            sisa_qty: sisaQty
         });
         
         $('#itemPreviewBox').slideDown();
@@ -707,27 +864,40 @@ $(document).ready(function() {
         if (!itemData) return;
         
         const price = parseNumber($('#previewPrice').val());
-        const coef = parseNumber($('#previewCoef').val());
+        let inputVal = parseNumber($('#previewCoef').val());
         
-        if (price <= 0 || coef <= 0) {
-            showToast('Harga dan koefisien harus lebih dari 0', 'error');
+        if (price <= 0 || inputVal <= 0) {
+            showToast('Harga dan ' + (itemData.item_type === 'upah' ? 'jumlah orang' : 'koefisien') + ' harus lebih dari 0', 'error');
             return;
         }
         
+        // For upah: input is jumlah orang, actual coefficient = jumlah_orang × 6 (hari kerja/minggu)
+        let actualCoef = inputVal;
+        let jumlahOrang = null;
+        if (itemData.item_type === 'upah') {
+            jumlahOrang = inputVal;
+            actualCoef = inputVal * 6;
+        }
+        
         addItemRow({
-            category_id: selectedCategoryId,
-            subcategory_id: selectedSubcategoryId,
+            category_id: null, // Not used in new flow
+            subcategory_id: itemData.subcategory_id,
             item_code: itemData.code,
+            item_type: itemData.item_type || '',
             item_name: itemData.name,
             unit: itemData.unit,
             unit_price: price,
-            coefficient: coef,
+            coefficient: actualCoef,
+            jumlah_orang: jumlahOrang,
             is_readonly: true
         });
         
         // Reset selection
         $('#itemSelect').val('');
         $('#itemPreviewBox').hide();
+        // Reset label back to default
+        $('#previewCoefLabel').html('<small>Koefisien <span class="text-danger">*</span></small>');
+        $('#previewCoef').attr('placeholder', '0');
         
         showToast('Item berhasil ditambahkan', 'success');
     });
@@ -806,9 +976,9 @@ $(document).ready(function() {
             item_code: itemCode,
             item_name: itemName,
             unit: itemUnit,
-            unit_price: itemPrice,
-            coefficient: itemCoef,
-            is_readonly: true
+            unit_price: 0,
+            coefficient: 0,
+            is_readonly: false
         });
         
         $('#addItemModal').modal('hide');
@@ -843,15 +1013,27 @@ $(document).ready(function() {
         const readonlyUnit = data.is_readonly ? 'readonly class="form-control form-control-sm readonly-field"' : 'class="form-control form-control-sm"';
         
         const totalPrice = data.unit_price * data.coefficient;
+        const isUpah = data.item_type === 'upah';
+        
+        // For upah: display jumlah orang, otherwise display coefficient
+        let coefDisplay = '';
+        let coefLabel = '';
+        if (isUpah && data.jumlah_orang !== null) {
+            coefDisplay = data.jumlah_orang.toString().replace('.', ',');
+            coefLabel = '<small class="text-info d-block">× 6 hari = ' + data.coefficient + '</small>';
+        } else {
+            coefDisplay = data.coefficient > 0 ? data.coefficient.toString().replace('.', ',') : '';
+        }
         
         const row = `
-            <tr class="item-row" data-index="${itemIndex}">
+            <tr class="item-row" data-index="${itemIndex}" data-item-type="${data.item_type || ''}">
                 <td class="text-center">${itemIndex}</td>
                 <td>
                     <small class="text-muted">${data.item_code || '<em>Custom</em>'}</small>
                     <input type="hidden" name="items[${itemIndex}][category_id]" value="${data.category_id}">
                     <input type="hidden" name="items[${itemIndex}][subcategory_id]" value="${data.subcategory_id}">
                     <input type="hidden" name="items[${itemIndex}][item_code]" value="${data.item_code}">
+                    <input type="hidden" name="items[${itemIndex}][item_type]" value="${data.item_type || ''}">
                 </td>
                 <td>
                     <input type="text" name="items[${itemIndex}][item_name]" value="${data.item_name}" 
@@ -868,10 +1050,19 @@ $(document).ready(function() {
                            placeholder="0" required>
                 </td>
                 <td>
-                    <input type="text" name="items[${itemIndex}][coefficient]" 
-                           value="${data.coefficient > 0 ? data.coefficient.toString().replace('.', ',') : ''}" 
-                           class="form-control form-control-sm text-end coef-input" 
-                           placeholder="0" required>
+                    ${isUpah ? 
+                        `<input type="text" name="items[${itemIndex}][coefficient]" 
+                               value="${coefDisplay}" 
+                               class="form-control form-control-sm text-end coef-input" 
+                               data-is-upah="1" data-jumlah-orang="${data.jumlah_orang || ''}" 
+                               placeholder="Jml Orang" required>
+                         ${coefLabel}` 
+                    : 
+                        `<input type="text" name="items[${itemIndex}][coefficient]" 
+                               value="${coefDisplay}" 
+                               class="form-control form-control-sm text-end coef-input" 
+                               placeholder="0" required>`
+                    }
                 </td>
                 <td>
                     <input type="text" name="items[${itemIndex}][total_price]" 
@@ -921,7 +1112,23 @@ $(document).ready(function() {
         // Allow numbers and comma for decimal
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
-        calculateRowTotal($(this).closest('tr'));
+        
+        const row = $(this).closest('tr');
+        const isUpah = $(this).data('is-upah') == 1;
+        
+        if (isUpah) {
+            // For upah: input = jumlah orang, actual coef = jumlah_orang × 6
+            const jumlahOrang = parseNumber(val);
+            const actualCoef = jumlahOrang * 6;
+            $(this).data('jumlah-orang', jumlahOrang);
+            // Update the ×6 label
+            $(this).siblings('small').remove();
+            if (jumlahOrang > 0) {
+                $(this).after('<small class="text-info d-block">× 6 hari = ' + actualCoef + '</small>');
+            }
+        }
+        
+        calculateRowTotal(row);
     });
     
     // =====================================
@@ -929,7 +1136,15 @@ $(document).ready(function() {
     // =====================================
     function calculateRowTotal(row) {
         const price = parseNumber(row.find('.price-input').val());
-        const coef = parseNumber(row.find('.coef-input').val());
+        const coefInput = row.find('.coef-input');
+        const isUpah = coefInput.data('is-upah') == 1;
+        let coef = parseNumber(coefInput.val());
+        
+        // For upah: multiply by 6 to get actual coefficient
+        if (isUpah) {
+            coef = coef * 6;
+        }
+        
         const total = price * coef;
         
         row.find('.total-price').val(formatNumber(total));
@@ -979,7 +1194,14 @@ $(document).ready(function() {
             const itemName = row.find('input[name*="[item_name]"]').val();
             const unit = row.find('input[name*="[unit]"]').val();
             const unitPrice = parseNumber(row.find('.price-input').val());
-            const coefficient = parseNumber(row.find('.coef-input').val());
+            const coefInput = row.find('.coef-input');
+            const isUpah = coefInput.data('is-upah') == 1;
+            let coefficient = parseNumber(coefInput.val());
+            
+            // For upah: actual coefficient = jumlah_orang × 6
+            if (isUpah) {
+                coefficient = coefficient * 6;
+            }
             
             if (!itemName || !unit || unitPrice <= 0 || coefficient <= 0) {
                 hasError = true;
@@ -990,6 +1212,7 @@ $(document).ready(function() {
                     category_id: row.find('input[name*="[category_id]"]').val(),
                     subcategory_id: row.find('input[name*="[subcategory_id]"]').val(),
                     item_code: row.find('input[name*="[item_code]"]').val(),
+                    item_type: row.find('input[name*="[item_type]"]').val(),
                     item_name: itemName,
                     unit: unit,
                     unit_price: unitPrice,
@@ -1073,8 +1296,16 @@ $(document).ready(function() {
         }
         list.html(html);
     });
+    
+    // =====================================
+    // INITIALIZE - Load RAP Pekerjaan on page load
+    // =====================================
+    loadRapPekerjaan();
 });
 </script>
+<?php 
+$extraScripts = ob_get_clean();
+?>
 
 <?php endif; ?>
 

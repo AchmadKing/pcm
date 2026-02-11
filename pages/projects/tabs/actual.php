@@ -7,6 +7,13 @@
  * Weekly Progress: Shows weekly date columns when project is started
  */
 
+// Get category filter (all, upah, material, alat)
+$categoryFilter = $_GET['cat'] ?? 'all';
+$validFilters = ['all', 'upah', 'material', 'alat'];
+if (!in_array($categoryFilter, $validFilters)) {
+    $categoryFilter = 'all';
+}
+
 // Get project settings
 $ppnPercentage = $project['ppn_percentage'] ?? 11;
 $overheadPct = $project['overhead_percentage'] ?? 10;
@@ -144,25 +151,17 @@ foreach ($categories as $cat) {
         ", [$sub['id'], $projectId]);
         $subActualTotal = floatval($actualRow['total'] ?? 0);
         
-        // Get actual breakdown by component
+        // Get actual breakdown by component - use item's own category directly
         $actualBreakdown = dbGetAll("
             SELECT 
                 pi.category as item_category,
-                COALESCE(SUM(
-                    reqi.total_price * 
-                    (pad.coefficient * pi.price) / 
-                    NULLIF(ahsp.unit_price, 0)
-                ), 0) as category_total
+                COALESCE(SUM(reqi.unit_price * reqi.coefficient), 0) as category_total
             FROM request_items reqi
             JOIN requests req ON reqi.request_id = req.id
-            JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
-            JOIN project_ahsp ahsp ON rs.ahsp_id = ahsp.id
-            JOIN project_ahsp_details pad ON pad.ahsp_id = ahsp.id
-            JOIN project_items pi ON pad.item_id = pi.id
+            JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = req.project_id
             WHERE reqi.subcategory_id = ? 
             AND req.status = 'approved'
             AND req.project_id = ?
-            AND ahsp.unit_price > 0
             GROUP BY pi.category
         ", [$sub['id'], $projectId]);
         
@@ -250,6 +249,33 @@ foreach ($categories as $cat) {
 </div>
 <?php else: ?>
 
+<!-- Category Filter Buttons -->
+<div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="btn-group" role="group" aria-label="Filter Kategori Anggaran">
+        <a href="?id=<?= $projectId ?>&tab=actual&cat=all" 
+           class="btn btn-outline-dark <?= $categoryFilter === 'all' ? 'active' : '' ?>">
+            <i class="mdi mdi-view-list"></i> Semua
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=actual&cat=upah" 
+           class="btn btn-outline-primary <?= $categoryFilter === 'upah' ? 'active' : '' ?>">
+            <i class="mdi mdi-account-hard-hat"></i> Upah
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=actual&cat=material" 
+           class="btn btn-outline-success <?= $categoryFilter === 'material' ? 'active' : '' ?>">
+            <i class="mdi mdi-package-variant"></i> Material
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=actual&cat=alat" 
+           class="btn btn-outline-warning <?= $categoryFilter === 'alat' ? 'active' : '' ?>">
+            <i class="mdi mdi-tools"></i> Alat
+        </a>
+    </div>
+    <?php if ($categoryFilter !== 'all'): ?>
+    <div class="alert alert-info py-1 px-3 mb-0">
+        <small><i class="mdi mdi-filter"></i> Menampilkan anggaran <strong><?= ucfirst($categoryFilter) ?></strong> saja</small>
+    </div>
+    <?php endif; ?>
+</div>
+
 <?php 
 // Calculate total columns for footer (base + weekly)
 $baseColCount = 9; // No, Uraian, RAP, Upah, Material, Alat, Total, Selisih, Progress
@@ -299,7 +325,16 @@ $lastStickyRight = 960; // Total width of sticky area
     background-color: #212529;
 }
 
-/* Column position classes */
+/* Column position classes - FILTERED VIEW (single realisasi column) */
+<?php if ($categoryFilter !== 'all'): ?>
+.col-no { left: 0px; min-width: 50px; max-width: 50px; }
+.col-uraian { left: 50px; min-width: 220px; }
+.col-rap { left: 270px; min-width: 110px; max-width: 110px; }
+.col-upah { left: 380px; min-width: 110px; max-width: 110px; } /* Single realisasi column */
+.col-selisih { left: 490px; min-width: 100px; max-width: 100px; }
+.col-progress { left: 590px; min-width: 110px; max-width: 110px; }
+<?php else: ?>
+/* Column position classes - ALL VIEW (4 realisasi columns) */
 .col-no { left: 0px; min-width: 50px; max-width: 50px; }
 .col-uraian { left: 50px; min-width: 220px; }
 .col-rap { left: 270px; min-width: 110px; max-width: 110px; }
@@ -309,6 +344,7 @@ $lastStickyRight = 960; // Total width of sticky area
 .col-total { left: 650px; min-width: 100px; max-width: 100px; }
 .col-selisih { left: 750px; min-width: 100px; max-width: 100px; }
 .col-progress { left: 850px; min-width: 110px; max-width: 110px; }
+<?php endif; ?>
 
 /* Row background colors for sticky cells */
 .table-primary .sticky-col { background-color: #cfe2ff !important; }
@@ -320,15 +356,18 @@ $lastStickyRight = 960; // Total width of sticky area
 /* Weekly column styling */
 .weekly-col {
     background-color: #f0f9ff;
-    border-left: 2px solid #0dcaf0;
+    border-left: 2px solid #212529;
+    border-color: #212529 !important;
 }
 .weekly-header {
     background-color: #0dcaf0 !important;
     color: #000 !important;
+    border-color: #212529 !important;
 }
 .weekly-subheader {
     background-color: #e0f7ff !important;
     color: #000 !important;
+    border-color: #212529 !important;
 }
 
 /* Box shadow for sticky edge */
@@ -362,8 +401,13 @@ $lastStickyRight = 960; // Total width of sticky area
             <tr>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
+                <?php if ($categoryFilter === 'all'): ?>
                 <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP (Target)</th>
                 <th colspan="4" class="text-center sticky-col sticky-col-header col-upah" style="left: 380px;">Realisasi Total</th>
+                <?php else: ?>
+                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP <?= ucfirst($categoryFilter) ?></th>
+                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-upah" style="left: 380px;">Realisasi <?= ucfirst($categoryFilter) ?></th>
+                <?php endif; ?>
                 <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-selisih">Selisih</th>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-progress">Progress</th>
                 <?php if ($showWeeklyColumns): ?>
@@ -375,16 +419,19 @@ $lastStickyRight = 960; // Total width of sticky area
                 <?php endforeach; ?>
                 <?php endif; ?>
             </tr>
-            <!-- Row 2: Sub Headers -->
+            <!-- Row 2: Sub Headers (only for 'all' filter) -->
             <tr>
+                <?php if ($categoryFilter === 'all'): ?>
                 <th class="text-end sticky-col sticky-col-header col-upah">Upah</th>
                 <th class="text-end sticky-col sticky-col-header col-material">Material</th>
                 <th class="text-end sticky-col sticky-col-header col-alat">Alat</th>
                 <th class="text-end sticky-col sticky-col-header col-total">Total</th>
+                <?php endif; ?>
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): ?>
                 <th class="text-end weekly-subheader">Realisasi (Rp)</th>
-                <th class="text-end weekly-subheader">Bobot (%)</th>
+                <th class="text-center weekly-subheader">Bobot (%)</th>
+                <th class="text-center weekly-subheader">Aksi</th>
                 <?php endforeach; ?>
                 <?php endif; ?>
             </tr>
@@ -425,10 +472,14 @@ $lastStickyRight = 960; // Total width of sticky area
                     <strong><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
                 </td>
                 <td class="sticky-col col-rap"></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="sticky-col col-upah"></td>
                 <td class="sticky-col col-material"></td>
                 <td class="sticky-col col-alat"></td>
                 <td class="sticky-col col-total"></td>
+                <?php else: ?>
+                <td class="sticky-col col-upah"></td>
+                <?php endif; ?>
                 <td class="sticky-col col-selisih"></td>
                 <td class="sticky-col col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
@@ -440,25 +491,46 @@ $lastStickyRight = 960; // Total width of sticky area
             
             <!-- Subcategory Items -->
             <?php foreach ($subcats as $sub): 
-                $progressClass = $sub['progress'] > 100 ? 'bg-danger' : ($sub['progress'] >= 75 ? 'bg-warning' : 'bg-success');
-                $selisihClass = $sub['selisih'] < 0 ? 'text-danger' : 'text-success';
+                // Calculate filtered values based on category filter
+                if ($categoryFilter === 'all') {
+                    $displayRap = $sub['rap_total'];
+                    $displayActual = $sub['actual_total'];
+                } elseif ($categoryFilter === 'upah') {
+                    $displayRap = $sub['rap_upah'];
+                    $displayActual = $sub['actual_upah'];
+                } elseif ($categoryFilter === 'material') {
+                    $displayRap = $sub['rap_material'];
+                    $displayActual = $sub['actual_material'];
+                } else { // alat
+                    $displayRap = $sub['rap_alat'];
+                    $displayActual = $sub['actual_alat'];
+                }
+                
+                $displaySelisih = $displayRap - $displayActual;
+                $displayProgress = $displayRap > 0 ? ($displayActual / $displayRap) * 100 : 0;
+                $progressClass = $displayProgress > 100 ? 'bg-danger' : ($displayProgress >= 75 ? 'bg-warning' : 'bg-success');
+                $selisihClass = $displaySelisih < 0 ? 'text-danger' : 'text-success';
             ?>
             <tr class="sub-row" data-subcategory-id="<?= $sub['id'] ?>">
                 <td class="sticky-col col-no"><?= sanitize($sub['code']) ?></td>
                 <td class="sticky-col col-uraian"><?= sanitize($sub['name']) ?></td>
-                <td class="sticky-col col-rap text-end"><?= formatNumber($sub['rap_total'], 2) ?></td>
+                <td class="sticky-col col-rap text-end"><?= formatNumber($displayRap, 2) ?></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="sticky-col col-upah text-end text-primary"><?= formatNumber($sub['actual_upah'], 2) ?></td>
                 <td class="sticky-col col-material text-end text-success"><?= formatNumber($sub['actual_material'], 2) ?></td>
                 <td class="sticky-col col-alat text-end text-warning"><?= formatNumber($sub['actual_alat'], 2) ?></td>
                 <td class="sticky-col col-total text-end"><strong><?= formatNumber($sub['actual_total'], 2) ?></strong></td>
+                <?php else: ?>
+                <td class="sticky-col col-upah text-end"><strong><?= formatNumber($displayActual, 2) ?></strong></td>
+                <?php endif; ?>
                 <td class="sticky-col col-selisih text-end <?= $selisihClass ?>">
-                    <?= ($sub['selisih'] >= 0 ? '+' : '') . formatNumber($sub['selisih'], 2) ?>
+                    <?= ($displaySelisih >= 0 ? '+' : '') . formatNumber($displaySelisih, 2) ?>
                 </td>
                 <td class="sticky-col col-progress">
                     <div class="progress" style="height: 18px;">
                         <div class="progress-bar <?= $progressClass ?>" 
-                             style="width: <?= min($sub['progress'], 100) ?>%">
-                            <?= number_format($sub['progress'], 1) ?>%
+                             style="width: <?= min($displayProgress, 100) ?>%">
+                            <?= number_format($displayProgress, 1) ?>%
                         </div>
                     </div>
                 </td>
@@ -471,8 +543,20 @@ $lastStickyRight = 960; // Total width of sticky area
                 <td class="text-end weekly-col">
                     <?= $weekRealization > 0 ? formatNumber($weekRealization, 0) : '<span class="text-muted">0</span>' ?>
                 </td>
-                <td class="text-end weekly-col week-bobot-<?= $sub['id'] ?>-<?= $weekNum ?>">
-                    <?= $weekBobot > 0 ? number_format($weekBobot, 2) : '-' ?>%
+                <td class="text-center weekly-col">
+                    <?= $weekBobot > 0 ? number_format($weekBobot, 2) . '%' : '-' ?>
+                </td>
+                <td class="text-center weekly-col">
+                    <?php if ($weekRealization > 0): ?>
+                    <button type="button" 
+                       class="btn btn-sm btn-outline-info py-0 px-1" 
+                       title="Lihat detail pengajuan minggu ke-<?= $weekNum ?>"
+                       onclick="showWeeklyDetail(<?= $projectId ?>, <?= $sub['id'] ?>, <?= $weekNum ?>, '<?= addslashes($sub['name']) ?>')">
+                        <i class="mdi mdi-eye"></i>
+                    </button>
+                    <?php else: ?>
+                    <span class="text-muted">-</span>
+                    <?php endif; ?>
                 </td>
                 <?php endforeach; ?>
                 <?php endif; ?>
@@ -481,31 +565,52 @@ $lastStickyRight = 960; // Total width of sticky area
             
             <!-- Category Total -->
             <?php 
-                $catProgressClass = $catProgress > 100 ? 'bg-danger' : ($catProgress >= 75 ? 'bg-warning' : 'bg-success');
-                $catSelisihClass = $catSelisih < 0 ? 'text-danger' : 'text-success';
+                // Calculate filtered category totals
+                if ($categoryFilter === 'all') {
+                    $catDisplayRap = $data['rap_total'];
+                    $catDisplayActual = $data['actual_total'];
+                } elseif ($categoryFilter === 'upah') {
+                    $catDisplayRap = $data['rap_upah'];
+                    $catDisplayActual = $data['actual_upah'];
+                } elseif ($categoryFilter === 'material') {
+                    $catDisplayRap = $data['rap_material'];
+                    $catDisplayActual = $data['actual_material'];
+                } else { // alat
+                    $catDisplayRap = $data['rap_alat'];
+                    $catDisplayActual = $data['actual_alat'];
+                }
+                
+                $catDisplaySelisih = $catDisplayRap - $catDisplayActual;
+                $catDisplayProgress = $catDisplayRap > 0 ? ($catDisplayActual / $catDisplayRap) * 100 : 0;
+                $catProgressClass = $catDisplayProgress > 100 ? 'bg-danger' : ($catDisplayProgress >= 75 ? 'bg-warning' : 'bg-success');
+                $catSelisihClass = $catDisplaySelisih < 0 ? 'text-danger' : 'text-success';
             ?>
             <tr class="table-secondary">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($data['rap_total'], 2) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($catDisplayRap, 2) ?></strong></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary sticky-col col-upah"><strong><?= formatNumber($data['actual_upah'], 2) ?></strong></td>
                 <td class="text-end text-success sticky-col col-material"><strong><?= formatNumber($data['actual_material'], 2) ?></strong></td>
                 <td class="text-end text-warning sticky-col col-alat"><strong><?= formatNumber($data['actual_alat'], 2) ?></strong></td>
                 <td class="text-end sticky-col col-total"><strong><?= formatNumber($data['actual_total'], 2) ?></strong></td>
+                <?php else: ?>
+                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($catDisplayActual, 2) ?></strong></td>
+                <?php endif; ?>
                 <td class="text-end <?= $catSelisihClass ?> sticky-col col-selisih">
-                    <strong><?= ($catSelisih >= 0 ? '+' : '') . formatNumber($catSelisih, 2) ?></strong>
+                    <strong><?= ($catDisplaySelisih >= 0 ? '+' : '') . formatNumber($catDisplaySelisih, 2) ?></strong>
                 </td>
                 <td class="sticky-col col-progress">
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1" style="height: 18px;">
                             <div class="progress-bar <?= $catProgressClass ?>" 
-                                 style="width: <?= min($catProgress, 100) ?>%">
+                                 style="width: <?= min($catDisplayProgress, 100) ?>%">
                             </div>
                         </div>
-                        <strong class="ms-2" style="min-width: 45px;"><?= number_format($catProgress, 1) ?>%</strong>
+                        <strong class="ms-2" style="min-width: 45px;"><?= number_format($catDisplayProgress, 1) ?>%</strong>
                     </div>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
-                <?php for ($i = 0; $i < count($weeklyRanges) * 2; $i++): ?>
+                <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
                 <td class="weekly-col"></td>
                 <?php endfor; ?>
                 <?php endif; ?>
@@ -514,17 +619,41 @@ $lastStickyRight = 960; // Total width of sticky area
         </tbody>
         <tfoot>
             <?php 
-            // Grand progress & totals
-            $overallProgress = $grandSubcatCount > 0 ? ($grandProgressSum / $grandSubcatCount) : 0;
-            $grandDiff = $grandRap - $grandActualTotal;
-            $grandProgressClass = $overallProgress > 100 ? 'bg-danger' : ($overallProgress >= 75 ? 'bg-warning' : 'bg-success');
-            $grandSelisihClass = $grandDiff < 0 ? 'text-danger' : 'text-success';
+            // Calculate filtered grand totals
+            if ($categoryFilter === 'all') {
+                $grandDisplayRap = $grandRap;
+                $grandDisplayActual = $grandActualTotal;
+            } elseif ($categoryFilter === 'upah') {
+                $grandDisplayRap = 0;
+                $grandDisplayActual = $grandActualUpah;
+                // Re-calculate RAP for upah from actual data
+                foreach ($actualData as $data) {
+                    $grandDisplayRap += $data['rap_upah'];
+                }
+            } elseif ($categoryFilter === 'material') {
+                $grandDisplayRap = 0;
+                $grandDisplayActual = $grandActualMaterial;
+                foreach ($actualData as $data) {
+                    $grandDisplayRap += $data['rap_material'];
+                }
+            } else { // alat
+                $grandDisplayRap = 0;
+                $grandDisplayActual = $grandActualAlat;
+                foreach ($actualData as $data) {
+                    $grandDisplayRap += $data['rap_alat'];
+                }
+            }
+            
+            $grandDisplayDiff = $grandDisplayRap - $grandDisplayActual;
+            $overallDisplayProgress = $grandDisplayRap > 0 ? ($grandDisplayActual / $grandDisplayRap) * 100 : 0;
+            $grandProgressClass = $overallDisplayProgress > 100 ? 'bg-danger' : ($overallDisplayProgress >= 75 ? 'bg-warning' : 'bg-success');
+            $grandSelisihClass = $grandDisplayDiff < 0 ? 'text-danger' : 'text-success';
             
             // PPN & Rounding
-            $ppnRap = $grandRap * ($ppnPercentage / 100);
-            $ppnActual = $grandActualTotal * ($ppnPercentage / 100);
-            $totalRapWithPpn = $grandRap + $ppnRap;
-            $totalActualWithPpn = $grandActualTotal + $ppnActual;
+            $ppnRap = $grandDisplayRap * ($ppnPercentage / 100);
+            $ppnActual = $grandDisplayActual * ($ppnPercentage / 100);
+            $totalRapWithPpn = $grandDisplayRap + $ppnRap;
+            $totalActualWithPpn = $grandDisplayActual + $ppnActual;
             $totalRapRounded = ceil($totalRapWithPpn / 10) * 10;
             $totalActualRounded = ceil($totalActualWithPpn / 10) * 10;
             $diffWithPpn = $totalRapWithPpn - $totalActualWithPpn;
@@ -532,23 +661,27 @@ $lastStickyRight = 960; // Total width of sticky area
             ?>
             <!-- Grand Total Row -->
             <tr class="table-dark">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL</strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandRap, 2) ?></strong></td>
+                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL<?= $categoryFilter !== 'all' ? ' (' . strtoupper($categoryFilter) . ')' : '' ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandDisplayRap, 2) ?></strong></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary sticky-col col-upah"><strong><?= formatNumber($grandActualUpah, 2) ?></strong></td>
                 <td class="text-end text-success sticky-col col-material"><strong><?= formatNumber($grandActualMaterial, 2) ?></strong></td>
                 <td class="text-end text-warning sticky-col col-alat"><strong><?= formatNumber($grandActualAlat, 2) ?></strong></td>
                 <td class="text-end sticky-col col-total"><strong><?= formatNumber($grandActualTotal, 2) ?></strong></td>
+                <?php else: ?>
+                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($grandDisplayActual, 2) ?></strong></td>
+                <?php endif; ?>
                 <td class="text-end <?= $grandSelisihClass ?> sticky-col col-selisih">
-                    <strong><?= ($grandDiff >= 0 ? '+' : '') . formatNumber($grandDiff, 2) ?></strong>
+                    <strong><?= ($grandDisplayDiff >= 0 ? '+' : '') . formatNumber($grandDisplayDiff, 2) ?></strong>
                 </td>
                 <td class="sticky-col col-progress">
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1" style="height: 18px;">
                             <div class="progress-bar <?= $grandProgressClass ?>" 
-                                 style="width: <?= min($overallProgress, 100) ?>%">
+                                 style="width: <?= min($overallDisplayProgress, 100) ?>%">
                             </div>
                         </div>
-                        <strong class="ms-2 text-white" style="min-width: 45px;"><?= number_format($overallProgress, 1) ?>%</strong>
+                        <strong class="ms-2 text-white" style="min-width: 45px;"><?= number_format($overallDisplayProgress, 1) ?>%</strong>
                     </div>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
@@ -561,10 +694,14 @@ $lastStickyRight = 960; // Total width of sticky area
             <tr class="table-light">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>PPN <?= number_format($ppnPercentage, 0) ?>%</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($ppnRap, 2) ?></strong></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="sticky-col col-upah"></td>
                 <td class="sticky-col col-material"></td>
                 <td class="sticky-col col-alat"></td>
                 <td class="text-end sticky-col col-total"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
+                <?php else: ?>
+                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
+                <?php endif; ?>
                 <td class="text-end <?= ($ppnRap - $ppnActual) < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
                     <strong><?= (($ppnRap - $ppnActual) >= 0 ? '+' : '') . formatNumber($ppnRap - $ppnActual, 2) ?></strong>
                 </td>
@@ -579,10 +716,14 @@ $lastStickyRight = 960; // Total width of sticky area
             <tr class="table-light">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL (TERMASUK PPN)</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($totalRapWithPpn, 2) ?></strong></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="sticky-col col-upah"></td>
                 <td class="sticky-col col-material"></td>
                 <td class="sticky-col col-alat"></td>
                 <td class="text-end sticky-col col-total"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
+                <?php else: ?>
+                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
+                <?php endif; ?>
                 <td class="text-end <?= $diffWithPpn < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
                     <strong><?= ($diffWithPpn >= 0 ? '+' : '') . formatNumber($diffWithPpn, 2) ?></strong>
                 </td>
@@ -597,10 +738,14 @@ $lastStickyRight = 960; // Total width of sticky area
             <tr class="table-primary">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL DIBULATKAN</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatRupiah($totalRapRounded) ?></strong></td>
+                <?php if ($categoryFilter === 'all'): ?>
                 <td class="sticky-col col-upah"></td>
                 <td class="sticky-col col-material"></td>
                 <td class="sticky-col col-alat"></td>
                 <td class="text-end sticky-col col-total"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
+                <?php else: ?>
+                <td class="text-end sticky-col col-upah"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
+                <?php endif; ?>
                 <td class="text-end <?= $diffRounded < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
                     <strong><?= ($diffRounded >= 0 ? '+' : '') . formatRupiah($diffRounded) ?></strong>
                 </td>
@@ -640,5 +785,146 @@ $lastStickyRight = 960; // Total width of sticky area
     <strong>Info:</strong> Data realisasi mingguan otomatis terisi dari pengajuan yang telah disetujui melalui <strong>Approval Center</strong>.
 </div>
 <?php endif; ?>
+
+<!-- Weekly Detail Modal -->
+<div class="modal fade" id="weeklyDetailModal" tabindex="-1" aria-labelledby="weeklyDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="weeklyDetailModalLabel">
+                    <i class="mdi mdi-clipboard-list-outline"></i> Detail Pengajuan
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="weeklyDetailBody">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-info" role="status">
+                        <span class="visually-hidden">Memuat...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Memuat data pengajuan...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showWeeklyDetail(projectId, subcategoryId, weekNumber, subcategoryName) {
+    // Update modal title
+    document.getElementById('weeklyDetailModalLabel').innerHTML = 
+        '<i class="mdi mdi-clipboard-list-outline"></i> Detail Pengajuan — Minggu ke-' + weekNumber + 
+        ' — <small>' + subcategoryName + '</small>';
+    
+    // Show loading
+    document.getElementById('weeklyDetailBody').innerHTML = 
+        '<div class="text-center py-4">' +
+        '<div class="spinner-border text-info" role="status"><span class="visually-hidden">Memuat...</span></div>' +
+        '<p class="mt-2 text-muted">Memuat data pengajuan...</p></div>';
+    
+    // Open modal
+    var modal = new bootstrap.Modal(document.getElementById('weeklyDetailModal'));
+    modal.show();
+    
+    // Fetch data
+    var url = '?id=' + projectId + '&tab=actual&ajax=weekly_detail' +
+              '&project_id=' + projectId + 
+              '&subcategory_id=' + subcategoryId + 
+              '&week_number=' + weekNumber;
+    
+    fetch(url)
+        .then(function(response) { return response.json(); })
+        .then(function(result) {
+            if (result.error) {
+                document.getElementById('weeklyDetailBody').innerHTML = 
+                    '<div class="alert alert-danger">' + result.error + '</div>';
+                return;
+            }
+            
+            var data = result.data;
+            if (!data || data.length === 0) {
+                document.getElementById('weeklyDetailBody').innerHTML = 
+                    '<div class="text-center py-4 text-muted">' +
+                    '<i class="mdi mdi-file-document-outline display-4"></i>' +
+                    '<p class="mt-2">Tidak ada pengajuan yang ditemukan untuk minggu ini.</p></div>';
+                return;
+            }
+            
+            var totalAll = 0;
+            var html = '<div class="table-responsive">' +
+                '<table class="table table-bordered table-sm table-hover mb-0">' +
+                '<thead class="table-light">' +
+                '<tr>' +
+                '<th class="text-center" style="width:40px">No</th>' +
+                '<th>No. Pengajuan</th>' +
+                '<th>Diajukan Oleh</th>' +
+                '<th>Tanggal</th>' +
+                '<th>Catatan</th>' +
+                '<th class="text-end">Jumlah (Rp)</th>' +
+                '</tr></thead><tbody>';
+            
+            for (var i = 0; i < data.length; i++) {
+                var item = data[i];
+                var amount = parseFloat(item.subcategory_amount) || 0;
+                totalAll += amount;
+                
+                var notes = '';
+                if (item.description) notes += item.description;
+                if (item.admin_notes) {
+                    if (notes) notes += '<br>';
+                    notes += '<small class="text-info"><i class="mdi mdi-shield-check"></i> Admin: ' + escapeHtml(item.admin_notes) + '</small>';
+                }
+                if (!notes) notes = '<span class="text-muted">-</span>';
+                
+                html += '<tr>' +
+                    '<td class="text-center">' + (i + 1) + '</td>' +
+                    '<td><code>' + escapeHtml(item.request_number || '-') + '</code></td>' +
+                    '<td><i class="mdi mdi-account"></i> ' + escapeHtml(item.created_by_name || '-') + '</td>' +
+                    '<td>' + formatDateId(item.request_date) + '</td>' +
+                    '<td>' + notes + '</td>' +
+                    '<td class="text-end"><strong>' + formatRupiahJs(amount) + '</strong></td>' +
+                    '</tr>';
+            }
+            
+            html += '</tbody>' +
+                '<tfoot><tr class="table-info">' +
+                '<td colspan="5" class="text-end"><strong>Total Realisasi Minggu Ini</strong></td>' +
+                '<td class="text-end"><strong>' + formatRupiahJs(totalAll) + '</strong></td>' +
+                '</tr></tfoot></table></div>';
+            
+            html += '<div class="mt-2"><small class="text-muted">' +
+                '<i class="mdi mdi-information-outline"></i> Menampilkan ' + data.length + 
+                ' pengajuan yang telah disetujui untuk subkategori ini pada minggu ke-' + weekNumber + '.</small></div>';
+            
+            document.getElementById('weeklyDetailBody').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('weeklyDetailBody').innerHTML = 
+                '<div class="alert alert-danger">Gagal memuat data: ' + err.message + '</div>';
+        });
+}
+
+function formatRupiahJs(number) {
+    if (!number || isNaN(number)) return 'Rp 0';
+    return 'Rp ' + Math.round(number).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function formatDateId(dateStr) {
+    if (!dateStr) return '-';
+    var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    var parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    return parseInt(parts[2]) + ' ' + months[parseInt(parts[1]) - 1] + ' ' + parts[0];
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+</script>
 
 <?php endif; ?>

@@ -355,17 +355,23 @@
             $('#inlineEditToast').remove();
             
             var bgClass = 'bg-' + type;
-            var toast = $('<div id="inlineEditToast" class="position-fixed d-flex align-items-center text-white ' + bgClass + ' px-3 py-2 rounded shadow" style="bottom: 20px; right: 20px; z-index: 9999; min-width: 200px;">' +
-                '<span class="me-2">' + message + '</span>' +
+            var isSuccess = type === 'success';
+            var bgStyle = isSuccess ? 'background-color: #00b894 !important;' : ''; // Green custom color
+            
+            var toastHtml = '<div id="inlineEditToast" class="position-fixed d-flex align-items-center text-white px-3 py-2 rounded shadow ' + bgClass + '" ' +
+                'style="bottom: 20px; right: 20px; z-index: 9999; min-width: 250px; ' + bgStyle + '">' +
+                '<span class="me-2 fw-medium">' + message + '</span>' +
                 '<button type="button" class="btn-close btn-close-white ms-auto" onclick="$(\'#inlineEditToast\').fadeOut(200, function(){ $(this).remove(); })"></button>' +
-                '</div>');
+                '</div>';
+                
+            var toast = $(toastHtml);
             
             $('body').append(toast);
             
             // Auto hide after 2.5 seconds for success
-            if (type === 'success') {
+            if (isSuccess) {
                 setTimeout(function() {
-                    toast.fadeOut(300, function() { $(this).remove(); });
+                    toast.fadeOut(500, function() { $(this).remove(); });
                 }, 2500);
             }
         }

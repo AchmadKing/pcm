@@ -392,3 +392,346 @@ function isProjectLocked($project) {
     return in_array($project['status'] ?? '', ['on_progress', 'completed']);
 }
 
+// ============================================
+// MASTER DATA RAP FUNCTIONS
+// ============================================
+
+/**
+ * Initialize RAP Master Data by copying from RAB Master Data
+ * Called when first accessing RAP Master Data for a project
+ * @param int $projectId
+ * @return bool
+ */
+function initRapMasterData($projectId) {
+    // Check if already initialized
+    $project = dbGetRow("SELECT rap_master_data_initialized FROM projects WHERE id = ?", [$projectId]);
+    if ($project && $project['rap_master_data_initialized']) {
+        return true; // Already initialized
+    }
+    
+    // Copy all items from RAB to RAP
+    $rabItems = dbGetAll("SELECT * FROM project_items WHERE project_id = ?", [$projectId]);
+    foreach ($rabItems as $item) {
+        $existing = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ?", 
+            [$projectId, $item['item_code']]);
+        if (!$existing) {
+            dbInsert("INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [$projectId, $item['item_code'], $item['name'], $item['brand'], $item['category'], $item['unit'], $item['price'], $item['actual_price'], $item['id']]);
+        }
+    }
+    
+    // Create item code mapping for AHSP details
+    $itemMapping = [];
+    $rapItems = dbGetAll("SELECT id, item_code FROM project_items_rap WHERE project_id = ?", [$projectId]);
+    foreach ($rabItems as $rabItem) {
+        foreach ($rapItems as $rapItem) {
+            if ($rabItem['item_code'] === $rapItem['item_code']) {
+                $itemMapping[$rabItem['id']] = $rapItem['id'];
+                break;
+            }
+        }
+    }
+    
+    // Copy all AHSP from RAB to RAP
+    $rabAhsps = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ?", [$projectId]);
+    foreach ($rabAhsps as $ahsp) {
+        $existing = dbGetRow("SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", 
+            [$projectId, $ahsp['ahsp_code']]);
+        if (!$existing) {
+            $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, ?, ?)",
+                [$projectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $ahsp['id']]);
+            
+            // Copy AHSP details
+            $rabDetails = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ?", [$ahsp['id']]);
+            foreach ($rabDetails as $detail) {
+                $rapItemId = $itemMapping[$detail['item_id']] ?? null;
+                if ($rapItemId) {
+                    dbInsert("INSERT INTO project_ahsp_details_rap (ahsp_id, item_id, coefficient, unit_price) VALUES (?, ?, ?, ?)",
+                        [$rapAhspId, $rapItemId, $detail['coefficient'], $detail['unit_price']]);
+                }
+            }
+        }
+    }
+    
+    // Mark as initialized
+    dbExecute("UPDATE projects SET rap_master_data_initialized = 1 WHERE id = ?", [$projectId]);
+    
+    return true;
+}
+
+/**
+ * Sync item code from RAB to RAP (when adding new item in RAB)
+ * @param int $projectId
+ * @param string $itemCode
+ */
+function syncItemCodeRabToRap($projectId, $itemCode) {
+    $rabItem = dbGetRow("SELECT * FROM project_items WHERE project_id = ? AND item_code = ?", [$projectId, $itemCode]);
+    if (!$rabItem) return;
+    
+    $existing = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ?", [$projectId, $itemCode]);
+    if (!$existing) {
+        // Create new item in RAP with same data
+        dbInsert("INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [$projectId, $itemCode, $rabItem['name'], $rabItem['brand'], $rabItem['category'], $rabItem['unit'], $rabItem['price'], $rabItem['actual_price'], $rabItem['id']]);
+    }
+}
+
+/**
+ * Sync item code from RAP to RAB (when adding new item in RAP)
+ * @param int $projectId
+ * @param string $itemCode
+ */
+function syncItemCodeRapToRab($projectId, $itemCode) {
+    $rapItem = dbGetRow("SELECT * FROM project_items_rap WHERE project_id = ? AND item_code = ?", [$projectId, $itemCode]);
+    if (!$rapItem) return;
+    
+    $existing = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND item_code = ?", [$projectId, $itemCode]);
+    if (!$existing) {
+        // Create new item in RAB with same data
+        $rabItemId = dbInsert("INSERT INTO project_items (project_id, item_code, name, brand, category, unit, price, actual_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [$projectId, $itemCode, $rapItem['name'], $rapItem['brand'], $rapItem['category'], $rapItem['unit'], $rapItem['price'], $rapItem['actual_price']]);
+        
+        // Update RAP item to link to RAB item
+        dbExecute("UPDATE project_items_rap SET rab_item_id = ? WHERE id = ?", [$rabItemId, $rapItem['id']]);
+    }
+}
+
+/**
+ * Sync AHSP code from RAB to RAP (when adding new AHSP in RAB)
+ * @param int $projectId
+ * @param string $ahspCode
+ */
+function syncAhspCodeRabToRap($projectId, $ahspCode) {
+    $rabAhsp = dbGetRow("SELECT * FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
+    if (!$rabAhsp) return;
+    
+    $existing = dbGetRow("SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
+    if (!$existing) {
+        // Create new AHSP in RAP
+        $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, ?, ?)",
+            [$projectId, $ahspCode, $rabAhsp['work_name'], $rabAhsp['unit'], $rabAhsp['unit_price'], $rabAhsp['id']]);
+        
+        // Copy AHSP details
+        $rabDetails = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ?", [$rabAhsp['id']]);
+        foreach ($rabDetails as $detail) {
+            // Find corresponding RAP item by code
+            $rabItem = dbGetRow("SELECT item_code FROM project_items WHERE id = ?", [$detail['item_id']]);
+            if ($rabItem) {
+                $rapItem = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ?", [$projectId, $rabItem['item_code']]);
+                if ($rapItem) {
+                    dbInsert("INSERT INTO project_ahsp_details_rap (ahsp_id, item_id, coefficient, unit_price) VALUES (?, ?, ?, ?)",
+                        [$rapAhspId, $rapItem['id'], $detail['coefficient'], $detail['unit_price']]);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sync AHSP code from RAP to RAB (when adding new AHSP in RAP)
+ * @param int $projectId
+ * @param string $ahspCode
+ */
+function syncAhspCodeRapToRab($projectId, $ahspCode) {
+    $rapAhsp = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
+    if (!$rapAhsp) return;
+    
+    $existing = dbGetRow("SELECT id FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
+    if (!$existing) {
+        // Create new AHSP in RAB
+        $rabAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, ?)",
+            [$projectId, $ahspCode, $rapAhsp['work_name'], $rapAhsp['unit'], $rapAhsp['unit_price']]);
+        
+        // Update RAP AHSP to link to RAB AHSP
+        dbExecute("UPDATE project_ahsp_rap SET rab_ahsp_id = ? WHERE id = ?", [$rabAhspId, $rapAhsp['id']]);
+        
+        // Copy AHSP details
+        $rapDetails = dbGetAll("SELECT * FROM project_ahsp_details_rap WHERE ahsp_id = ?", [$rapAhsp['id']]);
+        foreach ($rapDetails as $detail) {
+            // Find corresponding RAB item by code
+            $rapItem = dbGetRow("SELECT item_code FROM project_items_rap WHERE id = ?", [$detail['item_id']]);
+            if ($rapItem) {
+                $rabItem = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND item_code = ?", [$projectId, $rapItem['item_code']]);
+                if ($rabItem) {
+                    dbInsert("INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient, unit_price) VALUES (?, ?, ?, ?)",
+                        [$rabAhspId, $rabItem['id'], $detail['coefficient'], $detail['unit_price']]);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Recalculate RAP AHSP price from its components
+ * @param int $ahspId AHSP ID in project_ahsp_rap table
+ */
+function recalculateRapAhspPrice($ahspId) {
+    $total = dbGetRow("
+        SELECT COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total
+        FROM project_ahsp_details_rap d
+        JOIN project_items_rap i ON d.item_id = i.id
+        WHERE d.ahsp_id = ?
+    ", [$ahspId]);
+    
+    $unitPrice = $total['total'] ?? 0;
+    dbExecute("UPDATE project_ahsp_rap SET unit_price = ? WHERE id = ?", [$unitPrice, $ahspId]);
+    
+    return $unitPrice;
+}
+
+/**
+ * Sync RAP item changes to rap_ahsp_details (update price)
+ * @param int $itemId Item ID in project_items_rap table
+ * @param int $projectId
+ */
+function syncRapItemToAhsp($itemId, $projectId) {
+    // Get item price
+    $item = dbGetRow("SELECT price FROM project_items_rap WHERE id = ?", [$itemId]);
+    if (!$item) return;
+    
+    // Update all AHSP details using this item (where unit_price is null = uses item price)
+    // No need to update if they have custom unit_price
+    
+    // Recalculate all AHSP that use this item
+    $ahspIds = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details_rap WHERE item_id = ?", [$itemId]);
+    foreach ($ahspIds as $row) {
+        recalculateRapAhspPrice($row['ahsp_id']);
+    }
+}
+
+/**
+ * Sync Master Data AHSP RAP to RAP Table (rap_ahsp_details)
+ * Called when editing coefficient/price in Master Data AHSP RAP
+ * 
+ * @param int $ahspRapId AHSP ID in project_ahsp_rap table
+ * @param int $projectId
+ */
+function syncMasterAhspRapToRapTable($ahspRapId, $projectId) {
+    // Get the Master Data AHSP RAP
+    $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE id = ?", [$ahspRapId]);
+    if (!$ahspRap) return;
+    
+    // Find the corresponding rap_items via rab_subcategories.ahsp_id → project_ahsp.id → project_ahsp_rap.rab_ahsp_id
+    // rab_subcategories.ahsp_id = project_ahsp_rap.rab_ahsp_id
+    $rapItems = dbGetAll("
+        SELECT ri.id as rap_item_id, rs.id as subcategory_id
+        FROM rap_items ri
+        JOIN rab_subcategories rs ON ri.subcategory_id = rs.id
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rs.ahsp_id = ? AND rc.project_id = ?
+    ", [$ahspRap['rab_ahsp_id'], $projectId]);
+    
+    if (empty($rapItems)) return;
+    
+    // Get Master Data details
+    $masterDetails = dbGetAll("
+        SELECT d.*, pir.item_code
+        FROM project_ahsp_details_rap d
+        JOIN project_items_rap pir ON d.item_id = pir.id
+        WHERE d.ahsp_id = ?
+    ", [$ahspRapId]);
+    
+    foreach ($rapItems as $rapItem) {
+        $rapItemId = $rapItem['rap_item_id'];
+        
+        // For each master detail, find/update corresponding rap_ahsp_details
+        foreach ($masterDetails as $masterDetail) {
+            // Find corresponding project_items.id (RAB item) via item_code
+            $rabItem = dbGetRow("
+                SELECT id FROM project_items 
+                WHERE project_id = ? AND CONVERT(item_code USING utf8mb4) = CONVERT(? USING utf8mb4)
+            ", [$projectId, $masterDetail['item_code']]);
+            
+            if (!$rabItem) continue;
+            
+            // Update or insert rap_ahsp_details
+            $existingDetail = dbGetRow("
+                SELECT id FROM rap_ahsp_details 
+                WHERE rap_item_id = ? AND item_id = ?
+            ", [$rapItemId, $rabItem['id']]);
+            
+            if ($existingDetail) {
+                // Update coefficient and unit_price
+                dbExecute("
+                    UPDATE rap_ahsp_details 
+                    SET coefficient = ?, unit_price = ?, updated_at = NOW()
+                    WHERE id = ?
+                ", [$masterDetail['coefficient'], $masterDetail['unit_price'], $existingDetail['id']]);
+            }
+        }
+        
+        // Recalculate rap_items.unit_price
+        $newUnitPrice = dbGetRow("
+            SELECT COALESCE(SUM(coefficient * unit_price), 0) as total 
+            FROM rap_ahsp_details 
+            WHERE rap_item_id = ?
+        ", [$rapItemId])['total'] ?? 0;
+        
+        dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
+    }
+}
+
+/**
+ * Sync RAP Table (rap_ahsp_details) to Master Data AHSP RAP
+ * Called when editing coefficient/price in ahsp_rap.php
+ * 
+ * @param int $rapItemId RAP Item ID in rap_items table
+ * @param int $projectId
+ */
+function syncRapTableToMasterAhspRap($rapItemId, $projectId) {
+    // Get the rap_item and linked rab_subcategory
+    $rapItem = dbGetRow("
+        SELECT ri.*, rs.ahsp_id as rab_ahsp_id
+        FROM rap_items ri
+        JOIN rab_subcategories rs ON ri.subcategory_id = rs.id
+        WHERE ri.id = ?
+    ", [$rapItemId]);
+    
+    if (!$rapItem || !$rapItem['rab_ahsp_id']) return;
+    
+    // Find corresponding project_ahsp_rap
+    $ahspRap = dbGetRow("
+        SELECT id FROM project_ahsp_rap 
+        WHERE rab_ahsp_id = ? AND project_id = ?
+    ", [$rapItem['rab_ahsp_id'], $projectId]);
+    
+    if (!$ahspRap) return;
+    
+    $ahspRapId = $ahspRap['id'];
+    
+    // Get RAP Table details
+    $rapDetails = dbGetAll("
+        SELECT rd.*, pi.item_code
+        FROM rap_ahsp_details rd
+        JOIN project_items pi ON rd.item_id = pi.id
+        WHERE rd.rap_item_id = ?
+    ", [$rapItemId]);
+    
+    foreach ($rapDetails as $rapDetail) {
+        // Find corresponding project_items_rap.id via item_code
+        $rapMasterItem = dbGetRow("
+            SELECT id FROM project_items_rap 
+            WHERE project_id = ? AND CONVERT(item_code USING utf8mb4) = CONVERT(? USING utf8mb4)
+        ", [$projectId, $rapDetail['item_code']]);
+        
+        if (!$rapMasterItem) continue;
+        
+        // Update project_ahsp_details_rap
+        $existingDetail = dbGetRow("
+            SELECT id FROM project_ahsp_details_rap 
+            WHERE ahsp_id = ? AND item_id = ?
+        ", [$ahspRapId, $rapMasterItem['id']]);
+        
+        if ($existingDetail) {
+            // Update coefficient and unit_price
+            dbExecute("
+                UPDATE project_ahsp_details_rap 
+                SET coefficient = ?, unit_price = ?
+                WHERE id = ?
+            ", [$rapDetail['coefficient'], $rapDetail['unit_price'], $existingDetail['id']]);
+        }
+    }
+    
+    // Recalculate project_ahsp_rap.unit_price
+    recalculateRapAhspPrice($ahspRapId);
+}

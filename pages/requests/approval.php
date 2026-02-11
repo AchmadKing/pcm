@@ -20,12 +20,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'];
     $reqId = $_POST['request_id'];
     $notes = trim($_POST['notes'] ?? '');
+    $targetWeek = $_POST['target_week'] ?? null;
     
     try {
+        // Validate target_week is required for approval
+        if ($action === 'approve' && empty($targetWeek)) {
+            setFlash('error', 'Minggu target wajib dipilih sebelum menyetujui pengajuan!');
+            header('Location: approval.php?id=' . $reqId);
+            exit;
+        }
+        
         $newStatus = ($action === 'approve') ? 'approved' : 'rejected';
         
-        dbExecute("UPDATE requests SET status = ?, admin_notes = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-            [$newStatus, $notes, getCurrentUserId(), $reqId]);
+        // Update request status with target_week and week_number
+        dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+            [$newStatus, $notes, $action === 'approve' ? $targetWeek : null, $action === 'approve' ? $targetWeek : null, getCurrentUserId(), $reqId]);
+        
+        // If approved, insert realization into weekly_progress
+        if ($action === 'approve') {
+            // Get request info for project_id
+            $reqInfo = dbGetRow("SELECT project_id FROM requests WHERE id = ?", [$reqId]);
+            $projId = $reqInfo['project_id'];
+            
+            // Get project info for weekly ranges
+            $projInfo = dbGetRow("SELECT start_date, duration_days FROM projects WHERE id = ?", [$projId]);
+            $weekRanges = generateWeeklyRanges($projInfo['start_date'], $projInfo['duration_days']);
+            
+            // Find start/end dates for the selected week
+            $weekStart = null;
+            $weekEnd = null;
+            foreach ($weekRanges as $w) {
+                if ($w['week_number'] == $targetWeek) {
+                    $weekStart = $w['start'];
+                    $weekEnd = $w['end'];
+                    break;
+                }
+            }
+            
+            if ($weekStart && $weekEnd) {
+                // Get all items of the approved request
+                $approvedItems = dbGetAll("
+                    SELECT subcategory_id, SUM(unit_price * coefficient) as total_price
+                    FROM request_items 
+                    WHERE request_id = ?
+                    GROUP BY subcategory_id
+                ", [$reqId]);
+                
+                foreach ($approvedItems as $item) {
+                    if (!$item['subcategory_id']) continue;
+                    
+                    // Insert or update weekly_progress
+                    dbExecute("
+                        INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE realization_amount = realization_amount + VALUES(realization_amount)
+                    ", [$projId, $item['subcategory_id'], $targetWeek, $weekStart, $weekEnd, $item['total_price'], getCurrentUserId()]);
+                }
+            }
+        }
         
         $statusText = ($action === 'approve') ? 'disetujui' : 'ditolak';
         setFlash('success', 'Pengajuan berhasil ' . $statusText . '!');
@@ -72,21 +124,71 @@ if ($requestId) {
     ", [$requestId]);
     
     if ($selectedRequest) {
-        // Get items with RAP comparison
+        $projectId = $selectedRequest['project_id'];
+        
+        // Get items with RAP comparison - match by item_code from rap_ahsp_details
+        // Use subquery to get rap_ahsp_details data to avoid duplicates
         $selectedItems = dbGetAll("
             SELECT reqi.*, rs.code, rs.name as subcategory_name,
-                rap.unit_price as rap_price, rap.volume as rap_volume,
-                (SELECT COALESCE(SUM(reqi2.quantity), 0) 
+                -- RAP data from rap_ahsp_details (matched by item_code within same project)
+                (SELECT rad2.coefficient FROM rap_ahsp_details rad2 
+                 JOIN project_items pi2 ON rad2.item_id = pi2.id 
+                 JOIN rap_items rap2 ON rad2.rap_item_id = rap2.id
+                 WHERE pi2.item_code = reqi.item_code 
+                   AND pi2.project_id = ?
+                   AND rap2.subcategory_id = reqi.subcategory_id
+                 LIMIT 1) as rap_coefficient,
+                (SELECT rad2.unit_price FROM rap_ahsp_details rad2 
+                 JOIN project_items pi2 ON rad2.item_id = pi2.id 
+                 JOIN rap_items rap2 ON rad2.rap_item_id = rap2.id
+                 WHERE pi2.item_code = reqi.item_code 
+                   AND pi2.project_id = ?
+                   AND rap2.subcategory_id = reqi.subcategory_id
+                 LIMIT 1) as rap_unit_price,
+                rap.volume as rap_volume,
+                -- Qty per Item RAP = koefisien AHSP × volume pekerjaan
+                (SELECT COALESCE(rad2.coefficient, 0) * COALESCE(rap.volume, 0) 
+                 FROM rap_ahsp_details rad2 
+                 JOIN project_items pi2 ON rad2.item_id = pi2.id 
+                 JOIN rap_items rap2 ON rad2.rap_item_id = rap2.id
+                 WHERE pi2.item_code = reqi.item_code 
+                   AND pi2.project_id = ?
+                   AND rap2.subcategory_id = reqi.subcategory_id
+                 LIMIT 1) as rap_qty,
+                -- Sum approved qty by item_code for this subcategory
+                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
                  FROM request_items reqi2 
                  JOIN requests r ON reqi2.request_id = r.id 
-                 WHERE reqi2.subcategory_id = rs.id AND r.status = 'approved' AND r.id != req.id) as approved_qty
+                 WHERE reqi2.item_code = reqi.item_code 
+                   AND reqi2.subcategory_id = reqi.subcategory_id
+                   AND r.status = 'approved' 
+                   AND r.id != req.id) as approved_qty
             FROM request_items reqi
             LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
             LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
             JOIN requests req ON reqi.request_id = req.id
             WHERE reqi.request_id = ?
             ORDER BY rs.code, reqi.item_name
+        ", [$projectId, $projectId, $projectId, $requestId]);
+        
+        // Get distinct pekerjaan (subcategories) for this request
+        $selectedPekerjaan = dbGetAll("
+            SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
+            FROM request_items reqi
+            JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
+            JOIN rab_categories rc ON rs.category_id = rc.id
+            WHERE reqi.request_id = ?
+            ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
         ", [$requestId]);
+    }
+}
+
+// Generate weekly ranges for selected request's project
+$weeklyRanges = [];
+if ($selectedRequest) {
+    $projectInfo = dbGetRow("SELECT start_date, duration_days FROM projects WHERE id = ?", [$selectedRequest['project_id']]);
+    if (!empty($projectInfo['start_date']) && !empty($projectInfo['duration_days'])) {
+        $weeklyRanges = generateWeeklyRanges($projectInfo['start_date'], $projectInfo['duration_days']);
     }
 }
 
@@ -177,12 +279,23 @@ require_once __DIR__ . '/../../includes/header.php';
                     </div>
                     <div class="col-md-4">
                         <small class="text-muted">Minggu Ke</small>
-                        <p class="mb-0"><?= $selectedRequest['week_number'] ?></p>
+                        <p class="mb-0"><?= $selectedRequest['target_week'] ?? $selectedRequest['week_number'] ?? '-' ?></p>
                     </div>
                 </div>
                 
                 <?php if ($selectedRequest['description']): ?>
                 <div class="alert alert-light mb-3"><?= sanitize($selectedRequest['description']) ?></div>
+                <?php endif; ?>
+                
+                <?php if (!empty($selectedPekerjaan)): ?>
+                <div class="alert alert-info mb-3">
+                    <h6 class="alert-heading mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan yang Diajukan</h6>
+                    <ul class="mb-0 ps-3">
+                        <?php foreach ($selectedPekerjaan as $pek): ?>
+                        <li><strong><?= sanitize($pek['code']) ?></strong> - <?= sanitize($pek['name']) ?> <small class="text-muted">(<?= sanitize($pek['category_code']) ?>. <?= sanitize($pek['category_name']) ?>)</small></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
                 <?php endif; ?>
                 
                 <h6 class="mb-3">Analisis Item Pengajuan</h6>
@@ -192,8 +305,9 @@ require_once __DIR__ . '/../../includes/header.php';
                             <tr>
                                 <th>Kode</th>
                                 <th>Uraian</th>
-                                <th class="text-end">Qty</th>
-                                <th class="text-end">Harga Lapangan</th>
+                                <th class="text-end">Koef.</th>
+                                <th class="text-end">Harga Satuan</th>
+                                <th class="text-end">Total Lapangan</th>
                                 <th class="text-end">Harga RAP</th>
                                 <th>Status Harga</th>
                                 <th>Status Qty</th>
@@ -204,35 +318,68 @@ require_once __DIR__ . '/../../includes/header.php';
                             $totalReq = 0;
                             $totalRap = 0;
                             foreach ($selectedItems as $item): 
-                                $totalReq += $item['total_price'];
-                                $totalRap += $item['quantity'] * ($item['rap_price'] ?? 0);
+                                // Total Lapangan = unit_price × coefficient
+                                $hargaLapangan = $item['unit_price'] * $item['coefficient'];
+                                $totalReq += $hargaLapangan;
                                 
-                                // Calculate remaining qty
-                                $remainingQty = ($item['rap_volume'] ?? 0) - ($item['approved_qty'] ?? 0);
-                                $isOverQty = $item['quantity'] > $remainingQty;
-                                $afterApproval = $remainingQty - $item['quantity'];
+                                // Harga RAP = harga satuan RAP × koefisien yang diajukan
+                                $hargaRap = ($item['rap_unit_price'] ?? 0) * $item['coefficient'];
+                                $totalRap += $hargaRap;
+                                
+                                // Qty per Item RAP = koefisien AHSP × volume pekerjaan
+                                $qtyRap = $item['rap_qty'] ?? 0;
+                                
+                                // Remaining qty = qty RAP - approved qty
+                                $remainingQty = $qtyRap - ($item['approved_qty'] ?? 0);
+                                $isOverQty = $item['coefficient'] > $remainingQty && $qtyRap > 0;
+                                $afterApproval = $remainingQty - $item['coefficient'];
                             ?>
                             <tr class="<?= $isOverQty ? 'table-danger' : '' ?>">
-                                <td><code><?= sanitize($item['code'] ?? '-') ?></code></td>
+                                <td><code><?= sanitize($item['item_code'] ?? $item['code'] ?? '-') ?></code></td>
                                 <td>
                                     <?= sanitize($item['item_name']) ?>
                                     <?php if ($item['notes']): ?>
                                     <br><small class="text-muted"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end"><?= formatNumber($item['quantity'], 2) ?></td>
+                                <td class="text-end">
+                                    <?php if (($item['item_type'] ?? '') === 'upah'): ?>
+                                        <?= formatNumber($item['coefficient'] / 6, 0) ?> org
+                                        <br><small class="text-muted">× 6 hari = <?= formatNumber($item['coefficient'], 4) ?></small>
+                                    <?php else: ?>
+                                        <?= formatNumber($item['coefficient'], 4) ?>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
-                                <td class="text-end"><?= formatRupiah($item['rap_price'] ?? 0, false) ?></td>
-                                <td>
-                                    <?= getPriceComparisonLabel($item['unit_price'], $item['rap_price'] ?? 0) ?>
+                                <td class="text-end"><?= formatRupiah($hargaLapangan, false) ?></td>
+                                <td class="text-end">
+                                    <?= formatRupiah($hargaRap, false) ?>
+                                    <?php if ($item['rap_unit_price'] > 0): ?>
+                                    <br><small class="text-muted">@<?= formatRupiah($item['rap_unit_price'], false) ?></small>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php if ($isOverQty): ?>
-                                    <span class="badge bg-danger">⚠️ OVER QTY</span>
-                                    <br><small>Sisa: <?= formatNumber($remainingQty, 2) ?></small>
+                                    <?= getPriceComparisonLabel($hargaLapangan, $hargaRap) ?>
+                                </td>
+                                <td>
+                                    <?php if ($qtyRap > 0): ?>
+                                        <?php if ($isOverQty): ?>
+                                        <span class="badge bg-danger">⚠️ OVER QTY</span>
+                                        <br><small class="text-danger">Proyeksi sisa: <?= formatNumber($afterApproval, 4) ?></small>
+                                        <?php else: ?>
+                                        <span class="badge bg-success">OK</span>
+                                        <br><small class="text-success">Proyeksi sisa: <?= formatNumber($afterApproval, 4) ?></small>
+                                        <?php endif; ?>
+                                        <br><small class="text-muted">RAP: <?= formatNumber($qtyRap, 4) ?> | Diajukan: 
+                                        <?php if (($item['item_type'] ?? '') === 'upah'): ?>
+                                            <?= formatNumber($item['coefficient'] / 6, 0) ?> org
+                                        <?php else: ?>
+                                            <?= formatNumber($item['coefficient'], 4) ?>
+                                        <?php endif; ?>
+                                        </small>
                                     <?php else: ?>
-                                    <span class="badge bg-success">OK</span>
-                                    <br><small>Sisa: <?= formatNumber($afterApproval, 2) ?></small>
+                                        <span class="badge bg-secondary">-</span>
+                                        <br><small class="text-muted">Tidak ada data RAP</small>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -240,7 +387,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </tbody>
                         <tfoot>
                             <tr class="table-light">
-                                <td colspan="3" class="text-end"><strong>Total Pengajuan</strong></td>
+                                <td colspan="4" class="text-end"><strong>Total Pengajuan</strong></td>
                                 <td class="text-end"><strong><?= formatRupiah($totalReq) ?></strong></td>
                                 <td class="text-end"><strong><?= formatRupiah($totalRap) ?></strong></td>
                                 <td colspan="2">
@@ -248,8 +395,10 @@ require_once __DIR__ . '/../../includes/header.php';
                                     $diff = $totalReq - $totalRap;
                                     if ($diff > 0): ?>
                                     <span class="text-danger">+<?= formatRupiah($diff) ?> (LEBIH)</span>
-                                    <?php else: ?>
+                                    <?php elseif ($diff < 0): ?>
                                     <span class="text-success"><?= formatRupiah($diff) ?> (HEMAT)</span>
+                                    <?php else: ?>
+                                    <span class="text-muted">= SAMA</span>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -262,6 +411,23 @@ require_once __DIR__ . '/../../includes/header.php';
                     <input type="hidden" name="request_id" value="<?= $selectedRequest['id'] ?>">
                     
                     <div class="mb-3">
+                        <label class="form-label">Minggu Target <span class="text-danger">*</span></label>
+                        <select class="form-select" name="target_week" id="targetWeek">
+                            <option value="">-- Pilih Minggu --</option>
+                            <?php foreach ($weeklyRanges as $week): ?>
+                            <option value="<?= $week['week_number'] ?>">
+                                Minggu ke-<?= $week['week_number'] ?> (<?= date('d M', strtotime($week['start'])) ?> - <?= date('d M Y', strtotime($week['end'])) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php if (empty($weeklyRanges)): ?>
+                        <small class="text-warning"><i class="mdi mdi-alert"></i> Proyek belum memiliki tanggal mulai atau durasi, tidak bisa memilih minggu.</small>
+                        <?php else: ?>
+                        <small class="text-muted">Wajib dipilih sebelum approve. Realisasi akan masuk ke tabel minggu di tab Actual.</small>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <div class="mb-3">
                         <label class="form-label">Catatan Admin</label>
                         <textarea class="form-control" name="notes" rows="2" id="adminNotes"
                                   placeholder="Catatan untuk tim lapangan (opsional untuk approve, wajib untuk reject)"></textarea>
@@ -272,7 +438,8 @@ require_once __DIR__ . '/../../includes/header.php';
                                 onclick="return validateReject()">
                             <i class="mdi mdi-close"></i> Reject
                         </button>
-                        <button type="submit" name="action" value="approve" class="btn btn-success">
+                        <button type="submit" name="action" value="approve" class="btn btn-success"
+                                onclick="return validateApprove()">
                             <i class="mdi mdi-check"></i> Approve
                         </button>
                     </div>
@@ -295,6 +462,35 @@ require_once __DIR__ . '/../../includes/header.php';
 <?php 
 $extraScripts = <<<'SCRIPT'
 <script>
+function validateApprove() {
+    var targetWeek = document.getElementById('targetWeek').value;
+    if (!targetWeek) {
+        alert('Minggu target wajib dipilih sebelum menyetujui pengajuan!');
+        document.getElementById('targetWeek').focus();
+        return false;
+    }
+    
+    var weekText = document.getElementById('targetWeek').options[document.getElementById('targetWeek').selectedIndex].text;
+    
+    // Use confirmAction modal
+    confirmAction(function() {
+        var form = document.getElementById('approvalForm');
+        var actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'approve';
+        form.appendChild(actionInput);
+        form.submit();
+    }, {
+        title: 'Setujui Pengajuan',
+        message: 'Yakin ingin menyetujui pengajuan ini?<br><br>Realisasi akan masuk ke <strong>' + weekText + '</strong> di tab Actual.',
+        buttonText: 'Ya, Setujui',
+        buttonClass: 'btn-success'
+    });
+    
+    return false;
+}
+
 function validateReject() {
     var notes = document.getElementById('adminNotes').value.trim();
     if (!notes) {
@@ -319,7 +515,7 @@ function validateReject() {
         buttonClass: 'btn-danger'
     });
     
-    return false; // Prevent default form submission
+    return false;
 }
 </script>
 SCRIPT;

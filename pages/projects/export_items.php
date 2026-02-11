@@ -13,6 +13,7 @@ requireLogin();
 requireAdmin();
 
 $projectId = $_GET['project_id'] ?? null;
+$exportType = $_GET['type'] ?? 'rab'; // 'rab' or 'rap'
 
 if (!$projectId) {
     setFlash('error', 'Project ID tidak ditemukan!');
@@ -29,16 +30,18 @@ if (!$project) {
     exit;
 }
 
-// Get all items for this project
+// Get all items for this project based on type
+$tableName = ($exportType === 'rap') ? 'project_items_rap' : 'project_items';
 $items = dbGetAll("
     SELECT item_code, name, brand, category, unit, price, actual_price
-    FROM project_items
+    FROM {$tableName}
     WHERE project_id = ?
     ORDER BY category, item_code
 ", [$projectId]);
 
 // Generate filename
-$filename = 'items_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd_His') . '.csv';
+$typeLabel = ($exportType === 'rap') ? 'rap_items' : 'items';
+$filename = $typeLabel . '_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd_His') . '.csv';
 
 // Set headers for CSV download
 header('Content-Type: text/csv; charset=utf-8');
@@ -72,6 +75,11 @@ foreach ($items as $item) {
     $namaUtama = $nameParts[0];
     $jenis = $nameParts[1] ?? '';
     
+    // Format prices with Indonesian format (dots for thousands, comma for decimal)
+    // Example: 15142.86 becomes "15.142,86" (not "15.142.86.00")
+    $priceFormatted = formatNumber($item['price'] ?? 0, 2);
+    $actualPriceFormatted = !empty($item['actual_price']) ? formatNumber($item['actual_price'], 2) : '';
+    
     fputcsv($output, [
         $item['item_code'] ?? '',
         $namaUtama,
@@ -79,8 +87,8 @@ foreach ($items as $item) {
         $item['brand'] ?? '',
         $item['category'] ?? '',
         $item['unit'] ?? '',
-        $item['price'] ?? 0,
-        $item['actual_price'] ?? ''
+        $priceFormatted,
+        $actualPriceFormatted
     ], ';');
 }
 

@@ -13,6 +13,7 @@ requireLogin();
 requireAdmin();
 
 $projectId = $_GET['project_id'] ?? null;
+$exportType = $_GET['type'] ?? 'rab'; // 'rab' or 'rap'
 
 if (!$projectId) {
     setFlash('error', 'Project ID tidak ditemukan!');
@@ -29,16 +30,18 @@ if (!$project) {
     exit;
 }
 
-// Get all AHSP with their details for this project
+// Get all AHSP with their details for this project based on type
+$ahspTable = ($exportType === 'rap') ? 'project_ahsp_rap' : 'project_ahsp';
 $ahspList = dbGetAll("
     SELECT a.id, a.ahsp_code, a.work_name, a.unit
-    FROM project_ahsp a
+    FROM {$ahspTable} a
     WHERE a.project_id = ?
     ORDER BY a.ahsp_code
 ", [$projectId]);
 
 // Generate filename
-$filename = 'ahsp_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd_His') . '.csv';
+$typeLabel = ($exportType === 'rap') ? 'rap_ahsp' : 'ahsp';
+$filename = $typeLabel . '_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd_His') . '.csv';
 
 // Set headers for CSV download
 header('Content-Type: text/csv; charset=utf-8');
@@ -74,14 +77,24 @@ foreach ($ahspList as $ahsp) {
         ''
     ], ';');
     
-    // Get details for this AHSP
-    $details = dbGetAll("
-        SELECT d.coefficient, i.item_code, i.name as item_name
-        FROM project_ahsp_details d
-        JOIN project_items i ON d.item_id = i.id
-        WHERE d.ahsp_id = ?
-        ORDER BY i.category, i.item_code
-    ", [$ahsp['id']]);
+    // Get details for this AHSP based on type
+    if ($exportType === 'rap') {
+        $details = dbGetAll("
+            SELECT d.coefficient, i.item_code, i.name as item_name
+            FROM project_ahsp_details_rap d
+            JOIN project_items_rap i ON d.item_id = i.id
+            WHERE d.ahsp_id = ?
+            ORDER BY i.category, i.item_code
+        ", [$ahsp['id']]);
+    } else {
+        $details = dbGetAll("
+            SELECT d.coefficient, i.item_code, i.name as item_name
+            FROM project_ahsp_details d
+            JOIN project_items i ON d.item_id = i.id
+            WHERE d.ahsp_id = ?
+            ORDER BY i.category, i.item_code
+        ", [$ahsp['id']]);
+    }
     
     // Write item rows
     foreach ($details as $detail) {

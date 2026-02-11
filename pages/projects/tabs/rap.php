@@ -24,53 +24,66 @@ if ($rabSourceId > 0) {
     }
 }
 
-// Function to get RAP AHSP component breakdown
-function getRapAhspComponentBreakdown($rapItemId) {
+// Function to get RAP AHSP component breakdown from Master Data RAP
+// Uses AHSP code matching to get data from project_ahsp_rap / project_ahsp_details_rap
+function getRapAhspComponentBreakdown($ahspCode, $projectId) {
     $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
     
-    if (!$rapItemId) return $result;
+    if (!$ahspCode) return $result;
     
-    // First try from rap_ahsp_details
+    // Find matching AHSP RAP by code
+    $ahspRap = dbGetRow("
+        SELECT id FROM project_ahsp_rap 
+        WHERE project_id = ? AND ahsp_code = ?
+    ", [$projectId, $ahspCode]);
+    
+    if (!$ahspRap) return $result;
+    
+    // Get component breakdown from project_ahsp_details_rap
     $totals = dbGetAll("
-        SELECT category, SUM(coefficient * unit_price) as total 
-        FROM rap_ahsp_details 
-        WHERE rap_item_id = ?
-        GROUP BY category
-    ", [$rapItemId]);
+        SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
+        FROM project_ahsp_details_rap d
+        JOIN project_items_rap i ON d.item_id = i.id
+        WHERE d.ahsp_id = ?
+        GROUP BY i.category
+    ", [$ahspRap['id']]);
     
-    if (!empty($totals)) {
-        foreach ($totals as $row) {
-            if (isset($result[$row['category']])) {
-                $result[$row['category']] = $row['total'];
-            }
-        }
-    } else {
-        // Fallback to project_ahsp_details via rab_subcategories
-        $rapItem = dbGetRow("
-            SELECT rs.ahsp_id FROM rap_items rap
-            JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-            WHERE rap.id = ?
-        ", [$rapItemId]);
-        
-        if ($rapItem && $rapItem['ahsp_id']) {
-            $totals = dbGetAll("
-                SELECT i.category, SUM(d.coefficient * i.price) as total 
-                FROM project_ahsp_details d 
-                JOIN project_items i ON d.item_id = i.id 
-                WHERE d.ahsp_id = ?
-                GROUP BY i.category
-            ", [$rapItem['ahsp_id']]);
-            
-            foreach ($totals as $row) {
-                if (isset($result[$row['category']])) {
-                    $result[$row['category']] = $row['total'];
-                }
-            }
+    foreach ($totals as $row) {
+        if (isset($result[$row['category']])) {
+            $result[$row['category']] = $row['total'];
         }
     }
     
     return $result;
 }
+
+// Function to get RAP AHSP unit price from Master Data RAP
+function getRapAhspUnitPrice($ahspCode, $projectId, $overheadPct = 10) {
+    if (!$ahspCode) return 0;
+    
+    // Find matching AHSP RAP by code
+    $ahspRap = dbGetRow("
+        SELECT unit_price FROM project_ahsp_rap 
+        WHERE project_id = ? AND ahsp_code = ?
+    ", [$projectId, $ahspCode]);
+    
+    if ($ahspRap && $ahspRap['unit_price'] > 0) {
+        return $ahspRap['unit_price'];
+    }
+    
+    // Calculate from components if unit_price is 0
+    $total = dbGetRow("
+        SELECT SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total
+        FROM project_ahsp_details_rap d
+        JOIN project_items_rap i ON d.item_id = i.id
+        WHERE d.ahsp_id = (
+            SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?
+        )
+    ", [$projectId, $ahspCode]);
+    
+    return $total['total'] ?? 0;
+}
+
 
 // Get RAP data grouped by category
 $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
@@ -83,9 +96,11 @@ $grandTotalAlat = 0;
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
-        SELECT rs.*, rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price
+        SELECT rs.*, rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+               pa.ahsp_code as ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
+        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
         WHERE rs.category_id = ? 
         ORDER BY rs.sort_order, rs.code
     ", [$cat['id']]);
@@ -101,7 +116,20 @@ foreach ($categories as $cat) {
     $enrichedSubcats = [];
     foreach ($subcats as $sub) {
         $volume = $sub['rap_volume'] ?? $sub['volume'];
-        $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['unit_price'];
+        
+        // Get unit price from Master Data RAP (priority) or fallback to rap_items/rab_subcategories
+        $ahspCode = $sub['ahsp_code'] ?? null;
+        if ($ahspCode) {
+            // Try Master Data RAP first
+            $masterDataPrice = getRapAhspUnitPrice($ahspCode, $projectId, $overheadPct);
+            if ($masterDataPrice > 0) {
+                $baseUnitPrice = $masterDataPrice;
+            } else {
+                $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['unit_price'];
+            }
+        } else {
+            $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['unit_price'];
+        }
         
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $subTotal = $volume * $unitPriceWithOverhead;
@@ -130,9 +158,9 @@ foreach ($categories as $cat) {
         $sub['selisih'] = $rabTotal - $subTotal;
         $catRabTotal += $rabTotal;
         
-        // Get AHSP component breakdown
-        if ($sub['rap_id']) {
-            $components = getRapAhspComponentBreakdown($sub['rap_id']);
+        // Get AHSP component breakdown from Master Data RAP
+        if ($ahspCode) {
+            $components = getRapAhspComponentBreakdown($ahspCode, $projectId);
         } else {
             $components = ['upah' => 0, 'material' => 0, 'alat' => 0];
         }
@@ -404,9 +432,9 @@ $selisihRounded = $totalRounded - $rabTotalRounded;
                     data-bs-toggle="tooltip" 
                     data-bs-placement="left"
                     data-bs-html="true"
-                    title="Selisih: <?= ($grandSelisihPct >= 0 ? '+' : '') . formatNumber($grandSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($grandRabTotal) ?>"
+                    title="Selisih: <?= ($grandSelisihPct >= 0 ? '-' : '') . formatNumber($grandSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($grandRabTotal) ?>"
                     style="cursor: help;">
-                    <strong><?= ($grandSelisih >= 0 ? '+' : '') . formatNumber($grandSelisih, 2) ?></strong>
+                    <strong><?= ($grandSelisih >= 0 ? '-' : '') . formatNumber($grandSelisih, 2) ?></strong>
                 </td>
                 <td></td>
             </tr>
@@ -467,7 +495,6 @@ $(document).ready(function() {
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
     });
 });
 </script>

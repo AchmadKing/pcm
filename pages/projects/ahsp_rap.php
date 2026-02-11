@@ -97,6 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
             dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
             
+            // Sync to Master Data AHSP RAP
+            syncRapTableToMasterAhspRap($rapItemId, $projectId);
+            
             setFlash('success', 'Koefisien berhasil diperbarui!');
             header('Location: ahsp_rap.php?id=' . $rapItemId);
             exit;
@@ -113,6 +116,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Recalculate RAP unit_price
             $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
             dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
+            
+            // Sync to Master Data AHSP RAP
+            syncRapTableToMasterAhspRap($rapItemId, $projectId);
             
             setFlash('success', 'Harga satuan berhasil diperbarui!');
             header('Location: ahsp_rap.php?id=' . $rapItemId);
@@ -164,15 +170,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get RAP AHSP details
+// Get RAP AHSP details - use project_items_rap for RAP prices
 $rapDetails = dbGetAll("
     SELECT rad.*, pi.name as item_name, pi.unit,
-           pi.price as item_up_price, pi.actual_price as item_actual_price
+           pir.price as item_up_price, pir.actual_price as item_actual_price
     FROM rap_ahsp_details rad
     JOIN project_items pi ON rad.item_id = pi.id
+    LEFT JOIN project_items_rap pir ON CONVERT(pir.item_code USING utf8mb4) = CONVERT(pi.item_code USING utf8mb4) AND pir.project_id = ?
     WHERE rad.rap_item_id = ?
     ORDER BY rad.category, pi.name
-", [$rapItemId]);
+", [$projectId, $rapItemId]);
 
 // If empty, copy from project AHSP
 if (empty($rapDetails) && $rapItem['ahsp_id']) {
@@ -188,14 +195,16 @@ if (empty($rapDetails) && $rapItem['ahsp_id']) {
             [$rapItemId, $detail['item_id'], $detail['category'], $detail['coefficient'], $detail['price']]);
     }
     
-    // Reload
+    // Reload - use project_items_rap for RAP prices
     $rapDetails = dbGetAll("
-        SELECT rad.*, pi.name as item_name, pi.unit
+        SELECT rad.*, pi.name as item_name, pi.unit,
+               pir.price as item_up_price, pir.actual_price as item_actual_price
         FROM rap_ahsp_details rad
         JOIN project_items pi ON rad.item_id = pi.id
+        LEFT JOIN project_items_rap pir ON CONVERT(pir.item_code USING utf8mb4) = CONVERT(pi.item_code USING utf8mb4) AND pir.project_id = ?
         WHERE rad.rap_item_id = ?
         ORDER BY rad.category, pi.name
-    ", [$rapItemId]);
+    ", [$projectId, $rapItemId]);
 }
 
 // Get RAB AHSP details for comparison (indexed by item_id)

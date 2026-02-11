@@ -54,6 +54,16 @@ $items = dbGetAll("
 
 $totalAmount = array_sum(array_column($items, 'total_price'));
 
+// Get distinct pekerjaan (subcategories) for this request
+$pekerjaan = dbGetAll("
+    SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
+    FROM request_items reqi
+    JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
+    JOIN rab_categories rc ON rs.category_id = rc.id
+    WHERE reqi.request_id = ?
+    ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+", [$requestId]);
+
 // NOW include header (after all possible redirects)
 $pageTitle = 'Detail Pengajuan';
 require_once __DIR__ . '/../../includes/header.php';
@@ -103,7 +113,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <table class="table table-sm mb-0">
                     <tr><th>No. Request</th><td><?= sanitize($request['request_number']) ?></td></tr>
                     <tr><th>Tanggal</th><td><?= formatDate($request['request_date'], true) ?></td></tr>
-                    <tr><th>Minggu Ke</th><td><?= $request['week_number'] ?></td></tr>
+                    <tr><th>Minggu Ke</th><td><?= $request['target_week'] ?? $request['week_number'] ?? '-' ?></td></tr>
                     <tr><th>Dibuat Oleh</th><td><?= sanitize($request['created_by_name']) ?></td></tr>
                     <?php if ($request['description']): ?>
                     <tr><th>Keterangan</th><td><?= sanitize($request['description']) ?></td></tr>
@@ -136,6 +146,24 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h3 class="text-primary"><?= formatRupiah($totalAmount) ?></h3>
             </div>
         </div>
+        
+        <!-- Pekerjaan Card -->
+        <?php if (!empty($pekerjaan)): ?>
+        <div class="card border-info">
+            <div class="card-body">
+                <h6 class="header-title mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan Terkait</h6>
+                <ul class="list-unstyled mb-0">
+                    <?php foreach ($pekerjaan as $pek): ?>
+                    <li class="mb-1">
+                        <code><?= sanitize($pek['code']) ?></code>
+                        <?= sanitize($pek['name']) ?>
+                        <br><small class="text-muted"><?= sanitize($pek['category_code']) ?>. <?= sanitize($pek['category_name']) ?></small>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
     
     <!-- Items List -->
@@ -150,7 +178,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <th width="100">Kode</th>
                                 <th>Uraian</th>
                                 <th width="60">Satuan</th>
-                                <th width="80" class="text-end">Qty</th>
+                                <th width="100" class="text-end">Koefisien</th>
                                 <th width="130" class="text-end">Harga</th>
                                 <th width="150" class="text-end">Jumlah</th>
                             </tr>
@@ -166,7 +194,14 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($item['unit']) ?></td>
-                                <td class="text-end"><?= formatNumber($item['quantity'], 2) ?></td>
+                                <td class="text-end">
+                                    <?php if (($item['item_type'] ?? '') === 'upah'): ?>
+                                        <?= formatNumber($item['coefficient'] / 6, 0) ?> org
+                                        <br><small class="text-muted">× 6 hari = <?= formatNumber($item['coefficient'], 2) ?></small>
+                                    <?php else: ?>
+                                        <?= formatNumber($item['coefficient'], 4) ?>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><strong><?= formatRupiah($item['total_price'], false) ?></strong></td>
                             </tr>

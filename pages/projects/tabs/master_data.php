@@ -127,7 +127,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isAdmin()) {
             // Recalculate all AHSP prices (set to 0 since no items)
             dbExecute("UPDATE project_ahsp SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
-            setFlash('success', "Semua items berhasil dihapus!");
+            // === Also delete RAP Items ===
+            // Delete RAP AHSP details first
+            dbExecute("
+                DELETE d FROM project_ahsp_details_rap d
+                INNER JOIN project_ahsp_rap a ON d.ahsp_id = a.id
+                WHERE a.project_id = ?
+            ", [$projectId]);
+            
+            // Delete RAP items
+            dbExecute("DELETE FROM project_items_rap WHERE project_id = ?", [$projectId]);
+            
+            // Reset RAP AHSP prices
+            dbExecute("UPDATE project_ahsp_rap SET unit_price = 0 WHERE project_id = ?", [$projectId]);
+            
+            setFlash('success', "Semua items RAB dan RAP berhasil dihapus!");
         }
         
         if ($action === 'clear_all_ahsp') {
@@ -168,7 +182,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isAdmin()) {
             // 5. Delete all AHSP (now safe - no more references)
             $deletedCount = dbExecute("DELETE FROM project_ahsp WHERE project_id = ?", [$projectId]);
             
-            setFlash('success', "Semua AHSP berhasil dihapus!");
+            // === Also delete RAP AHSP ===
+            // Delete RAP AHSP details first
+            dbExecute("
+                DELETE d FROM project_ahsp_details_rap d
+                INNER JOIN project_ahsp_rap a ON d.ahsp_id = a.id
+                WHERE a.project_id = ?
+            ", [$projectId]);
+            
+            // Delete RAP AHSP
+            dbExecute("DELETE FROM project_ahsp_rap WHERE project_id = ?", [$projectId]);
+            
+            setFlash('success', "Semua AHSP RAB dan RAP berhasil dihapus!");
         }
         
         // ========== AHSP ==========
@@ -319,12 +344,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isAdmin()) {
             recalculateAhspPrice($ahspId);
             setFlash('success', 'Komponen berhasil dihapus!');
         }
+        
+        // Include RAP handlers
+        include 'master_data_rap_handlers.php';
+        
     } catch (Exception $e) {
         setFlash('error', 'Error: ' . $e->getMessage());
     }
     
-    // Use JavaScript redirect - stay on AHSP subtab for AHSP-related actions
-    $subtab = (strpos($action, 'ahsp') !== false) ? '&subtab=ahsp' : '';
+    // Use JavaScript redirect - determine correct subtab based on action
+    $subtab = '';
+    if (strpos($action, 'ahsp_rap') !== false || strpos($action, 'ahsp_detail_rap') !== false) {
+        $subtab = '&subtab=ahsp_rap';
+    } elseif (strpos($action, 'item_rap') !== false || strpos($action, 'items_rap') !== false) {
+        $subtab = '&subtab=items_rap';
+    } elseif (strpos($action, 'ahsp') !== false) {
+        $subtab = '&subtab=ahsp';
+    }
     echo '<script>window.location.href = "view.php?id=' . $projectId . '&tab=master' . $subtab . '";</script>';
     exit;
 }
@@ -424,20 +460,50 @@ $activeSubtab = $_GET['subtab'] ?? 'items';
 
 // Check if specific AHSP should be opened (from ahsp.php edit button)
 $targetAhspId = $_GET['ahsp_id'] ?? null;
+
+// ============================================================
+// RAP MASTER DATA
+// ============================================================
+// Initialize RAP master data if not done yet
+initRapMasterData($projectId);
+
+// Get RAP Items
+$itemsRap = dbGetAll("SELECT * FROM project_items_rap WHERE project_id = ? ORDER BY category, name", [$projectId]);
+
+// Group RAP items by category
+$itemsRapByCategory = ['upah' => [], 'material' => [], 'alat' => []];
+foreach ($itemsRap as $item) {
+    $itemsRapByCategory[$item['category']][] = $item;
+}
+
+// Get RAP AHSP with same sorting
+$ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY $ahspOrderBy $ahspSortOrder", [$projectId]);
 ?>
 
-<!-- Sub-tabs for Items and AHSP -->
+<!-- Sub-tabs for Items and AHSP (RAB & RAP) -->
 <ul class="nav nav-pills mb-3" role="tablist">
     <li class="nav-item">
         <a class="nav-link <?= $activeSubtab == 'items' ? 'active' : '' ?>" data-bs-toggle="pill" href="#items-tab">
-            <i class="mdi mdi-package-variant"></i> Items
+            <i class="mdi mdi-package-variant"></i> Items RAB
             <span class="badge bg-secondary"><?= count($items) ?></span>
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link <?= $activeSubtab == 'ahsp' ? 'active' : '' ?>" data-bs-toggle="pill" href="#ahsp-tab">
-            <i class="mdi mdi-file-table-outline"></i> AHSP
+            <i class="mdi mdi-file-table-outline"></i> AHSP RAB
             <span class="badge bg-secondary"><?= count($ahspList) ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeSubtab == 'items_rap' ? 'active' : '' ?>" data-bs-toggle="pill" href="#items-rap-tab">
+            <i class="mdi mdi-package-variant text-info"></i> Items RAP
+            <span class="badge bg-info"><?= count($itemsRap) ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeSubtab == 'ahsp_rap' ? 'active' : '' ?>" data-bs-toggle="pill" href="#ahsp-rap-tab">
+            <i class="mdi mdi-file-table-outline text-info"></i> AHSP RAP
+            <span class="badge bg-info"><?= count($ahspListRap) ?></span>
         </a>
     </li>
 </ul>
@@ -717,6 +783,17 @@ $targetAhspId = $_GET['ahsp_id'] ?? null;
                     ORDER BY i.category, i.name
                 ", [$ahsp['id']]);
                 
+                // Calculate totals for header display (must be calculated BEFORE header)
+                $detailsByCategory = ['upah' => [], 'material' => [], 'alat' => []];
+                $totalByCategory = ['upah' => 0, 'material' => 0, 'alat' => 0];
+                foreach ($details as $detail) {
+                    $detailsByCategory[$detail['category']][] = $detail;
+                    $totalByCategory[$detail['category']] += $detail['total_price'];
+                }
+                $subtotal = array_sum($totalByCategory);
+                $overheadAmount = $subtotal * ($overheadPct / 100);
+                $grandTotal = $subtotal + $overheadAmount;
+                
                 // Check if this AHSP should be opened (from URL param or first item)
                 $isTargetAhsp = ($targetAhspId && $ahsp['id'] == $targetAhspId);
                 $shouldBeOpen = $isTargetAhsp || ($idx == 0 && !$targetAhspId);
@@ -727,14 +804,10 @@ $targetAhspId = $_GET['ahsp_id'] ?? null;
                             data-bs-toggle="collapse" data-bs-target="#ahsp-<?= $ahsp['id'] ?>">
                         <div class="d-flex justify-content-between w-100 me-3">
                             <span><code class="me-2 fs-5"><?= sanitize($ahsp['ahsp_code'] ?? '') ?></code> <strong><?= sanitize($ahsp['work_name']) ?></strong> (<?= sanitize($ahsp['unit']) ?>)</span>
-                            <?php 
-                                // Calculate price with overhead (D+E)
-                                $priceWithOverhead = $ahsp['unit_price'] * (1 + ($overheadPct / 100));
-                            ?>
                             <span class="badge bg-primary" 
                                   data-bs-toggle="tooltip" 
                                   title="Harga Satuan (D+E) dengan Overhead <?= $overheadPct ?>%">
-                                <?= formatRupiah($priceWithOverhead) ?>
+                                <?= formatRupiah($grandTotal) ?>
                             </span>
                         </div>
                     </button>
@@ -758,17 +831,8 @@ $targetAhspId = $_GET['ahsp_id'] ?? null;
                         <?php if (empty($details)): ?>
                         <p class="text-muted">Belum ada komponen. Tambahkan upah, material, atau alat.</p>
                         <?php else: 
-                            // Group details by category
-                            $detailsByCategory = ['upah' => [], 'material' => [], 'alat' => []];
-                            $totalByCategory = ['upah' => 0, 'material' => 0, 'alat' => 0];
-                            foreach ($details as $detail) {
-                                $detailsByCategory[$detail['category']][] = $detail;
-                                $totalByCategory[$detail['category']] += $detail['total_price'];
-                            }
-                            $subtotal = array_sum($totalByCategory);
-                            $overheadPct = $project['overhead_percentage'] ?? 10;
-                            $overheadAmount = $subtotal * ($overheadPct / 100);
-                            $grandTotal = $subtotal + $overheadAmount;
+                            // detailsByCategory, totalByCategory, subtotal, overheadAmount, grandTotal 
+                            // are already calculated before accordion header
                         ?>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered mb-0">
@@ -914,6 +978,11 @@ $targetAhspId = $_GET['ahsp_id'] ?? null;
         
         <?php endif; ?>
     </div>
+
+<?php
+// Include RAP Master Data UI (Items RAP and AHSP RAP tabs)
+include 'master_data_rap_ui.php';
+?>
 </div>
 
 <!-- Add Item Modal -->
@@ -1159,6 +1228,7 @@ function deleteItem(itemId) {
     confirmDelete(function() {
         var form = document.createElement('form');
         form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=master';
         form.innerHTML = '<input type="hidden" name="action" value="delete_item"><input type="hidden" name="item_id" value="' + itemId + '">';
         document.body.appendChild(form);
         form.submit();
@@ -1171,6 +1241,7 @@ function confirmClearItems() {
     confirmDelete(function() {
         var form = document.createElement('form');
         form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=master';
         form.innerHTML = '<input type="hidden" name="action" value="clear_all_items">';
         document.body.appendChild(form);
         form.submit();
@@ -1187,6 +1258,7 @@ function deleteAhspDetail(detailId, ahspId) {
     confirmDelete(function() {
         var form = document.createElement('form');
         form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=master&subtab=ahsp';
         form.innerHTML = '<input type="hidden" name="action" value="delete_ahsp_detail"><input type="hidden" name="detail_id" value="' + detailId + '"><input type="hidden" name="ahsp_id" value="' + ahspId + '">';
         document.body.appendChild(form);
         form.submit();
@@ -1198,9 +1270,27 @@ function deleteAhsp(ahspId) {
     confirmDelete(function() {
         var form = document.createElement('form');
         form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=master&subtab=ahsp';
         form.innerHTML = '<input type="hidden" name="action" value="delete_ahsp"><input type="hidden" name="ahsp_id" value="' + ahspId + '">';
         document.body.appendChild(form);
         form.submit();
+    });
+}
+
+// Clear All AHSP Function
+function confirmClearAhsp() {
+    confirmDelete(function() {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=master&subtab=ahsp';
+        form.innerHTML = '<input type="hidden" name="action" value="clear_all_ahsp">';
+        document.body.appendChild(form);
+        form.submit();
+    }, {
+        title: '⚠️ PERINGATAN!',
+        message: '<strong>Anda akan menghapus SEMUA AHSP</strong> dari proyek ini.<br><br>Semua RAB dan RAP yang terkait juga akan dihapus.<br><br><span class="text-danger">Tindakan ini tidak dapat dibatalkan!</span>',
+        buttonText: 'Ya, Hapus Semua',
+        buttonClass: 'btn-danger'
     });
 }
 
@@ -1689,7 +1779,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         } else {
             // For AHSP, enable/disable delete and edit buttons
-            var ahspEditButtons = container.querySelectorAll('.ahsp-edit-btn, .ahsp-delete-btn, .detail-delete-btn, .coef-input');
+            var ahspEditButtons = container.querySelectorAll('.ahsp-edit-btn, .ahsp-delete-btn, .detail-delete-btn, input[name="coefficient"]');
             ahspEditButtons.forEach(function(el) {
                 if (isEnabled) {
                     el.classList.remove('d-none');

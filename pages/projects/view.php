@@ -4,6 +4,40 @@
  * PCM - Project Cost Management System
  */
 
+// AJAX Handler: Weekly Detail Modal - returns approved requests for a specific week+subcategory
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'weekly_detail') {
+    require_once __DIR__ . '/../../config/database.php';
+    require_once __DIR__ . '/../../includes/functions.php';
+    
+    header('Content-Type: application/json');
+    $pId = intval($_GET['project_id'] ?? $_GET['id'] ?? 0);
+    $subId = intval($_GET['subcategory_id'] ?? 0);
+    $weekNum = intval($_GET['week_number'] ?? 0);
+    
+    if (!$pId || !$subId || !$weekNum) {
+        echo json_encode(['error' => 'Parameter tidak lengkap']);
+        exit;
+    }
+    
+    $details = dbGetAll("
+        SELECT req.id, req.request_number, req.request_date, req.description, req.admin_notes,
+               u.full_name as created_by_name,
+               COALESCE(SUM(reqi.unit_price * reqi.coefficient), 0) as subcategory_amount
+        FROM requests req
+        JOIN request_items reqi ON reqi.request_id = req.id
+        LEFT JOIN users u ON req.created_by = u.id
+        WHERE req.project_id = ? 
+          AND req.status = 'approved'
+          AND (req.target_week = ? OR (req.target_week IS NULL AND req.week_number = ?))
+          AND reqi.subcategory_id = ?
+        GROUP BY req.id
+        ORDER BY req.request_date ASC
+    ", [$pId, $weekNum, $weekNum, $subId]);
+    
+    echo json_encode(['data' => $details]);
+    exit;
+}
+
 // AJAX Handler - Must be FIRST before any includes to prevent output
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_item_ajax') {
     // Only load what we need for AJAX
@@ -52,6 +86,153 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         header('Content-Type: application/json');
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
     }
+}
+
+// RAP AJAX Handlers (Items & AHSP)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['update_item_rap_ajax', 'update_ahsp_detail_rap_ajax'])) {
+    
+    // Dependencies
+    require_once __DIR__ . '/../../config/database.php';
+    require_once __DIR__ . '/../../includes/functions.php';
+    
+    // Auth Check
+    if (session_status() === PHP_SESSION_NONE) { session_start(); }
+    if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'admin') {
+        header('Content-Type: application/json');
+        die(json_encode(['success' => false, 'message' => 'Unauthorized']));
+    }
+    
+    $projectId = $_GET['id'] ?? null;
+    
+    // Helper Functions specific to RAP (Scoped here to avoid pollution)
+    if (!function_exists('recalculateRapAhspPrice')) {
+        function recalculateRapAhspPrice($ahspId) {
+            $total = dbGetRow("
+                SELECT COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total
+                FROM project_ahsp_details_rap d
+                JOIN project_items_rap i ON d.item_id = i.id
+                WHERE d.ahsp_id = ?
+            ", [$ahspId])['total'];
+            
+            dbExecute("UPDATE project_ahsp_rap SET unit_price = ? WHERE id = ?", [$total, $ahspId]);
+        }
+    }
+
+    if (!function_exists('syncRapItemToAhsp')) {
+        function syncRapItemToAhsp($itemId, $projectId) {
+            // Find all affected AHSPs that use this item
+            $affectedAhsp = dbGetAll("
+                SELECT DISTINCT d.ahsp_id 
+                FROM project_ahsp_details_rap d
+                JOIN project_ahsp_rap pa ON d.ahsp_id = pa.id
+                WHERE d.item_id = ? AND pa.project_id = ?
+            ", [$itemId, $projectId]);
+            
+            // Recalculate each affected AHSP
+            // Note: d.unit_price stays NULL so COALESCE(d.unit_price, i.price) uses current item price
+            foreach ($affectedAhsp as $row) {
+                recalculateRapAhspPrice($row['ahsp_id']);
+            }
+        }
+    }
+
+    try {
+        if ($_POST['action'] === 'update_item_rap_ajax') {
+            $itemId = $_POST['item_id'];
+            $itemCode = trim($_POST['item_code'] ?? '');
+            $name = trim($_POST['item_name']);
+            $brand = trim($_POST['item_brand'] ?? '');
+            $category = $_POST['item_category'];
+            $unit = trim($_POST['item_unit']);
+            $priceRaw = $_POST['item_price'];
+            $price = floatval(str_replace(',', '.', str_replace('.', '', $priceRaw)));
+            $actualPriceRaw = $_POST['item_actual_price'] ?? '';
+            $actualPrice = !empty($actualPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', $actualPriceRaw))) : null;
+            
+            // Duplicate Check
+            if (!empty($itemCode)) {
+                $existing = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ? AND id != ?", 
+                    [$projectId, $itemCode, $itemId]);
+                if ($existing) {
+                    header('Content-Type: application/json');
+                    die(json_encode(['success' => false, 'message' => 'Kode item "' . $itemCode . '" sudah digunakan!']));
+                }
+            }
+            
+            dbExecute("UPDATE project_items_rap SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ? AND project_id = ?",
+                [$itemCode, $name, $brand ?: null, $category, $unit, $price, $actualPrice, $itemId, $projectId]);
+            
+            syncRapItemToAhsp($itemId, $projectId);
+            
+            header('Content-Type: application/json');
+            die(json_encode(['success' => true, 'message' => 'Item RAP berhasil disimpan!']));
+        }
+        
+        if ($_POST['action'] === 'update_ahsp_detail_rap_ajax') {
+            $detailId = $_POST['detail_id'];
+            $ahspId = $_POST['ahsp_id'];
+            $coeffRaw = $_POST['coefficient'];
+            $coefficient = floatval(str_replace(',', '.', $coeffRaw));
+            
+            if (empty($coeffRaw) || $coefficient > 0) {
+                if (empty($coeffRaw)) {
+                    $current = dbGetRow("SELECT coefficient FROM project_ahsp_details_rap WHERE id = ?", [$detailId]);
+                    $coefficient = $current['coefficient'] ?? 1;
+                }
+                
+                dbExecute("UPDATE project_ahsp_details_rap SET coefficient = ? WHERE id = ?",
+                    [$coefficient, $detailId]);
+                recalculateRapAhspPrice($ahspId);
+                
+                // Sync to RAP Table (rap_ahsp_details)
+                syncMasterAhspRapToRapTable($ahspId, $projectId);
+                
+                header('Content-Type: application/json');
+                die(json_encode(['success' => true, 'message' => 'Komponen berhasil diperbarui!']));
+            } else {
+                header('Content-Type: application/json');
+                die(json_encode(['success' => false, 'message' => 'Koefisien harus lebih dari 0!']));
+            }
+        }
+    } catch (Exception $e) {
+        header('Content-Type: application/json');
+        die(json_encode(['success' => false, 'message' => $e->getMessage()]));
+    }
+}
+
+// AJAX Handler: Get AHSP RAP HTML (for refresh after item update)
+if (isset($_GET['action']) && $_GET['action'] === 'get_ahsp_rap_html') {
+    require_once __DIR__ . '/../../config/database.php';
+    require_once __DIR__ . '/../../includes/functions.php';
+    require_once __DIR__ . '/../../includes/auth.php';
+    
+    if (session_status() === PHP_SESSION_NONE) { session_start(); }
+    if (!isset($_SESSION['user_id'])) { die('Unauthorized'); }
+    
+    $projectId = $_GET['id'] ?? null;
+    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+    
+    if (!$project) { die('Project not found'); }
+    
+    // Prepare variables for partial
+    $overheadPct = $project['overhead_percentage'] ?? 10;
+    $isEditable = ($project['status'] === 'draft'); // Only draft is editable
+    
+    // AHSP sorting (match default logic)
+    $ahspSort = $_GET['ahsp_sort'] ?? 'name';
+    $ahspSortOrder = 'ASC';
+    switch ($ahspSort) {
+        case 'code': $ahspOrderBy = 'ahsp_code'; break;
+        case 'price_asc': $ahspOrderBy = 'unit_price'; $ahspSortOrder = 'ASC'; break;
+        case 'price_desc': $ahspOrderBy = 'unit_price'; $ahspSortOrder = 'DESC'; break;
+        case 'name': default: $ahspOrderBy = 'work_name'; break;
+    }
+    
+    $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY $ahspOrderBy $ahspSortOrder", [$projectId]);
+    
+    // Include the partial
+    include __DIR__ . '/tabs/partials/ahsp_rap_list.php';
+    exit;
 }
 
 // AJAX Handler for Weekly Progress Save
@@ -193,6 +374,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     header('Location: view.php?id=' . $projectId . '&tab=detail');
     exit;
+}
+
+// Include Master Data handlers for POST actions (must be before rab_rap_handlers)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $projectId = $_GET['id'] ?? null;
+    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+    if ($project && $projectId) {
+        include __DIR__ . '/tabs/master_data_handlers.php';
+    }
 }
 
 // Include RAB/RAP handlers for POST actions

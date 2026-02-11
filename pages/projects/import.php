@@ -639,6 +639,12 @@ function importItems($data, $projectId) {
                 [$projectId, $itemCode, $itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice]
             );
         }
+        
+        // Auto-sync to RAP Master Data
+        if (!empty($itemCode)) {
+            syncItemCodeRabToRap($projectId, $itemCode);
+        }
+        
         $count++;
     }
     return $count;
@@ -720,6 +726,16 @@ function importAhsp($data, $projectId) {
     // Recalculate unit_price for all affected AHSP
     foreach ($ahspCache as $ahspId) {
         recalculateAhspPriceById($ahspId);
+    }
+    
+    // Auto-sync all imported AHSP to RAP Master Data
+    foreach ($ahspCache as $ahspKey => $ahspId) {
+        // Extract ahspCode from the cache key (format: code|name|unit)
+        $keyParts = explode('|', $ahspKey);
+        $ahspCode = $keyParts[0] ?? '';
+        if (!empty($ahspCode)) {
+            syncAhspCodeRabToRap($projectId, $ahspCode);
+        }
     }
     
     return $count;

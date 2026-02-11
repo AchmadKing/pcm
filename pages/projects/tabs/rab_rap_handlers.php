@@ -34,17 +34,25 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 break;
                 
             case 'add_subcategory':
-                $categoryId = $_POST['category_id'];
+                $categoryId = $_POST['category_id'] ?? '';
+                if (empty($categoryId)) {
+                    throw new Exception('Kategori tidak valid!');
+                }
+                
                 $ahspId = $_POST['ahsp_id'];
                 $volumeRaw = $_POST['volume'] ?? '0';
                 $volume = floatval(str_replace(',', '.', str_replace('.', '', $volumeRaw)));
+                
+                // Validate category exists and belongs to this project
+                $category = dbGetRow("SELECT code FROM rab_categories WHERE id = ? AND project_id = ?", [$categoryId, $projectId]);
+                if (!$category) {
+                    throw new Exception('Kategori tidak ditemukan!');
+                }
                 
                 $ahsp = dbGetRow("SELECT * FROM project_ahsp WHERE id = ? AND project_id = ?", [$ahspId, $projectId]);
                 if (!$ahsp) {
                     throw new Exception('AHSP tidak ditemukan!');
                 }
-                
-                $category = dbGetRow("SELECT code FROM rab_categories WHERE id = ?", [$categoryId]);
                 $maxSubCode = dbGetRow("SELECT COUNT(*) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$categoryId]);
                 $nextCode = $category['code'] . '.' . $maxSubCode['next'];
                 $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$categoryId]);
