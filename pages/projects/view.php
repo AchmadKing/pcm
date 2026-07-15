@@ -19,26 +19,25 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'weekly_detail') {
         exit;
     }
     
-    // Get all approved requests for this week+subcategory (with full info)
     $requests = dbGetAll("
         SELECT req.id, req.request_number, req.request_date, req.description, req.status,
                req.target_week, req.week_number,
-               req.admin_notes, req.pm_notes,
-               req.pm_approved_at, req.approved_at,
+               req.admin_notes, req.approved_at, req.created_at,
+               req.pm_notes, req.pm_approved_at,
                u.full_name as created_by_name,
-               upm.full_name as pm_approved_by_name,
-               ua.full_name as approved_by_name
+               ua.full_name as approved_by_name,
+               upm.full_name as pm_approved_by_name
         FROM requests req
         JOIN request_items reqi ON reqi.request_id = req.id
         LEFT JOIN users u ON req.created_by = u.id
-        LEFT JOIN users upm ON req.pm_approved_by = upm.id
         LEFT JOIN users ua ON req.approved_by = ua.id
+        LEFT JOIN users upm ON req.pm_approved_by = upm.id
         WHERE req.project_id = ? 
           AND req.status = 'approved'
           AND (req.target_week = ? OR (req.target_week IS NULL AND req.week_number = ?))
           AND reqi.subcategory_id = ?
         GROUP BY req.id
-        ORDER BY req.request_date ASC
+        ORDER BY req.created_at ASC
     ", [$pId, $weekNum, $weekNum, $subId]);
     
     // For each request, get items, actuals, and attachments

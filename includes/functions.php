@@ -4,6 +4,9 @@
  * PCM - Project Cost Management System
  */
 
+// Set default timezone to Asia/Jakarta (WIB)
+date_default_timezone_set('Asia/Jakarta');
+
 /**
  * Format number as Indonesian Rupiah
  * @param float $number
@@ -85,6 +88,35 @@ function formatDate($date, $withDay = false) {
     }
     return "$d $month $year";
 }
+
+/**
+ * Format datetime to Indonesian format with time
+ * @param string $datetime
+ * @param bool $withDay
+ * @return string
+ */
+function formatDateTime($datetime, $withDay = false) {
+    if (empty($datetime)) return '-';
+    
+    $days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    $months = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
+               'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    
+    $timestamp = strtotime($datetime);
+    if (!$timestamp) return '-';
+    
+    $day = $days[date('w', $timestamp)];
+    $d = date('d', $timestamp);
+    $month = $months[intval(date('m', $timestamp))];
+    $year = date('Y', $timestamp);
+    $time = date('H:i', $timestamp);
+    
+    if ($withDay) {
+        return "$day, $d $month $year - $time WIB";
+    }
+    return "$d $month $year, $time WIB";
+}
+
 
 /**
  * Sanitize input

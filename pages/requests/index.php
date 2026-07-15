@@ -126,7 +126,7 @@ if (hasPermission('requests.approve')) {
                             <tr>
                                 <td><strong><?= sanitize($req['request_number']) ?></strong></td>
                                 <td><?= sanitize($req['project_name']) ?></td>
-                                <td><?= formatDate($req['request_date']) ?></td>
+                                <td><?= formatDateTime($req['created_at']) ?></td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
                                 <td><?= getStatusBadge($req['status']) ?></td>
                                 <?php if (hasPermission('requests.approve')): ?>

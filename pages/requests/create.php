@@ -369,9 +369,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         
         $pdo->commit();
         
+        setFlash('success', 'Pengajuan ' . $requestNumber . ' berhasil dikirim!');
+        
         echo json_encode([
             'success' => true, 
-            'message' => 'Pengajuan ' . $requestNumber . ' berhasil dibuat!',
+            'message' => 'Pengajuan ' . $requestNumber . ' berhasil dikirim!',
             'request_id' => $requestId,
             'redirect' => '../projects/view.php?id=' . $projectId . '&tab=requests'
         ]);

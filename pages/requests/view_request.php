@@ -56,6 +56,9 @@ $items = dbGetAll("
 
 $totalAmount = array_sum(array_column($items, 'total_price'));
 
+// Get request attachments
+$requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
+
 // Get actualization data if exists
 $actualData = null;
 $actualAttachments = [];
@@ -158,7 +161,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h5 class="header-title mb-3">Informasi Pengajuan</h5>
                 <table class="table table-sm mb-0">
                     <tr><th>No. Request</th><td><?= sanitize($request['request_number']) ?></td></tr>
-                    <tr><th>Tanggal</th><td><?= formatDate($request['request_date'], true) ?></td></tr>
+                    <tr><th>Tanggal Pengajuan</th><td><?= formatDateTime($request['created_at'], true) ?></td></tr>
                     <tr><th>Minggu Ke</th><td><?= $request['target_week'] ?? $request['week_number'] ?? '-' ?></td></tr>
                     <tr><th>Dibuat Oleh</th><td><?= sanitize($request['created_by_name']) ?></td></tr>
                     <?php if ($request['description']): ?>
@@ -171,26 +174,54 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h6 class="text-muted">Status Approval</h6>
                 <table class="table table-sm mb-0">
                     <tr><th>Status</th><td><?= getStatusBadge($request['status']) ?></td></tr>
+                    
+                    <!-- PM Review Info -->
                     <?php if ($request['pm_approved_by_name']): ?>
-                    <tr><th>Disetujui Oleh</th><td><?= sanitize($request['pm_approved_by_name']) ?></td></tr>
+                    <tr><th>PM Reviewer</th><td><?= sanitize($request['pm_approved_by_name']) ?></td></tr>
                     <?php endif; ?>
                     <?php if ($request['pm_approved_at']): ?>
-                    <tr><th>Tanggal Disetujui</th><td><?= formatDate($request['pm_approved_at'], true) ?></td></tr>
+                    <tr><th>Waktu Review PM</th><td><?= formatDateTime($request['pm_approved_at'], true) ?></td></tr>
                     <?php endif; ?>
                     <?php if ($request['pm_notes']): ?>
                     <tr><th>Catatan PM</th><td><?= sanitize($request['pm_notes']) ?></td></tr>
                     <?php endif; ?>
+                    
+                    <!-- Admin Final Approval Info -->
                     <?php if ($request['approved_by_name']): ?>
                     <tr><th>Diproses Admin</th><td><?= sanitize($request['approved_by_name']) ?></td></tr>
                     <?php endif; ?>
                     <?php if ($request['approved_at']): ?>
-                    <tr><th>Tanggal Diproses</th><td><?= formatDate($request['approved_at'], true) ?></td></tr>
+                    <tr><th>Waktu Final Approval</th><td><?= formatDateTime($request['approved_at'], true) ?></td></tr>
                     <?php endif; ?>
                     <?php if ($request['admin_notes']): ?>
                     <tr><th>Catatan Admin</th><td><?= sanitize($request['admin_notes']) ?></td></tr>
                     <?php endif; ?>
+                    
+                    <!-- Rejection Reason if any -->
+                    <?php if ($request['rejection_reason']): ?>
+                    <tr><th>Alasan Penolakan</th><td><?= sanitize($request['rejection_reason']) ?></td></tr>
+                    <?php endif; ?>
                 </table>
                 <?php endif; ?>
+            </div>
+        </div>
+        
+        <!-- PDF Export Card -->
+        <div class="card border-danger">
+            <div class="card-body">
+                <h6 class="header-title mb-3 text-danger"><i class="mdi mdi-file-pdf-box"></i> Ekspor Laporan PDF</h6>
+                <form action="export_request_pdf.php" method="GET" target="_blank">
+                    <input type="hidden" name="id" value="<?= $requestId ?>">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="include_receipts" value="1" id="includeReceipts" checked>
+                        <label class="form-check-label" for="includeReceipts" style="cursor: pointer;">
+                            Sertakan Nota / Lampiran
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-danger w-100">
+                        <i class="mdi mdi-download"></i> Unduh Laporan PDF
+                    </button>
+                </form>
             </div>
         </div>
         
@@ -216,6 +247,31 @@ require_once __DIR__ . '/../../includes/header.php';
                     </li>
                     <?php endforeach; ?>
                 </ul>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Request Attachments Card -->
+        <?php if (!empty($requestAttachments)): ?>
+        <div class="card border-secondary">
+            <div class="card-body">
+                <h6 class="header-title mb-2"><i class="mdi mdi-paperclip"></i> Lampiran Pengajuan</h6>
+                <div class="row g-2">
+                    <?php foreach ($requestAttachments as $att): ?>
+                    <div class="col-auto">
+                        <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
+                        <a href="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" target="_blank" title="<?= sanitize($att['original_name']) ?>">
+                            <img src="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" 
+                                 style="height: 60px; width: auto;" class="rounded border">
+                        </a>
+                        <?php else: ?>
+                        <a href="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" target="_blank" class="btn btn-outline-danger btn-sm" title="<?= sanitize($att['original_name']) ?>">
+                            <i class="mdi mdi-file-pdf-box text-danger"></i> PDF
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
             </div>
         </div>
         <?php endif; ?>

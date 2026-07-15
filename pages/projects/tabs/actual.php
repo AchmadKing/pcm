@@ -981,7 +981,7 @@ function renderRequestDetail(index) {
     html += '<h6 class="header-title mb-3"><i class="mdi mdi-information-outline text-info"></i> Informasi Pengajuan</h6>';
     html += '<table class="table table-sm mb-0">';
     html += '<tr><th style="width:40%">No. Request</th><td><code>' + escapeHtml(req.request_number || '-') + '</code></td></tr>';
-    html += '<tr><th>Tanggal</th><td>' + formatDateId(req.request_date) + '</td></tr>';
+    html += '<tr><th>Tanggal Pengajuan</th><td>' + formatDateTimeJs(req.created_at) + '</td></tr>';
     html += '<tr><th>Minggu Ke</th><td>' + (req.target_week || req.week_number || '-') + '</td></tr>';
     html += '<tr><th>Dibuat Oleh</th><td><i class="mdi mdi-account"></i> ' + escapeHtml(req.created_by_name || '-') + '</td></tr>';
     if (req.description) {
@@ -998,7 +998,7 @@ function renderRequestDetail(index) {
         html += '<tr><th>Disetujui Oleh</th><td>' + escapeHtml(req.pm_approved_by_name) + '</td></tr>';
     }
     if (req.pm_approved_at) {
-        html += '<tr><th>Tgl Disetujui</th><td>' + formatDateId(req.pm_approved_at) + '</td></tr>';
+        html += '<tr><th>Tgl Disetujui</th><td>' + formatDateTimeJs(req.pm_approved_at) + '</td></tr>';
     }
     if (req.pm_notes) {
         html += '<tr><th>Catatan PM</th><td>' + escapeHtml(req.pm_notes) + '</td></tr>';
@@ -1007,7 +1007,7 @@ function renderRequestDetail(index) {
         html += '<tr><th>Diproses Admin</th><td>' + escapeHtml(req.approved_by_name) + '</td></tr>';
     }
     if (req.approved_at) {
-        html += '<tr><th>Tgl Diproses</th><td>' + formatDateId(req.approved_at) + '</td></tr>';
+        html += '<tr><th>Tgl Diproses</th><td>' + formatDateTimeJs(req.approved_at) + '</td></tr>';
     }
     if (req.admin_notes) {
         html += '<tr><th>Catatan Admin</th><td>' + escapeHtml(req.admin_notes) + '</td></tr>';
@@ -1221,6 +1221,21 @@ function formatRupiahJs(number) {
 function formatNumberJs(number, decimals) {
     if (isNaN(number)) return '0';
     return Number(number).toLocaleString('id-ID', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+}
+
+function formatDateTimeJs(dateTimeStr) {
+    if (!dateTimeStr) return '-';
+    var parts = dateTimeStr.split(' ');
+    var datePart = parts[0];
+    var timePart = parts.length > 1 ? parts[1] : '';
+    
+    var formattedDate = formatDateId(datePart);
+    if (timePart) {
+        var timeParts = timePart.split(':');
+        var formattedTime = timeParts[0] + ':' + timeParts[1];
+        return formattedDate + ' - ' + formattedTime + ' WIB';
+    }
+    return formattedDate;
 }
 
 function formatDateId(dateStr) {

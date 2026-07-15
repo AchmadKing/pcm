@@ -27,233 +27,229 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $currentReq = dbGetRow("SELECT status, project_id FROM requests WHERE id = ?", [$reqId]);
         $currentStatus = $currentReq['status'] ?? '';
         
-        // PM APPROVAL: pending → pm_approved
-        if (!hasPermission('requests.approve')) {
-            if ($currentStatus !== 'pending') {
-                setFlash('error', 'Pengajuan ini tidak dalam status pending!');
+        if ($action === 'approve') {
+            $isAdmin = hasPermission('projects.edit');
+            
+            if ($isAdmin) {
+                if (!in_array($currentStatus, ['pending', 'pm_approved'])) {
+                    setFlash('error', 'Status pengajuan tidak valid untuk di-approve oleh Admin!');
+                    header('Location: approval.php');
+                    exit;
+                }
+            } else {
+                if ($currentStatus !== 'pending') {
+                    setFlash('error', 'Status pengajuan tidak valid untuk di-approve oleh PM!');
+                    header('Location: approval.php');
+                    exit;
+                }
+            }
+            
+            // Get target_week from the request (set by requester at creation)
+            $targetWeek = dbGetRow("SELECT target_week FROM requests WHERE id = ?", [$reqId])['target_week'] ?? null;
+            if (empty($targetWeek)) {
+                setFlash('error', 'Pengajuan ini belum memiliki minggu target!');
+                header('Location: approval.php?id=' . $reqId);
+                exit;
+            }
+            
+            if (!$isAdmin) {
+                // PM approval: set status to 'pm_approved'
+                dbExecute("UPDATE requests SET status = 'pm_approved', pm_notes = ?, pm_approved_by = ?, pm_approved_at = NOW() WHERE id = ?",
+                    [$notes, getCurrentUserId(), $reqId]);
+                setFlash('success', 'Pengajuan berhasil disetujui (PM Review) dan diteruskan ke Admin.');
                 header('Location: approval.php');
                 exit;
             }
             
-            if ($action === 'approve') {
-                $newStatus = 'pm_approved';
-                dbExecute("UPDATE requests SET status = ?, pm_notes = ?, pm_approved_by = ?, pm_approved_at = NOW() WHERE id = ?",
-                    [$newStatus, $notes, getCurrentUserId(), $reqId]);
-                setFlash('success', 'Pengajuan berhasil di-review dan disetujui PM! Menunggu approval Admin.');
-            } else {
-                // PM reject
-                dbExecute("UPDATE requests SET status = 'rejected', pm_notes = ?, pm_approved_by = ?, pm_approved_at = NOW() WHERE id = ?",
-                    [$notes, getCurrentUserId(), $reqId]);
-                setFlash('success', 'Pengajuan berhasil ditolak.');
+            $newStatus = 'approved';
+            
+            // Update request status with target_week and week_number
+            dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                [$newStatus, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+            
+            // Insert realization into weekly_progress using sequential filling
+            $projId = $currentReq['project_id'];
+            $projName = dbGetRow("SELECT name FROM projects WHERE id = ?", [$projId])['name'] ?? '';
+            
+            // Get project info for weekly ranges
+            $projInfo = dbGetRow("SELECT start_date, duration_days FROM projects WHERE id = ?", [$projId]);
+            $weekRanges = generateWeeklyRanges($projInfo['start_date'], $projInfo['duration_days']);
+            
+            // Find start/end dates for the selected week
+            $weekStart = null;
+            $weekEnd = null;
+            foreach ($weekRanges as $w) {
+                if ($w['week_number'] == $targetWeek) {
+                    $weekStart = $w['start'];
+                    $weekEnd = $w['end'];
+                    break;
+                }
             }
             
-            header('Location: approval.php');
-            exit;
-        }
-        
-        // ADMIN APPROVAL: pending/pm_approved → approved (with realization)
-        if (hasPermission('projects.edit')) {
-            if ($action === 'approve') {
-                if ($currentStatus !== 'pm_approved' && $currentStatus !== 'pending') {
-                    setFlash('error', 'Status pengajuan tidak valid untuk di-approve!');
-                    header('Location: approval.php');
-                    exit;
-                }
+            if ($weekStart && $weekEnd) {
+                // Get all items of the approved request with subcat_details
+                $approvedItems = dbGetAll("
+                    SELECT id, subcategory_id, subcat_details, item_code, item_type,
+                           unit_price, coefficient
+                    FROM request_items 
+                    WHERE request_id = ?
+                ", [$reqId]);
                 
-                // Get target_week from the request (set by requester at creation)
-                $targetWeek = dbGetRow("SELECT target_week FROM requests WHERE id = ?", [$reqId])['target_week'] ?? null;
-                if (empty($targetWeek)) {
-                    setFlash('error', 'Pengajuan ini belum memiliki minggu target!');
-                    header('Location: approval.php?id=' . $reqId);
-                    exit;
-                }
+                // Accumulate amounts per subcategory for weekly_progress
+                $subcatAmounts = [];
                 
-                $newStatus = 'approved';
-                
-                // Update request status with target_week and week_number
-                dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                    [$newStatus, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
-                
-                // Insert realization into weekly_progress using sequential filling
-                $projId = $currentReq['project_id'];
-                $projName = dbGetRow("SELECT name FROM projects WHERE id = ?", [$projId])['name'] ?? '';
-                
-                // Get project info for weekly ranges
-                $projInfo = dbGetRow("SELECT start_date, duration_days FROM projects WHERE id = ?", [$projId]);
-                $weekRanges = generateWeeklyRanges($projInfo['start_date'], $projInfo['duration_days']);
-                
-                // Find start/end dates for the selected week
-                $weekStart = null;
-                $weekEnd = null;
-                foreach ($weekRanges as $w) {
-                    if ($w['week_number'] == $targetWeek) {
-                        $weekStart = $w['start'];
-                        $weekEnd = $w['end'];
-                        break;
-                    }
-                }
-                
-                if ($weekStart && $weekEnd) {
-                    // Get all items of the approved request with subcat_details
-                    $approvedItems = dbGetAll("
-                        SELECT id, subcategory_id, subcat_details, item_code, item_type,
-                               unit_price, coefficient
-                        FROM request_items 
-                        WHERE request_id = ?
-                    ", [$reqId]);
+                foreach ($approvedItems as $item) {
+                    $itemCoef = floatval($item['coefficient']);
+                    $itemPrice = floatval($item['unit_price']);
+                    $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
                     
-                    // Accumulate amounts per subcategory for weekly_progress
-                    $subcatAmounts = [];
-                    
-                    foreach ($approvedItems as $item) {
-                        $itemCoef = floatval($item['coefficient']);
-                        $itemPrice = floatval($item['unit_price']);
-                        $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
+                    if (!empty($subcatDetails) && is_array($subcatDetails)) {
+                        // Sequential filling: distribute coefficient across pekerjaan in order
+                        $remaining = $itemCoef;
                         
-                        if (!empty($subcatDetails) && is_array($subcatDetails)) {
-                            // Sequential filling: distribute coefficient across pekerjaan in order
-                            $remaining = $itemCoef;
+                        foreach ($subcatDetails as $sd) {
+                            if ($remaining <= 0) break;
                             
-                            foreach ($subcatDetails as $sd) {
-                                if ($remaining <= 0) break;
-                                
-                                $subcatId = intval($sd['subcategory_id']);
-                                $sisaCapacity = floatval($sd['sisa'] ?? 0);
-                                
-                                // Recalculate current sisa from DB for accuracy
-                                $currentUsed = dbGetRow("
-                                    SELECT COALESCE(SUM(reqi2.coefficient), 0) as total_used
-                                    FROM request_items reqi2
-                                    JOIN requests r ON reqi2.request_id = r.id
-                                    WHERE reqi2.item_code = ?
-                                      AND reqi2.subcategory_id = ?
-                                      AND r.status = 'approved'
-                                      AND r.id != ?
-                                ", [$item['item_code'], $subcatId, $reqId]);
-                                
-                                $rapQty = floatval($sd['rap_qty'] ?? 0);
-                                $actualSisa = $rapQty - floatval($currentUsed['total_used'] ?? 0);
-                                if ($actualSisa < 0) $actualSisa = 0;
-                                
-                                // Fill this pekerjaan: take min(remaining, capacity)
-                                $fillAmount = min($remaining, $actualSisa);
-                                if ($fillAmount <= 0) continue;
-                                
-                                $amount = $fillAmount * $itemPrice;
-                                
-                                if (!isset($subcatAmounts[$subcatId])) {
-                                    $subcatAmounts[$subcatId] = 0;
-                                }
-                                $subcatAmounts[$subcatId] += $amount;
-                                
-                                $remaining -= $fillAmount;
-                            }
+                            $subcatId = intval($sd['subcategory_id']);
+                            $sisaCapacity = floatval($sd['sisa'] ?? 0);
                             
-                            // If there's still remaining (over-capacity), put into last subcategory
-                            if ($remaining > 0 && !empty($subcatDetails)) {
-                                $lastSubcatId = intval(end($subcatDetails)['subcategory_id']);
-                                $amount = $remaining * $itemPrice;
-                                if (!isset($subcatAmounts[$lastSubcatId])) {
-                                    $subcatAmounts[$lastSubcatId] = 0;
-                                }
-                                $subcatAmounts[$lastSubcatId] += $amount;
-                            }
-                        } else {
-                            // Fallback: no subcat_details, use primary subcategory_id
-                            $subcatId = intval($item['subcategory_id']);
-                            if ($subcatId) {
-                                $amount = $itemCoef * $itemPrice;
-                                if (!isset($subcatAmounts[$subcatId])) {
-                                    $subcatAmounts[$subcatId] = 0;
-                                }
-                                $subcatAmounts[$subcatId] += $amount;
-                            }
-                        }
-                    }
-                    
-                    // Calculate available remaining budget (total pool from all actualized requests)
-                    $sisaRows = dbGetAll("
-                        SELECT ra.id,
-                            GREATEST(ra.remaining_upah - ra.consumed_upah, 0) as avail_upah,
-                            GREATEST(ra.remaining_material - ra.consumed_material, 0) as avail_material,
-                            GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as avail_alat
-                        FROM request_actuals ra
-                        JOIN requests r ON ra.request_id = r.id
-                        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
-                        HAVING avail_upah > 0 OR avail_material > 0 OR avail_alat > 0
-                        ORDER BY ra.created_at ASC
-                    ", [$projId]);
-                    
-                    // Pool all remaining into one total (no per-category restriction)
-                    $totalAvailSisa = 0;
-                    foreach ($sisaRows as $sr) {
-                        $totalAvailSisa += floatval($sr['avail_upah']) + floatval($sr['avail_material']) + floatval($sr['avail_alat']);
-                    }
-                    
-                    // Deduction = min(total available sisa, total request amount)
-                    $totalRequestAmount = array_sum($subcatAmounts);
-                    $totalDeduction = min($totalAvailSisa, $totalRequestAmount);
-                    
-                    // Mark consumed in request_actuals (FIFO: consume from oldest first)
-                    $remainToConsume = $totalDeduction;
-                    foreach ($sisaRows as $sr) {
-                        if ($remainToConsume <= 0) break;
-                        
-                        $rowAvail = floatval($sr['avail_upah']) + floatval($sr['avail_material']) + floatval($sr['avail_alat']);
-                        $consumeFromRow = min($remainToConsume, $rowAvail);
-                        
-                        if ($consumeFromRow > 0) {
-                            // Distribute consumption proportionally across categories within this row
-                            $cUpah = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_upah']) / $rowAvail) : 0;
-                            $cMaterial = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_material']) / $rowAvail) : 0;
-                            $cAlat = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_alat']) / $rowAvail) : 0;
+                            // Recalculate current sisa from DB for accuracy
+                            $currentUsed = dbGetRow("
+                                SELECT COALESCE(SUM(reqi2.coefficient), 0) as total_used
+                                FROM request_items reqi2
+                                JOIN requests r ON reqi2.request_id = r.id
+                                WHERE reqi2.item_code = ?
+                                  AND reqi2.subcategory_id = ?
+                                  AND r.status = 'approved'
+                                  AND r.id != ?
+                            ", [$item['item_code'], $subcatId, $reqId]);
                             
-                            dbExecute("
-                                UPDATE request_actuals 
-                                SET consumed_upah = consumed_upah + ?,
-                                    consumed_material = consumed_material + ?,
-                                    consumed_alat = consumed_alat + ?
-                                WHERE id = ?
-                            ", [$cUpah, $cMaterial, $cAlat, $sr['id']]);
+                            $rapQty = floatval($sd['rap_qty'] ?? 0);
+                            $actualSisa = $rapQty - floatval($currentUsed['total_used'] ?? 0);
+                            if ($actualSisa < 0) $actualSisa = 0;
+                            
+                            // Fill this pekerjaan: take min(remaining, capacity)
+                            $fillAmount = min($remaining, $actualSisa);
+                            if ($fillAmount <= 0) continue;
+                            
+                            $amount = $fillAmount * $itemPrice;
+                            
+                            if (!isset($subcatAmounts[$subcatId])) {
+                                $subcatAmounts[$subcatId] = 0;
+                            }
+                            $subcatAmounts[$subcatId] += $amount;
+                            
+                            $remaining -= $fillAmount;
                         }
                         
-                        $remainToConsume -= $consumeFromRow;
-                    }
-                    
-                    // Insert/update weekly_progress per subcategory (with total sisa deduction)
-                    foreach ($subcatAmounts as $subcatId => $totalAmount) {
-                        if ($totalAmount <= 0) continue;
-                        
-                        // Proportionally deduct total sisa across all subcategories
-                        $netAmount = $totalAmount;
-                        if ($totalDeduction > 0 && $totalRequestAmount > 0) {
-                            $proportion = $totalAmount / $totalRequestAmount;
-                            $deductionForSubcat = $totalDeduction * $proportion;
-                            $netAmount = max(0, $totalAmount - $deductionForSubcat);
+                        // If there's still remaining (over-capacity), put into last subcategory
+                        if ($remaining > 0 && !empty($subcatDetails)) {
+                            $lastSubcatId = intval(end($subcatDetails)['subcategory_id']);
+                            $amount = $remaining * $itemPrice;
+                            if (!isset($subcatAmounts[$lastSubcatId])) {
+                                $subcatAmounts[$lastSubcatId] = 0;
+                            }
+                            $subcatAmounts[$lastSubcatId] += $amount;
                         }
+                    } else {
+                        // Fallback: no subcat_details, use primary subcategory_id
+                        $subcatId = intval($item['subcategory_id']);
+                        if ($subcatId) {
+                            $amount = $itemCoef * $itemPrice;
+                            if (!isset($subcatAmounts[$subcatId])) {
+                                $subcatAmounts[$subcatId] = 0;
+                            }
+                            $subcatAmounts[$subcatId] += $amount;
+                        }
+                    }
+                }
+                
+                // Calculate available remaining budget (total pool from all actualized requests)
+                $sisaRows = dbGetAll("
+                    SELECT ra.id,
+                        GREATEST(ra.remaining_upah - ra.consumed_upah, 0) as avail_upah,
+                        GREATEST(ra.remaining_material - ra.consumed_material, 0) as avail_material,
+                        GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as avail_alat
+                    FROM request_actuals ra
+                    JOIN requests r ON ra.request_id = r.id
+                    WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
+                    HAVING avail_upah > 0 OR avail_material > 0 OR avail_alat > 0
+                    ORDER BY ra.created_at ASC
+                ", [$projId]);
+                
+                // Pool all remaining into one total (no per-category restriction)
+                $totalAvailSisa = 0;
+                foreach ($sisaRows as $sr) {
+                    $totalAvailSisa += floatval($sr['avail_upah']) + floatval($sr['avail_material']) + floatval($sr['avail_alat']);
+                }
+                
+                // Deduction = min(total available sisa, total request amount)
+                $totalRequestAmount = array_sum($subcatAmounts);
+                $totalDeduction = min($totalAvailSisa, $totalRequestAmount);
+                
+                // Mark consumed in request_actuals (FIFO: consume from oldest first)
+                $remainToConsume = $totalDeduction;
+                foreach ($sisaRows as $sr) {
+                    if ($remainToConsume <= 0) break;
+                    
+                    $rowAvail = floatval($sr['avail_upah']) + floatval($sr['avail_material']) + floatval($sr['avail_alat']);
+                    $consumeFromRow = min($remainToConsume, $rowAvail);
+                    
+                    if ($consumeFromRow > 0) {
+                        // Distribute consumption proportionally across categories within this row
+                        $cUpah = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_upah']) / $rowAvail) : 0;
+                        $cMaterial = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_material']) / $rowAvail) : 0;
+                        $cAlat = $rowAvail > 0 ? $consumeFromRow * (floatval($sr['avail_alat']) / $rowAvail) : 0;
                         
                         dbExecute("
-                            INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_by)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ON DUPLICATE KEY UPDATE realization_amount = realization_amount + VALUES(realization_amount)
-                        ", [$projId, $subcatId, $targetWeek, $weekStart, $weekEnd, $netAmount, getCurrentUserId()]);
+                            UPDATE request_actuals 
+                            SET consumed_upah = consumed_upah + ?,
+                                consumed_material = consumed_material + ?,
+                                consumed_alat = consumed_alat + ?
+                            WHERE id = ?
+                        ", [$cUpah, $cMaterial, $cAlat, $sr['id']]);
                     }
+                    
+                    $remainToConsume -= $consumeFromRow;
                 }
                 
-                $deductionMsg = $totalDeduction > 0 ? ' (dipotong sisa anggaran ' . number_format($totalDeduction, 0, ',', '.') . ')' : '';
-                setFlash('success', 'Pengajuan berhasil disetujui dan tercatat di realisasi!' . $deductionMsg);
-                
-                // Store approved project info for navigation modal
-                $_SESSION['approved_project_id'] = $projId;
-                $_SESSION['approved_project_name'] = $projName;
-                
-            } else {
-                // Admin reject (can reject both pending and pm_approved)
-                $rejectionNotes = $notes;
-                dbExecute("UPDATE requests SET status = 'rejected', admin_notes = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                    [$rejectionNotes, getCurrentUserId(), $reqId]);
-                setFlash('success', 'Pengajuan berhasil ditolak.');
+                // Insert/update weekly_progress per subcategory (with total sisa deduction)
+                foreach ($subcatAmounts as $subcatId => $totalAmount) {
+                    if ($totalAmount <= 0) continue;
+                    
+                    // Proportionally deduct total sisa across all subcategories
+                    $netAmount = $totalAmount;
+                    if ($totalDeduction > 0 && $totalRequestAmount > 0) {
+                        $proportion = $totalAmount / $totalRequestAmount;
+                        $deductionForSubcat = $totalDeduction * $proportion;
+                        $netAmount = max(0, $totalAmount - $deductionForSubcat);
+                    }
+                    
+                    dbExecute("
+                        INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE realization_amount = realization_amount + VALUES(realization_amount)
+                    ", [$projId, $subcatId, $targetWeek, $weekStart, $weekEnd, $netAmount, getCurrentUserId()]);
+                }
             }
+            
+            $deductionMsg = $totalDeduction > 0 ? ' (dipotong sisa anggaran ' . number_format($totalDeduction, 0, ',', '.') . ')' : '';
+            setFlash('success', 'Pengajuan berhasil disetujui dan tercatat di realisasi!' . $deductionMsg);
+            
+            // Store approved project info for navigation modal
+            $_SESSION['approved_project_id'] = $projId;
+            $_SESSION['approved_project_name'] = $projName;
+            
+        } else {
+            if (!in_array($currentStatus, ['pending', 'pm_approved'])) {
+                setFlash('error', 'Status pengajuan tidak valid untuk ditolak!');
+                header('Location: approval.php');
+                exit;
+            }
+            $rejectionNotes = $notes;
+            dbExecute("UPDATE requests SET status = 'rejected', admin_notes = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                [$rejectionNotes, getCurrentUserId(), $reqId]);
+            setFlash('success', 'Pengajuan berhasil ditolak.');
         }
         
     } catch (Exception $e) {
@@ -265,13 +261,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get requests based on role
-// PM sees 'pending' requests, Admin sees 'pm_approved' requests (and can also reject 'pending')
-if (hasPermission('projects.edit')) {
-    $where = "req.status IN ('pending', 'pm_approved')";
-} else {
-    // PM only sees pending
-    $where = "req.status = 'pending'";
-}
+$isAdmin = hasPermission('projects.edit');
+$where = $isAdmin ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
 $params = [];
 if ($projectFilter) {
     $where .= " AND req.project_id = ?";
@@ -295,19 +286,12 @@ $projects = dbGetAll("SELECT id, name FROM projects WHERE status = 'on_progress'
 $selectedRequest = null;
 $selectedItems = [];
 if ($requestId) {
-    // PM can open pending, Admin can open pm_approved
-    if (hasPermission('projects.edit')) {
-        $statusFilter = "req.status IN ('pending', 'pm_approved')";
-    } else {
-        $statusFilter = "req.status = 'pending'";
-    }
+    $statusFilter = $isAdmin ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
     $selectedRequest = dbGetRow("
-        SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name,
-               upm.full_name as pm_approved_by_name
+        SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name
         FROM requests req
         LEFT JOIN projects p ON req.project_id = p.id
         LEFT JOIN users u ON req.created_by = u.id
-        LEFT JOIN users upm ON req.pm_approved_by = upm.id
         WHERE req.id = ? AND $statusFilter
     ", [$requestId]);
     
@@ -480,7 +464,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <span class="badge bg-info">PM Approved</span>
                                 <?php endif; ?>
                                 <br><small><?= sanitize($req['project_name']) ?></small>
-                                <br><small class="text-muted"><?= formatDate($req['request_date']) ?></small>
+                                <br><small class="text-muted"><?= formatDateTime($req['created_at']) ?></small>
                             </div>
                             <span class="badge bg-primary"><?= formatRupiah($req['total_amount'], false) ?></span>
                         </div>
@@ -515,7 +499,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     </div>
                     <div class="col-md-4">
                         <small class="text-muted">Tanggal</small>
-                        <p class="mb-0"><?= formatDate($selectedRequest['request_date'], true) ?></p>
+                        <p class="mb-0"><?= formatDateTime($selectedRequest['created_at'], true) ?></p>
                     </div>
                     <div class="col-md-4">
                         <small class="text-muted">Minggu Ke</small>
@@ -658,15 +642,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     </table>
                 </div>
             </div>
-                <?php if ($selectedRequest['status'] === 'pm_approved' && !empty($selectedRequest['pm_approved_by_name'])): ?>
-                <div class="alert alert-info mb-3">
-                    <h6 class="alert-heading mb-1"><i class="mdi mdi-check-decagram"></i> Disetujui PM</h6>
-                    <p class="mb-0"><strong><?= sanitize($selectedRequest['pm_approved_by_name']) ?></strong> - <?= formatDate($selectedRequest['pm_approved_at'] ?? '', true) ?></p>
-                    <?php if (!empty($selectedRequest['pm_notes'])): ?>
-                    <p class="mb-0 mt-1"><em><?= sanitize($selectedRequest['pm_notes']) ?></em></p>
-                    <?php endif; ?>
-                </div>
-                <?php endif; ?>
+
                 
                 <?php if ($availableRemaining['total'] > 0): ?>
                 <div class="alert alert-success mb-3">

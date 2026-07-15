@@ -344,7 +344,7 @@ $canManageTeam = ($project['status'] === 'on_progress');
                             ?>
                             <tr>
                                 <td><code><?= sanitize($req['request_number'] ?: 'REQ-' . $req['id']) ?></code></td>
-                                <td><?= formatDate($req['request_date']) ?></td>
+                                <td><?= formatDateTime($req['created_at']) ?></td>
                                 <td class="text-center"><?= $req['target_week'] ?? $req['week_number'] ?? '-' ?></td>
                                 <td><?= sanitize($req['description'] ?: '-') ?></td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
