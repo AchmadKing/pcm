@@ -1,0 +1,124 @@
+// 
+// Widgets.scss
+// 
+
+
+
+// activity widget
+
+.activity-wid {
+    margin-top: 8px;
+    margin-left: 16px;
+
+    .activity-list {
+        position: relative;
+        padding: 0 0 40px 30px;
+
+        &:before {
+            content: "";
+            border-left: 2px dashed rgba($primary, 0.25);
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            top: 32px
+        }
+
+        .activity-icon {
+            position: absolute;
+            left: -15px;
+            top: 0;
+            z-index: 9;
+        }
+
+        &:last-child {
+            padding-bottom: 0px;
+        }
+    }
+}
+
+.widget-chart {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+}
+
+// mini-stats
+
+.mini-stat-icon {
+    i {
+        font-size: 30px;
+        width: 58px;
+        height: 58px;
+        line-height: 58px;
+        text-align: center;
+        border-radius: 50%;
+        display: inline-block;
+    }
+}
+
+.dashboard-ct-chart {
+    .ct-grid {
+        stroke: rgba(0, 0, 0, 0.05);
+    }
+}
+
+
+#slider-1 {
+    height: 49px;
+}
+
+#slider-2 {
+    height: 49px;
+}
+
+/* Activity */
+
+.activity-feed {
+    list-style: none;
+
+    .feed-item {
+        position: relative;
+        padding-bottom: 30px;
+        padding-left: 30px;
+        border-left: 2px solid var(--#{$prefix}border-color);
+
+        &:after {
+            content: "";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: -11px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 6px solid $primary;
+            background-color: $white;
+        }
+    }
+}
+
+
+.activity-feed {
+    .feed-item {
+        &:last-child {
+            border-color: transparent;
+        }
+    }
+}
+
+// Friends Suggestions
+
+
+.suggestion-icon {
+    i {
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        color: $white;
+        display: inline-block;
+        text-align: center;
+        border-radius: 50%;
+        background-color: $primary;
+        font-size: 15px;
+    }
+}

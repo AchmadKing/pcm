@@ -1,0 +1,158 @@
+// 
+// Extras pages.scss
+//
+
+
+// pricing
+.pricing-box {
+    padding: 30px;
+    position: relative;
+
+    .pricing-icon {
+        i {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            text-align: center;
+            color: $white;
+            font-size: 24px;
+            line-height: 56px;
+            top: -25px;
+            position: absolute;
+            display: inline-block;
+            margin: 0 auto;
+            left: 0px;
+            right: 0px;
+        }
+    }
+
+    .pricing-features {
+        padding-left: 20px;
+    }
+
+    .pricing-plan {
+        sup {
+            font-size: 26px;
+            position: relative;
+            top: -18px;
+        }
+    }
+
+    .pricing-border {
+        border-top: 1px solid var(--#{$prefix}border-color);
+        margin: 0 auto;
+        border-bottom: 1px solid var(--#{$prefix}border-color);
+        padding: 5px;
+    }
+
+    .pricing-features {
+        padding-left: 20px;
+    }
+}
+
+/*********************
+    Faqs
+**********************/ 
+
+.faq-nav-tabs{
+    .nav-item{
+        margin: 0px 8px;
+    }
+    .nav-link{
+        text-align: center;
+        margin-bottom: 8px;
+        border: 2px solid var(--#{$prefix}border-color);
+        color: var(--#{$prefix}body-color);
+        .nav-icon{
+            font-size: 40px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        &.active{
+            border-color: $primary;
+            background-color: transparent;
+            color: var(--#{$prefix}body-color);
+
+            .nav-icon{
+                color: $primary;
+            }
+        }
+    }
+}
+
+.text-error{
+    font-size: 120px;
+    @media (max-width: 575.98px) {
+        font-size: 86px;
+    }
+}
+
+.error-text{
+    color: $danger;
+    position: relative;
+
+    .error-img{
+        position: absolute;
+        width: 120px;
+        left: -15px;
+        right: 0;
+        bottom: 47px;
+
+        @media (max-width: 575.98px) {
+            width: 86px;
+            left: -12px;
+            bottom: 38px;
+        }
+    }
+}
+
+
+// log in
+
+.accountbg {
+    background: url("../images/restaurant.png");
+    position: absolute;
+    background-position: center center;
+    height: 100%;
+    width: 100%;
+    top: 0;
+}
+
+.wrapper-page {
+    margin: 7.5% auto;
+    width: 420px;
+    position: relative;
+}
+
+@media (max-width: 767px) {
+    .wrapper-page {
+        width: 90%;
+    }
+}
+
+
+// ERROR PAGE
+
+.error-bg {
+    background: url("../images/error.png");
+    position: absolute;
+    background-position: center center;
+    height: 100%;
+    width: 100%;
+    top: 0;
+}
+
+.error-page {
+    text-transform: uppercase;
+    background: repeating-linear-gradient(45deg,
+            $primary ,
+            $primary 10px,
+            $success 10px,
+            $success 20px);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 110px;
+    line-height: .7;
+    position: relative;
+}

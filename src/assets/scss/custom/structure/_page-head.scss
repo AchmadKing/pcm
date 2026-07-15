@@ -1,0 +1,25 @@
+// 
+// Page-title
+// 
+
+.page-title-box {
+    padding-bottom: $grid-gutter-width;
+
+    .breadcrumb {
+        background-color: transparent;
+        padding: 0;
+    }
+
+    h4 {
+        font-size: 15px;
+        text-transform: uppercase;
+        font-weight: 600;
+    }
+}
+
+.home-btn {
+    position: absolute;
+    top: 22px;
+    left: 22px;
+    z-index: 1;
+}

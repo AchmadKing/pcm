@@ -1,0 +1,518 @@
+Nama Utama;Jenis;Kategori;Satuan;Harga
+Pekerja;;upah;OH;75000
+Tukang Batu;;upah;OH;85000
+Tukang Kayu;;upah;OH;85000
+Tukang Besi;;upah;OH;90000
+Tukang Cat;;upah;OH;85000
+Tukang Listrik;;upah;OH;95000
+Tukang Pipa;;upah;OH;90000
+Tukang Las;;upah;OH;100000
+Tukang Plester;;upah;OH;85000
+Tukang Keramik;;upah;OH;90000
+Tukang Aluminium;;upah;OH;90000
+Tukang Gypsum;;upah;OH;85000
+Kepala Tukang;;upah;OH;95000
+Mandor;;upah;OH;105000
+Surveyor;;upah;OH;150000
+Operator Alat Berat;;upah;OH;175000
+Supir Truk;;upah;OH;125000
+Helper;;upah;OH;70000
+Teknisi Listrik;;upah;OH;150000
+Teknisi AC;;upah;OH;150000
+Pengawas Lapangan;;upah;OH;200000
+Site Manager;;upah;OH;350000
+Safety Officer;;upah;OH;175000
+Tukang Waterproofing;;upah;OH;95000
+Tukang Scaffolding;;upah;OH;90000
+Tukang Rangka Atap;;upah;OH;95000
+Tukang Plafon;;upah;OH;85000
+Tukang Kaca;;upah;OH;90000
+Tukang Marmer;;upah;OH;100000
+Tukang Granit;;upah;OH;100000
+Semen Portland;;material;zak;65000
+Semen Putih;;material;zak;85000
+Semen Warna;;material;zak;95000
+Semen Instan;;material;zak;75000
+Pasir;Urug;material;m3;154500
+Pasir;Pasang;material;m3;250000
+Pasir;Beton;material;m3;300000
+Pasir;Halus;material;m3;280000
+Pasir;Kasar;material;m3;200000
+Kerikil;Koral;material;m3;206000
+Kerikil;Split 1-2;material;m3;299000
+Kerikil;Split 2-3;material;m3;285000
+Kerikil;Split 0.5-1;material;m3;304000
+Batu Kali;Belah 20-30;material;m3;300000
+Batu Kali;Pecah 15/20;material;m3;185000
+Batu Kali;Pecah 10/15;material;m3;155000
+Batu Kali;Pecah 5/7;material;m3;135400
+Batu Kali;Pecah 3/5;material;m3;150000
+Bata Merah;Press;material;bh;850
+Bata Merah;Biasa;material;bh;650
+Batako;;material;bh;2500
+Bata Ringan;Hebel 10cm;material;bh;8500
+Bata Ringan;Hebel 7.5cm;material;bh;7000
+Hollow Brick;;material;bh;3500
+Roster Beton;;material;bh;15000
+Besi Beton;D8;material;kg;12500
+Besi Beton;D10;material;kg;12500
+Besi Beton;D12;material;kg;12500
+Besi Beton;D13;material;kg;12500
+Besi Beton;D16;material;kg;12500
+Besi Beton;D19;material;kg;12500
+Besi Beton;D22;material;kg;12500
+Besi Beton;D25;material;kg;12500
+Besi Beton;D29;material;kg;12800
+Besi Beton;D32;material;kg;12800
+Kawat Bendrat;;material;kg;18000
+Kawat Ayam;;material;roll;85000
+Wire Mesh;M6;material;lbr;175000
+Wire Mesh;M8;material;lbr;285000
+Wire Mesh;M10;material;lbr;425000
+Kayu Bekisting;5/7;material;m3;3500000
+Kayu Bekisting;6/12;material;m3;4000000
+Kayu Kaso;5/7;material;btg;35000
+Kayu Usuk;4/6;material;btg;28000
+Kayu Reng;2/3;material;btg;12000
+Kayu Papan;2/20;material;lbr;45000
+Kayu Papan;3/30;material;lbr;85000
+Plywood;9mm;material;lbr;95000
+Plywood;12mm;material;lbr;125000
+Plywood;18mm;material;lbr;175000
+Multiplex;9mm;material;lbr;85000
+Multiplex;12mm;material;lbr;115000
+Multiplex;18mm;material;lbr;165000
+Triplex;4mm;material;lbr;55000
+Triplex;6mm;material;lbr;72000
+MDF Board;9mm;material;lbr;95000
+MDF Board;12mm;material;lbr;125000
+MDF Board;18mm;material;lbr;175000
+Blockboard;18mm;material;lbr;195000
+Partikel Board;18mm;material;lbr;145000
+Paku;2 inch;material;kg;18000
+Paku;3 inch;material;kg;18000
+Paku;4 inch;material;kg;18000
+Paku;5 inch;material;kg;18000
+Paku Beton;;material;kg;25000
+Paku Payung;;material;kg;22000
+Paku Seng;;material;kg;20000
+Sekrup;1 inch;material;bks;15000
+Sekrup;1.5 inch;material;bks;18000
+Sekrup;2 inch;material;bks;22000
+Angkur Baut;M10;material;bh;3500
+Angkur Baut;M12;material;bh;5000
+Angkur Baut;M16;material;bh;8500
+Dynabolt;M10;material;bh;8500
+Dynabolt;M12;material;bh;12000
+Fischer;S6;material;bh;350
+Fischer;S8;material;bh;500
+Fischer;S10;material;bh;750
+Genteng Metal;Standard;material;lbr;45000
+Genteng Metal;Pasir;material;lbr;55000
+Genteng Keramik;;material;bh;8500
+Genteng Beton;Flat;material;bh;6500
+Genteng Beton;Bergelombang;material;bh;7000
+Genteng Tanah Liat;;material;bh;2500
+Asbes;Gelombang Besar;material;lbr;85000
+Asbes;Gelombang Kecil;material;lbr;65000
+Seng BJLS;0.3mm;material;lbr;55000
+Seng BJLS;0.4mm;material;lbr;72000
+Seng Gelombang;;material;lbr;45000
+Spandek;0.3mm;material;m2;65000
+Spandek;0.4mm;material;m2;85000
+Spandek;0.5mm;material;m2;105000
+Polycarbonate;6mm;material;lbr;285000
+Polycarbonate;10mm;material;lbr;425000
+Atap Bitumen;;material;lbr;95000
+Nok Genteng Metal;;material;m;35000
+Wuwung Genteng;;material;bh;12000
+Flashing;Aluminium;material;m;45000
+Talang;PVC 4 inch;material;m;35000
+Talang;Seng;material;m;55000
+Pipa Talang;PVC 3 inch;material;m;25000
+Rangka Atap Baja Ringan;C75;material;m;35000
+Rangka Atap Baja Ringan;C100;material;m;45000
+Reng Baja Ringan;;material;m;18000
+Hollow Galvalum;2x4;material;m;28000
+Hollow Galvalum;4x4;material;m;38000
+Hollow Galvalum;4x6;material;m;48000
+Hollow Galvalum;5x5;material;m;52000
+Hollow Besi;2x4;material;m;35000
+Hollow Besi;4x4;material;m;55000
+Hollow Besi;4x6;material;m;72000
+Besi WF;100x50;material;kg;14500
+Besi WF;150x75;material;kg;14500
+Besi WF;200x100;material;kg;14500
+Besi Siku;40x40x4;material;m;38000
+Besi Siku;50x50x5;material;m;55000
+Besi Siku;60x60x6;material;m;75000
+Besi Siku;75x75x8;material;m;115000
+Besi UNP;80;material;m;95000
+Besi UNP;100;material;m;125000
+Besi UNP;120;material;m;155000
+Besi Plat;2mm;material;lbr;285000
+Besi Plat;3mm;material;lbr;425000
+Besi Plat;4mm;material;lbr;565000
+Besi Plat;5mm;material;lbr;705000
+Besi Plat;6mm;material;lbr;845000
+Keramik Lantai;30x30;material;m2;45000
+Keramik Lantai;40x40;material;m2;55000
+Keramik Lantai;50x50;material;m2;75000
+Keramik Lantai;60x60;material;m2;95000
+Keramik Dinding;20x25;material;m2;55000
+Keramik Dinding;25x40;material;m2;65000
+Keramik Dinding;30x60;material;m2;85000
+Granit Tile;60x60;material;m2;185000
+Granit Tile;80x80;material;m2;225000
+Granit Alam;;material;m2;450000
+Marmer Lokal;;material;m2;350000
+Marmer Import;;material;m2;850000
+Homogenous Tile;60x60;material;m2;125000
+Homogenous Tile;80x80;material;m2;165000
+Vinyl Flooring;;material;m2;95000
+Parquet Kayu;;material;m2;285000
+Parquet Laminate;;material;m2;145000
+Karpet Tile;;material;m2;175000
+Batu Alam;Andesit;material;m2;185000
+Batu Alam;Candi;material;m2;225000
+Batu Alam;Susun Sirih;material;m2;165000
+Batu Paras;;material;m2;145000
+Keramik Roman;60x60;material;m2;105000
+Keramik Roman;80x80;material;m2;145000
+Semen Nat;;material;kg;15000
+Semen Nat;Epoxy;material;kg;85000
+Lem Keramik;;material;zak;55000
+Lem Bata Ringan;;material;zak;75000
+Waterproofing;Membrane;material;m2;125000
+Waterproofing;Coating;material;kg;85000
+Cat Dasar;Alkali Resisting;material;kg;55000
+Cat Interior;;material;kg;65000
+Cat Exterior;;material;kg;85000
+Cat Minyak;;material;kg;75000
+Cat Besi;;material;kg;95000
+Cat Kayu;;material;kg;85000
+Cat Epoxy;;material;kg;185000
+Plamir Tembok;;material;kg;25000
+Dempul Kayu;;material;kg;45000
+Thinner;;material;ltr;35000
+Kuas;2 inch;material;bh;12000
+Kuas;3 inch;material;bh;18000
+Kuas;4 inch;material;bh;25000
+Roller Cat;;material;set;35000
+Amplas;Halus;material;lbr;3500
+Amplas;Sedang;material;lbr;3000
+Amplas;Kasar;material;lbr;2500
+Gypsum Board;9mm;material;lbr;65000
+Gypsum Board;12mm;material;lbr;85000
+Kalsiboard;4mm;material;lbr;55000
+Kalsiboard;6mm;material;lbr;72000
+GRC Board;6mm;material;lbr;85000
+GRC Board;8mm;material;lbr;105000
+List Gypsum;;material;m;15000
+Rangka Plafon;Metal Furing;material;m;18000
+Hollow Plafon;2x4;material;m;22000
+Hollow Plafon;4x4;material;m;32000
+Pintu Panel Kayu;80x210;material;unit;850000
+Pintu Panel Kayu;90x210;material;unit;950000
+Pintu Panil Kaca;90x210;material;unit;1250000
+Pintu Aluminium;90x210;material;unit;1450000
+Pintu PVC;70x200;material;unit;285000
+Pintu PVC;80x200;material;unit;325000
+Pintu Kaca Frameless;90x210;material;unit;2500000
+Pintu Folding;;material;m2;450000
+Pintu Harmonika;;material;m2;550000
+Pintu Rolling Door;Manual;material;m2;450000
+Pintu Rolling Door;Elektrik;material;m2;850000
+Pintu Besi;;material;unit;1850000
+Kusen Kayu;5/10;material;m;85000
+Kusen Kayu;6/12;material;m;105000
+Kusen Aluminium;3 inch;material;m;95000
+Kusen Aluminium;4 inch;material;m;125000
+Jendela Aluminium;60x120;material;unit;450000
+Jendela Aluminium;80x120;material;unit;550000
+Jendela Aluminium;100x150;material;unit;750000
+Jendela Nako;60x60;material;unit;285000
+Kaca Bening;5mm;material;m2;95000
+Kaca Bening;8mm;material;m2;145000
+Kaca Riben;5mm;material;m2;125000
+Kaca Riben;8mm;material;m2;185000
+Kaca Tempered;8mm;material;m2;285000
+Kaca Tempered;10mm;material;m2;385000
+Kaca Tempered;12mm;material;m2;485000
+Engsel Pintu;4 inch;material;set;45000
+Engsel Jendela;3 inch;material;set;35000
+Handle Pintu;;material;set;125000
+Kunci Pintu;;material;set;185000
+Kunci Silinder;;material;set;145000
+Door Closer;;material;unit;285000
+Floor Hinge;;material;unit;485000
+Door Stop;;material;bh;25000
+Grendel Pintu;;material;bh;35000
+Espagnolette;;material;set;85000
+Closet Duduk;Standard;material;unit;850000
+Closet Duduk;Premium;material;unit;1850000
+Closet Jongkok;;material;unit;185000
+Bidet;;material;unit;450000
+Wastafel;Pedestal;material;unit;650000
+Wastafel;Counter;material;unit;850000
+Wastafel;Wall Hung;material;unit;950000
+Bathtub;Standard;material;unit;2500000
+Bathtub;Whirlpool;material;unit;8500000
+Shower Set;;material;set;450000
+Rain Shower;;material;set;850000
+Kran Air;Standar;material;bh;85000
+Kran Air;Premium;material;bh;185000
+Kran Shower;;material;bh;185000
+Jet Spray;;material;unit;125000
+Floor Drain;;material;bh;45000
+Afur;Wastafel;material;bh;55000
+Afur;Bak Cuci;material;bh;45000
+Cermin Kamar Mandi;;material;unit;285000
+Rak Sabun;;material;bh;65000
+Tempat Tissue;;material;bh;55000
+Tempat Sikat Gigi;;material;bh;45000
+Pipa PVC;0.5 inch;material;m;8500
+Pipa PVC;0.75 inch;material;m;12000
+Pipa PVC;1 inch;material;m;18000
+Pipa PVC;1.25 inch;material;m;25000
+Pipa PVC;1.5 inch;material;m;32000
+Pipa PVC;2 inch;material;m;45000
+Pipa PVC;2.5 inch;material;m;58000
+Pipa PVC;3 inch;material;m;75000
+Pipa PVC;4 inch;material;m;95000
+Pipa PVC;6 inch;material;m;185000
+Pipa PVC;8 inch;material;m;285000
+Fitting PVC;Elbow;material;bh;8500
+Fitting PVC;Tee;material;bh;12000
+Fitting PVC;Socket;material;bh;5500
+Fitting PVC;Reducer;material;bh;8500
+Fitting PVC;Y Branch;material;bh;18000
+Pipa GIP;0.5 inch;material;m;25000
+Pipa GIP;0.75 inch;material;m;32000
+Pipa GIP;1 inch;material;m;45000
+Pipa GIP;1.5 inch;material;m;65000
+Pipa GIP;2 inch;material;m;95000
+Ball Valve;0.5 inch;material;bh;35000
+Ball Valve;0.75 inch;material;bh;45000
+Ball Valve;1 inch;material;bh;65000
+Gate Valve;1 inch;material;bh;125000
+Gate Valve;2 inch;material;bh;225000
+Check Valve;1 inch;material;bh;85000
+Check Valve;2 inch;material;bh;145000
+Water Meter;;material;bh;285000
+Tandon Air;500 ltr;material;unit;650000
+Tandon Air;1000 ltr;material;unit;1250000
+Tandon Air;2000 ltr;material;unit;2250000
+Tandon Air;5000 ltr;material;unit;5500000
+Pompa Air;125 watt;material;unit;450000
+Pompa Air;250 watt;material;unit;750000
+Pompa Air;375 watt;material;unit;1050000
+Pompa Celup;;material;unit;650000
+Septictank Biotech;1000 ltr;material;unit;3500000
+Septictank Biotech;2000 ltr;material;unit;5500000
+Septictank Biotech;3000 ltr;material;unit;7500000
+Bak Kontrol;30x30;material;unit;125000
+Bak Kontrol;40x40;material;unit;185000
+Bak Kontrol;50x50;material;unit;245000
+Sumur Resapan;;material;unit;1850000
+Kabel NYA;1.5mm;material;m;3500
+Kabel NYA;2.5mm;material;m;5500
+Kabel NYA;4mm;material;m;8500
+Kabel NYY;2x2.5mm;material;m;12500
+Kabel NYY;2x4mm;material;m;18500
+Kabel NYY;3x2.5mm;material;m;18500
+Kabel NYY;3x4mm;material;m;25500
+Kabel NYY;4x4mm;material;m;32500
+Kabel NYY;4x6mm;material;m;45500
+Kabel NYY;4x10mm;material;m;72500
+Kabel NYFGBY;4x10mm;material;m;125000
+Kabel NYFGBY;4x16mm;material;m;185000
+Konduit PVC;16mm;material;m;5500
+Konduit PVC;20mm;material;m;7500
+Konduit PVC;25mm;material;m;9500
+Konduit Besi;16mm;material;m;25000
+Konduit Besi;20mm;material;m;32000
+Cable Tray;100mm;material;m;85000
+Cable Tray;200mm;material;m;125000
+Cable Tray;300mm;material;m;165000
+MCB;1 Phase 6A;material;bh;45000
+MCB;1 Phase 10A;material;bh;45000
+MCB;1 Phase 16A;material;bh;48000
+MCB;1 Phase 20A;material;bh;52000
+MCB;1 Phase 25A;material;bh;55000
+MCB;1 Phase 32A;material;bh;60000
+MCB;3 Phase 20A;material;bh;145000
+MCB;3 Phase 32A;material;bh;165000
+MCB;3 Phase 50A;material;bh;195000
+MCB;3 Phase 63A;material;bh;225000
+MCCB;100A;material;bh;650000
+MCCB;160A;material;bh;950000
+MCCB;250A;material;bh;1450000
+ELCB;25A;material;bh;285000
+ELCB;40A;material;bh;395000
+Panel Box;4 Way;material;unit;185000
+Panel Box;8 Way;material;unit;285000
+Panel Box;12 Way;material;unit;385000
+Panel Listrik;Utama;material;unit;8500000
+Panel Listrik;Sub;material;unit;3500000
+Stop Kontak;Standard;material;bh;25000
+Stop Kontak;CP;material;bh;45000
+Stop Kontak;Arde;material;bh;35000
+Stop Kontak;AC;material;bh;85000
+Saklar;Single;material;bh;25000
+Saklar;Double;material;bh;35000
+Saklar;Triple;material;bh;45000
+Saklar;Dimmer;material;bh;125000
+Saklar;Hotel;material;bh;85000
+Fitting Lampu;E27;material;bh;15000
+Fitting Lampu;Downlight;material;bh;45000
+Lampu LED;5W;material;bh;25000
+Lampu LED;7W;material;bh;32000
+Lampu LED;9W;material;bh;38000
+Lampu LED;12W;material;bh;45000
+Lampu LED;15W;material;bh;55000
+Lampu LED;18W;material;bh;65000
+Lampu LED;24W;material;bh;85000
+Lampu Downlight;5W;material;bh;55000
+Lampu Downlight;7W;material;bh;65000
+Lampu Downlight;9W;material;bh;75000
+Lampu Downlight;12W;material;bh;85000
+Lampu Panel;18W;material;bh;125000
+Lampu Panel;24W;material;bh;155000
+Lampu Panel;36W;material;bh;225000
+Lampu TL;18W;material;bh;85000
+Lampu TL;36W;material;bh;125000
+Armature TL;1x18W;material;unit;125000
+Armature TL;2x18W;material;unit;185000
+Armature TL;1x36W;material;unit;155000
+Armature TL;2x36W;material;unit;235000
+Lampu Emergency;;material;unit;185000
+Lampu Exit Sign;;material;unit;145000
+Lampu Taman;;material;unit;285000
+Lampu Sorot;50W;material;unit;185000
+Lampu Sorot;100W;material;unit;285000
+Lampu Sorot;200W;material;unit;485000
+AC Split;0.5 PK;material;unit;3500000
+AC Split;0.75 PK;material;unit;4250000
+AC Split;1 PK;material;unit;4850000
+AC Split;1.5 PK;material;unit;6250000
+AC Split;2 PK;material;unit;8500000
+AC Cassette;2 PK;material;unit;12500000
+AC Cassette;3 PK;material;unit;18500000
+AC Cassette;5 PK;material;unit;28500000
+AC Standing Floor;5 PK;material;unit;35000000
+Pipa AC;1/4 + 3/8;material;m;45000
+Pipa AC;1/4 + 1/2;material;m;55000
+Pipa AC;1/4 + 5/8;material;m;65000
+Bracket AC;;material;set;85000
+Ducting AC;;material;m2;185000
+Exhaust Fan;8 inch;material;unit;185000
+Exhaust Fan;10 inch;material;unit;245000
+Exhaust Fan;12 inch;material;unit;325000
+Exhaust Fan;Ceiling;material;unit;285000
+Kipas Angin;Dinding;material;unit;285000
+Kipas Angin;Plafon;material;unit;485000
+Fire Alarm;Detector;material;unit;285000
+Fire Alarm;Sounder;material;unit;225000
+Fire Alarm;Panel;material;unit;4500000
+APAR;3 kg;material;unit;285000
+APAR;6 kg;material;unit;485000
+Hydrant Box;;material;unit;1250000
+Hydrant Pillar;;material;unit;2850000
+Sprinkler Head;;material;unit;125000
+Tangga Besi;Prefab;material;m;450000
+Railing Tangga;Stainless;material;m;550000
+Railing Tangga;Besi Tempa;material;m;450000
+Railing Tangga;Kaca;material;m;850000
+Railing Balkon;Stainless;material;m;650000
+Railing Balkon;Besi;material;m;450000
+Canopy Kaca;;material;m2;850000
+Canopy Polycarbonate;;material;m2;450000
+Canopy Spandek;;material;m2;350000
+Flag Pole;;material;unit;2500000
+Teralis Jendela;;material;m2;350000
+Pagar BRC;;material;m2;185000
+Pagar Besi Hollow;;material;m2;450000
+Listplank Kalsiboard;;material;m;125000
+Sunlouvre;;material;m2;450000
+Fasad ACP;;material;m2;550000
+Kanstin;Precast;material;m;45000
+Grass Block;;material;m2;125000
+Paving Block;6cm;material;m2;85000
+Paving Block;8cm;material;m2;105000
+Batu Bata Expose;;material;m2;185000
+Molen;350 ltr;alat;jam;25000
+Molen;500 ltr;alat;jam;35000
+Vibrator Beton;;alat;jam;20000
+Pompa Beton;;alat;jam;350000
+Concrete Pump;;alat;jam;750000
+Excavator;PC 75;alat;jam;450000
+Excavator;PC 120;alat;jam;550000
+Excavator;PC 200;alat;jam;750000
+Backhoe Loader;;alat;jam;450000
+Wheel Loader;;alat;jam;450000
+Bulldozer;D6;alat;jam;650000
+Roller;8 ton;alat;jam;350000
+Roller;10 ton;alat;jam;450000
+Stamper;;alat;jam;45000
+Plate Compactor;;alat;jam;55000
+Hand Tractor;;alat;jam;85000
+Dump Truck;6 m3;alat;jam;185000
+Dump Truck;10 m3;alat;jam;250000
+Trailer;;alat;jam;185000
+Pick Up;;alat;jam;85000
+Crane Mobile;25 ton;alat;jam;850000
+Crane Mobile;50 ton;alat;jam;1250000
+Tower Crane;;alat;hari;4500000
+Scaffolding;Standard;alat;set;15000
+Scaffolding;Frame;alat;set;25000
+Lift Barang;;alat;hari;450000
+Theodolite;;alat;hari;185000
+Waterpass;;alat;hari;85000
+Bar Bender;;alat;jam;25000
+Bar Cutter;;alat;jam;25000
+Welding Machine;Arc;alat;jam;35000
+Welding Machine;MIG;alat;jam;55000
+Welding Machine;TIG;alat;jam;75000
+Grinding Machine;;alat;jam;15000
+Cutting Machine;;alat;jam;15000
+Drill Machine;;alat;jam;15000
+Jack Hammer;;alat;jam;45000
+Breaker;;alat;jam;75000
+Genset;10 KVA;alat;jam;85000
+Genset;25 KVA;alat;jam;125000
+Genset;50 KVA;alat;jam;185000
+Genset;100 KVA;alat;jam;285000
+Pompa Submersible;;alat;jam;35000
+Dewatering Pump;;alat;jam;55000
+Sandblasting;;alat;jam;125000
+Airless Spray;;alat;jam;45000
+Power Sprayer;;alat;jam;25000
+Chain Block;1 ton;alat;jam;15000
+Chain Block;3 ton;alat;jam;25000
+Chain Block;5 ton;alat;jam;35000
+Forklift;2.5 ton;alat;jam;185000
+Forklift;5 ton;alat;jam;285000
+Pasir Silika;;material;kg;8500
+Sikadur;;material;kg;185000
+Sikagrout;;material;kg;125000
+Sikaflex;;material;tube;85000
+Silicone Sealant;;material;tube;45000
+Foam Sealant;;material;kaleng;75000
+Expansion Joint;;material;m;125000
+Waterstop PVC;;material;m;85000
+Bentonite;;material;kg;25000
+Kawat Bronjong;;material;m3;350000
+Geotextile;;material;m2;18500
+Geomembrane;;material;m2;45000
+Gabion Box;;material;bh;185000
+Lem PVC;;material;kaleng;35000
+Bracket Pipa;;material;bh;8500
+T-dus;;material;bh;3500
+Isolasi;;material;roll;15000
+Bracket Talang;;material;bh;12000
+Welding Stainless;;material;titik;25000
+Grounding;;material;set;450000
+Ball Valve;2 inch;material;bh;185000
+Fitting GIP;Elbow;material;bh;45000
+Fitting GIP;Tee;material;bh;55000

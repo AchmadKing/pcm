@@ -1,0 +1,69 @@
+@@include("partials/main.html")
+
+<head>
+
+    @@include("partials/title-meta.html", {"title": "Summernote"})
+
+    <!-- Plugins css -->
+    <link href="assets/libs/summernote/summernote-bs4.min.css" rel="stylesheet" type="text/css" />
+
+    @@include("partials/head-css.html")
+
+</head>
+
+@@include("partials/body.html")
+
+<!-- Begin page -->
+<div id="layout-wrapper">
+
+    @@include("partials/menu.html")
+
+    <!-- ============================================================== -->
+    <!-- Start right Content here -->
+    <!-- ============================================================== -->
+    <div class="main-content">
+
+        <div class="page-content">
+            <div class="container-fluid">
+
+                @@include("partials/page-title.html", {"pagetitle": "Forms", "title": "Summernote"})
+
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card mb-4">
+                            <div class="card-body">
+                
+                                <h4 class="mt-0 header-title">Examples</h4>
+                                <p class="sub-title">Super simple wysiwyg editor on bootstrap</p>
+                
+                                <div class="summernote">Hello Summernote</div>
+                
+                            </div>
+                        </div>
+                    </div> <!-- end col -->
+                </div> <!-- end row -->
+                
+            </div> <!-- container-fluid -->
+        </div>
+        <!-- End Page-content -->
+
+        @@include("partials/footer.html")
+
+    </div>
+    <!-- end main content-->
+
+</div>
+<!-- END layout-wrapper -->
+
+@@include("partials/vendor-scripts.html")
+
+<!-- Plugins js -->
+<script src="assets/libs/summernote/summernote-bs4.min.js"></script>
+
+<script src="assets/js/pages/form-editor.init.js"></script>
+
+<script src="assets/js/app.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+[AHSP];AHSP-001;Pekerjaan Pasangan Bata 1:4;m2
+Pekerja;0.3
+Tukang Batu;0.1
+Kepala Tukang;0.01
+Mandor;0.015
+Semen Portland 40kg;11.5
+Pasir Pasang;0.043
+Bata Merah;70
+
+[AHSP];AHSP-002;Pekerjaan Beton K-225;m3
+Pekerja;1.65
+Tukang Batu;0.275
+Kepala Tukang;0.028
+Mandor;0.083
+Semen Portland 40kg;9.275
+Pasir Beton;0.4675
+Batu Pecah/Split;0.69
+Molen;2
+Vibrator;1.5
+
+[AHSP];AHSP-003;Pekerjaan Bekisting;m2
+Pekerja;0.52
+Tukang Kayu;0.26
+Kepala Tukang;0.026
+Mandor;0.026
+Kayu Bekisting;0.04
+Paku;0.4
+
+[AHSP];AHSP-004;Pekerjaan Pembesian;kg
+Pekerja;0.007
+Tukang Batu;0.007
+Kepala Tukang;0.0007
+Mandor;0.0004
+Besi Beton Ulir;1.05
+Kawat Bendrat;0.015
