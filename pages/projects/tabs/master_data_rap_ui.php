@@ -21,7 +21,7 @@ foreach ($itemsRap as $item) {
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addItemRapModal">
                 <i class="mdi mdi-plus"></i> Tambah Item
             </button>
-            <a href="import.php?project_id=<?= $projectId ?>&type=items" class="btn btn-success" title="Import ke RAB, data akan otomatis di-sync ke RAP">
+            <a href="import.php?project_id=<?= $projectId ?>&type=items_rap" class="btn btn-success" title="Import ke RAP">
                 <i class="mdi mdi-file-upload"></i> Import dari CSV
             </a>
             <a href="export_items.php?project_id=<?= $projectId ?>&type=rap" class="btn btn-info">

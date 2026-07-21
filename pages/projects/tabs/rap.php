@@ -292,9 +292,42 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                 <?php endif; ?>
             </ul>
         </div>
-        <a href="export_rap.php?id=<?= $projectId ?>" class="btn btn-outline-success btn-sm text-nowrap">
-            <i class="mdi mdi-download"></i> Export CSV
-        </a>
+        
+        <?php if ($project['status'] === 'draft'): ?>
+        <button class="btn btn-outline-success btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#importRapModal">
+            <i class="mdi mdi-upload"></i> Import CSV
+        </button>
+        <?php endif; ?>
+        
+        <!-- Export Dropdown -->
+        <div class="dropdown d-inline-block">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle text-nowrap" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="mdi mdi-file-export-outline"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><h6 class="dropdown-header">Export CSV</h6></li>
+                <li>
+                    <a class="dropdown-item" href="export_rap.php?id=<?= $projectId ?>&format=report">
+                        <i class="mdi mdi-file-document-outline"></i> Export CSV Laporan
+                    </a>
+                </li>
+                <?php if ($project['status'] === 'draft'): ?>
+                <li>
+                    <a class="dropdown-item" href="export_rap.php?id=<?= $projectId ?>&format=import">
+                        <i class="mdi mdi-file-upload-outline"></i> CSV untuk Import
+                    </a>
+                </li>
+                <?php endif; ?>
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Export PDF</h6></li>
+                <li>
+                    <a class="dropdown-item" href="javascript:void(0);" onclick="openPdfPreviewRap()">
+                        <i class="mdi mdi-file-pdf-box text-danger"></i> Export PDF
+                        <small class="d-block text-muted">Preview laporan lalu cetak/export ke PDF</small>
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -582,6 +615,84 @@ $(document).ready(function() {
     </div>
 </div>
 
+<!-- Import RAP Modal -->
+<div class="modal fade" id="importRapModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <form method="POST" enctype="multipart/form-data" class="modal-content">
+            <input type="hidden" name="action" value="import_rap">
+            <div class="modal-header">
+                <h5 class="modal-title">Import RAP dari CSV</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label required">File CSV</label>
+                    <input type="file" class="form-control" name="csv_file" accept=".csv,.txt" required>
+                </div>
+                
+                <div class="alert alert-info small">
+                    <i class="mdi mdi-information"></i>
+                    <strong>Format CSV (3 Kolom):</strong>
+                    <table class="table table-sm table-bordered mt-2 mb-0 bg-white">
+                        <thead class="table-light">
+                            <tr><th>Kolom A</th><th>Kolom B</th><th>Kolom C</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Nama Kategori</td><td>Kode AHSP</td><td>Volume</td></tr>
+                        </tbody>
+                    </table>
+                    <small class="text-muted mt-1 d-block">Jika Kolom A terisi = buat kategori baru. Sub-kategori setelahnya mengikuti kategori tersebut.</small>
+                </div>
+                
+                <div class="bg-light p-3 rounded mb-3" style="font-family: monospace; font-size: 12px;">
+                    <div class="row fw-bold text-muted mb-1" style="font-size:10px">
+                        <div class="col-5">Kolom A</div>
+                        <div class="col-4">Kolom B</div>
+                        <div class="col-3">Kolom C</div>
+                    </div>
+                    <div class="row text-primary fw-bold"><div class="col-5">PEKERJAAN PERSIAPAN</div><div class="col-4">A.4.1.1.4</div><div class="col-3">10</div></div>
+                    <div class="row"><div class="col-5"></div><div class="col-4">A.4.1.1.5</div><div class="col-3">25,5</div></div>
+                    <div class="row text-primary fw-bold mt-1"><div class="col-5">PEKERJAAN TANAH</div><div class="col-4">A.4.2.1.1</div><div class="col-3">100</div></div>
+                    <div class="row"><div class="col-5"></div><div class="col-4">A.4.2.1.2</div><div class="col-3">50</div></div>
+                </div>
+                
+                <div class="alert alert-warning small mb-0">
+                    <i class="mdi mdi-alert"></i>
+                    <strong>Penting:</strong> Kode AHSP harus sesuai dengan yang ada di Master Data AHSP proyek ini.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="submit" class="btn btn-success">
+                    <i class="mdi mdi-upload"></i> Import
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- PDF Preview Modal RAP -->
+<div class="modal fade" id="pdfPreviewModalRap" tabindex="-1" aria-labelledby="pdfPreviewModalRapLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title" id="pdfPreviewModalRapLabel">
+                    <i class="mdi mdi-file-pdf-box text-danger"></i> Preview Laporan RAP
+                </h5>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-success btn-sm" onclick="printPdfPreviewRap()">
+                        <i class="mdi mdi-printer"></i> Cetak / Export PDF
+                    </button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0">
+                <iframe id="pdfPreviewIframeRap" style="width:100%; height:100%; border:none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Show AHSP RAP Detail Modal (from Master Data RAP)
 function showAhspRapModal(ahspCode) {
@@ -604,5 +715,21 @@ function showAhspRapModal(ahspCode) {
         .catch(function(err) {
             document.getElementById('ahspRapDetailBody').innerHTML = '<div class="alert alert-danger">Gagal memuat data: ' + err.message + '</div>';
         });
+}
+
+// Open PDF Preview in modal for RAP
+function openPdfPreviewRap() {
+    var modal = new bootstrap.Modal(document.getElementById('pdfPreviewModalRap'));
+    var iframe = document.getElementById('pdfPreviewIframeRap');
+    iframe.src = 'export_rap_pdf.php?id=<?= $projectId ?>';
+    modal.show();
+}
+
+// Print PDF from iframe for RAP
+function printPdfPreviewRap() {
+    var iframe = document.getElementById('pdfPreviewIframeRap');
+    if (iframe.contentWindow) {
+        iframe.contentWindow.print();
+    }
 }
 </script>

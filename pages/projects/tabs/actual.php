@@ -173,6 +173,7 @@ foreach ($categories as $cat) {
     $catActualAlat = 0;
     $subcatProgressSum = 0;
     $subcatCount = 0;
+    $catWeeklyTotals = [];
     
     foreach ($subcats as $sub) {
         // Use RAP values if available, otherwise use RAB values
@@ -251,6 +252,17 @@ foreach ($categories as $cat) {
         // Get weekly data for this subcategory
         $subWeeklyData = $weeklyData[$sub['id']] ?? [];
         
+        if ($showWeeklyColumns) {
+            foreach ($weeklyRanges as $week) {
+                $weekNum = $week['week_number'];
+                $weekRealization = $subWeeklyData[$weekNum] ?? 0;
+                if (!isset($catWeeklyTotals[$weekNum])) {
+                    $catWeeklyTotals[$weekNum] = 0;
+                }
+                $catWeeklyTotals[$weekNum] += $weekRealization;
+            }
+        }
+        
         $subcatData[] = [
             'id' => $sub['id'],
             'code' => $sub['code'],
@@ -303,7 +315,8 @@ foreach ($categories as $cat) {
         'actual_alat' => $catActualAlat,
         'selisih' => $catSelisih,
         'progress' => $catProgress,
-        'subcat_count' => $subcatCount
+        'subcat_count' => $subcatCount,
+        'weekly_totals' => $catWeeklyTotals
     ];
 }
 ?>
@@ -336,11 +349,36 @@ foreach ($categories as $cat) {
             <i class="mdi mdi-tools"></i> Alat
         </a>
     </div>
-    <?php if ($categoryFilter !== 'all'): ?>
-    <div class="alert alert-info py-1 px-3 mb-0">
-        <small><i class="mdi mdi-filter"></i> Menampilkan anggaran <strong><?= ucfirst($categoryFilter) ?></strong> saja</small>
+    <div class="d-flex align-items-center gap-2">
+        <?php if ($categoryFilter !== 'all'): ?>
+        <div class="alert alert-info py-1 px-3 mb-0 me-2">
+            <small><i class="mdi mdi-filter"></i> Menampilkan anggaran <strong><?= ucfirst($categoryFilter) ?></strong> saja</small>
+        </div>
+        <?php endif; ?>
+        
+        <!-- Export Dropdown -->
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle text-nowrap" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="mdi mdi-file-export-outline"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><h6 class="dropdown-header">Export CSV</h6></li>
+                <li>
+                    <a class="dropdown-item" href="export_actual.php?id=<?= $projectId ?>">
+                        <i class="mdi mdi-file-document-outline"></i> Export CSV Laporan
+                    </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Export PDF</h6></li>
+                <li>
+                    <a class="dropdown-item" href="javascript:void(0);" onclick="openPdfPreviewActual()">
+                        <i class="mdi mdi-file-pdf-box text-danger"></i> Export PDF
+                        <small class="d-block text-muted">Preview laporan lalu cetak/export ke PDF</small>
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
-    <?php endif; ?>
 </div>
 
 <?php 
@@ -403,25 +441,22 @@ $lastStickyRight = 1220; // Total width of sticky area
     background-color: #212529;
 }
 
-/* Column position classes - FILTERED VIEW (single realisasi column) */
+/* Column position classes */
+.col-no { left: 0px; min-width: 50px; max-width: 50px; }
+.col-uraian { left: 50px; min-width: 220px; max-width: 220px; }
+.col-rap { left: 270px; min-width: 150px; max-width: 150px; }
+
 <?php if ($categoryFilter !== 'all'): ?>
-.col-no { left: 0px; min-width: 50px; max-width: 50px; }
-.col-uraian { left: 50px; min-width: 220px; max-width: 220px; }
-.col-rap { left: 270px; min-width: 150px; max-width: 150px; }
-.col-upah { left: 420px; min-width: 150px; max-width: 150px; } /* Single realisasi column */
-.col-selisih { left: 570px; min-width: 150px; max-width: 150px; }
-.col-progress { left: 720px; min-width: 120px; max-width: 120px; }
+.col-upah { min-width: 150px; max-width: 150px; } /* Single realisasi column */
+.col-selisih { min-width: 150px; max-width: 150px; }
+.col-progress { min-width: 120px; max-width: 120px; }
 <?php else: ?>
-/* Column position classes - ALL VIEW (4 realisasi columns) */
-.col-no { left: 0px; min-width: 50px; max-width: 50px; }
-.col-uraian { left: 50px; min-width: 220px; max-width: 220px; }
-.col-rap { left: 270px; min-width: 150px; max-width: 150px; }
-.col-upah { left: 420px; min-width: 130px; max-width: 130px; }
-.col-material { left: 550px; min-width: 130px; max-width: 130px; }
-.col-alat { left: 680px; min-width: 130px; max-width: 130px; }
-.col-total { left: 810px; min-width: 140px; max-width: 140px; }
-.col-selisih { left: 950px; min-width: 150px; max-width: 150px; }
-.col-progress { left: 1100px; min-width: 120px; max-width: 120px; }
+.col-upah { min-width: 130px; max-width: 130px; }
+.col-material { min-width: 130px; max-width: 130px; }
+.col-alat { min-width: 130px; max-width: 130px; }
+.col-total { min-width: 140px; max-width: 140px; }
+.col-selisih { min-width: 150px; max-width: 150px; }
+.col-progress { min-width: 120px; max-width: 120px; }
 <?php endif; ?>
 
 /* Row background colors for sticky cells */
@@ -452,7 +487,7 @@ $lastStickyRight = 1220; // Total width of sticky area
 }
 
 /* Box shadow for sticky edge */
-.col-progress::after {
+.col-rap::after {
     content: '';
     position: absolute;
     top: 0;
@@ -484,19 +519,19 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
                 <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP (Target)</th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-upah">Realisasi<br><small>Upah</small></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-material">Realisasi<br><small>Material</small></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-alat">Realisasi<br><small>Alat</small></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-total">Realisasi<br><small>Total</small></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-selisih">Selisih</th>
-                <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-progress">Progress</th>
+                <th rowspan="2" class="align-middle text-end col-upah">Realisasi<br><small>Upah</small></th>
+                <th rowspan="2" class="align-middle text-end col-material">Realisasi<br><small>Material</small></th>
+                <th rowspan="2" class="align-middle text-end col-alat">Realisasi<br><small>Alat</small></th>
+                <th rowspan="2" class="align-middle text-end col-total">Realisasi<br><small>Total</small></th>
+                <th rowspan="2" class="align-middle text-end col-selisih">Selisih</th>
+                <th rowspan="2" class="align-middle text-center col-progress">Progress</th>
                 <?php else: ?>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
                 <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP <?= ucfirst($categoryFilter) ?></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-upah">Realisasi <?= ucfirst($categoryFilter) ?></th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-selisih">Selisih</th>
-                <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-progress">Progress</th>
+                <th rowspan="2" class="align-middle text-end col-upah">Realisasi <?= ucfirst($categoryFilter) ?></th>
+                <th rowspan="2" class="align-middle text-end col-selisih">Selisih</th>
+                <th rowspan="2" class="align-middle text-center col-progress">Progress</th>
                 <?php endif; ?>
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): ?>
@@ -527,6 +562,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             $grandActualTotal = 0;
             $grandProgressSum = 0;
             $grandSubcatCount = 0;
+            $grandWeeklyTotals = [];
             
             foreach ($actualData as $catId => $data): 
                 $cat = $data['category'];
@@ -540,6 +576,16 @@ $lastStickyRight = 1220; // Total width of sticky area
                 $grandActualMaterial += $data['actual_material'];
                 $grandActualAlat += $data['actual_alat'];
                 $grandActualTotal += $data['actual_total'];
+                
+                if ($showWeeklyColumns) {
+                    foreach ($weeklyRanges as $week) {
+                        $weekNum = $week['week_number'];
+                        if (!isset($grandWeeklyTotals[$weekNum])) {
+                            $grandWeeklyTotals[$weekNum] = 0;
+                        }
+                        $grandWeeklyTotals[$weekNum] += $data['weekly_totals'][$weekNum] ?? 0;
+                    }
+                }
                 
                 foreach ($subcats as $sub) {
                     if ($sub['rap_total'] > 0) {
@@ -555,15 +601,15 @@ $lastStickyRight = 1220; // Total width of sticky area
                 </td>
                 <td class="sticky-col col-rap"></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="sticky-col col-upah"></td>
-                <td class="sticky-col col-material"></td>
-                <td class="sticky-col col-alat"></td>
-                <td class="sticky-col col-total"></td>
+                <td class="col-upah"></td>
+                <td class="col-material"></td>
+                <td class="col-alat"></td>
+                <td class="col-total"></td>
                 <?php else: ?>
-                <td class="sticky-col col-upah"></td>
+                <td class="col-upah"></td>
                 <?php endif; ?>
-                <td class="sticky-col col-selisih"></td>
-                <td class="sticky-col col-progress"></td>
+                <td class="col-selisih"></td>
+                <td class="col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
                 <td class="weekly-col"></td>
@@ -598,17 +644,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td class="sticky-col col-uraian"><?= sanitize($sub['name']) ?></td>
                 <td class="sticky-col col-rap text-end"><?= formatNumber($displayRap, 2) ?></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="sticky-col col-upah text-end text-primary"><?= formatNumber($sub['actual_upah'], 2) ?></td>
-                <td class="sticky-col col-material text-end text-success"><?= formatNumber($sub['actual_material'], 2) ?></td>
-                <td class="sticky-col col-alat text-end text-warning"><?= formatNumber($sub['actual_alat'], 2) ?></td>
-                <td class="sticky-col col-total text-end"><strong><?= formatNumber($sub['actual_total'], 2) ?></strong></td>
+                <td class="col-upah text-end text-primary"><?= formatNumber($sub['actual_upah'], 2) ?></td>
+                <td class="col-material text-end text-success"><?= formatNumber($sub['actual_material'], 2) ?></td>
+                <td class="col-alat text-end text-warning"><?= formatNumber($sub['actual_alat'], 2) ?></td>
+                <td class="col-total text-end"><strong><?= formatNumber($sub['actual_total'], 2) ?></strong></td>
                 <?php else: ?>
-                <td class="sticky-col col-upah text-end"><strong><?= formatNumber($displayActual, 2) ?></strong></td>
+                <td class="col-upah text-end"><strong><?= formatNumber($displayActual, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="sticky-col col-selisih text-end <?= $selisihClass ?>">
+                <td class="col-selisih text-end <?= $selisihClass ?>">
                     <?= ($displaySelisih >= 0 ? '+' : '') . formatNumber($displaySelisih, 2) ?>
                 </td>
-                <td class="sticky-col col-progress">
+                <td class="col-progress">
                     <div class="progress" style="height: 18px;">
                         <div class="progress-bar <?= $progressClass ?>" 
                              style="width: <?= min($displayProgress, 100) ?>%">
@@ -671,17 +717,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($catDisplayRap, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="text-end text-primary sticky-col col-upah"><strong><?= formatNumber($data['actual_upah'], 2) ?></strong></td>
-                <td class="text-end text-success sticky-col col-material"><strong><?= formatNumber($data['actual_material'], 2) ?></strong></td>
-                <td class="text-end text-warning sticky-col col-alat"><strong><?= formatNumber($data['actual_alat'], 2) ?></strong></td>
-                <td class="text-end sticky-col col-total"><strong><?= formatNumber($data['actual_total'], 2) ?></strong></td>
+                <td class="text-end text-primary col-upah"><strong><?= formatNumber($data['actual_upah'], 2) ?></strong></td>
+                <td class="text-end text-success col-material"><strong><?= formatNumber($data['actual_material'], 2) ?></strong></td>
+                <td class="text-end text-warning col-alat"><strong><?= formatNumber($data['actual_alat'], 2) ?></strong></td>
+                <td class="text-end col-total"><strong><?= formatNumber($data['actual_total'], 2) ?></strong></td>
                 <?php else: ?>
-                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($catDisplayActual, 2) ?></strong></td>
+                <td class="text-end col-upah"><strong><?= formatNumber($catDisplayActual, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= $catSelisihClass ?> sticky-col col-selisih">
+                <td class="text-end <?= $catSelisihClass ?> col-selisih">
                     <strong><?= ($catDisplaySelisih >= 0 ? '+' : '') . formatNumber($catDisplaySelisih, 2) ?></strong>
                 </td>
-                <td class="sticky-col col-progress">
+                <td class="col-progress">
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1" style="height: 18px;">
                             <div class="progress-bar <?= $catProgressClass ?>" 
@@ -692,9 +738,21 @@ $lastStickyRight = 1220; // Total width of sticky area
                     </div>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
-                <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
-                <td class="weekly-col"></td>
-                <?php endfor; ?>
+                <?php foreach ($weeklyRanges as $week): 
+                    $weekNum = $week['week_number'];
+                    $catWeekRealization = $data['weekly_totals'][$weekNum] ?? 0;
+                    $catWeekBobot = $data['rap_total'] > 0 ? ($catWeekRealization / $data['rap_total']) * 100 : 0;
+                ?>
+                <td class="text-end weekly-col">
+                    <strong><?= $catWeekRealization > 0 ? formatNumber($catWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
+                </td>
+                <td class="text-center weekly-col">
+                    <strong><?= $catWeekBobot > 0 ? number_format($catWeekBobot, 2) . '%' : '-' ?></strong>
+                </td>
+                <td class="text-center weekly-col">
+                    <span class="text-muted">-</span>
+                </td>
+                <?php endforeach; ?>
                 <?php endif; ?>
             </tr>
             <?php endforeach; ?>
@@ -746,17 +804,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL<?= $categoryFilter !== 'all' ? ' (' . strtoupper($categoryFilter) . ')' : '' ?></strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandDisplayRap, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="text-end text-primary sticky-col col-upah"><strong><?= formatNumber($grandActualUpah, 2) ?></strong></td>
-                <td class="text-end text-success sticky-col col-material"><strong><?= formatNumber($grandActualMaterial, 2) ?></strong></td>
-                <td class="text-end text-warning sticky-col col-alat"><strong><?= formatNumber($grandActualAlat, 2) ?></strong></td>
-                <td class="text-end sticky-col col-total"><strong><?= formatNumber($grandActualTotal, 2) ?></strong></td>
+                <td class="text-end text-primary col-upah"><strong><?= formatNumber($grandActualUpah, 2) ?></strong></td>
+                <td class="text-end text-success col-material"><strong><?= formatNumber($grandActualMaterial, 2) ?></strong></td>
+                <td class="text-end text-warning col-alat"><strong><?= formatNumber($grandActualAlat, 2) ?></strong></td>
+                <td class="text-end col-total"><strong><?= formatNumber($grandActualTotal, 2) ?></strong></td>
                 <?php else: ?>
-                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($grandDisplayActual, 2) ?></strong></td>
+                <td class="text-end col-upah"><strong><?= formatNumber($grandDisplayActual, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= $grandSelisihClass ?> sticky-col col-selisih">
+                <td class="text-end <?= $grandSelisihClass ?> col-selisih">
                     <strong><?= ($grandDisplayDiff >= 0 ? '+' : '') . formatNumber($grandDisplayDiff, 2) ?></strong>
                 </td>
-                <td class="sticky-col col-progress">
+                <td class="col-progress">
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1" style="height: 18px;">
                             <div class="progress-bar <?= $grandProgressClass ?>" 
@@ -767,9 +825,21 @@ $lastStickyRight = 1220; // Total width of sticky area
                     </div>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
-                <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
-                <td class="weekly-col"></td>
-                <?php endfor; ?>
+                <?php foreach ($weeklyRanges as $week): 
+                    $weekNum = $week['week_number'];
+                    $grandWeekRealization = $grandWeeklyTotals[$weekNum] ?? 0;
+                    $grandWeekBobot = $grandRap > 0 ? ($grandWeekRealization / $grandRap) * 100 : 0;
+                ?>
+                <td class="text-end weekly-col">
+                    <strong><?= $grandWeekRealization > 0 ? formatNumber($grandWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
+                </td>
+                <td class="text-center weekly-col">
+                    <strong><?= $grandWeekBobot > 0 ? number_format($grandWeekBobot, 2) . '%' : '-' ?></strong>
+                </td>
+                <td class="text-center weekly-col">
+                    <span class="text-muted">-</span>
+                </td>
+                <?php endforeach; ?>
                 <?php endif; ?>
             </tr>
             <!-- PPN Row -->
@@ -777,17 +847,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>PPN <?= number_format($ppnPercentage, 0) ?>%</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($ppnRap, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="sticky-col col-upah"></td>
-                <td class="sticky-col col-material"></td>
-                <td class="sticky-col col-alat"></td>
-                <td class="text-end sticky-col col-total"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
+                <td class="col-upah"></td>
+                <td class="col-material"></td>
+                <td class="col-alat"></td>
+                <td class="text-end col-total"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
                 <?php else: ?>
-                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
+                <td class="text-end col-upah"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= ($ppnRap - $ppnActual) < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
+                <td class="text-end <?= ($ppnRap - $ppnActual) < 0 ? 'text-danger' : 'text-success' ?> col-selisih">
                     <strong><?= (($ppnRap - $ppnActual) >= 0 ? '+' : '') . formatNumber($ppnRap - $ppnActual, 2) ?></strong>
                 </td>
-                <td class="sticky-col col-progress"></td>
+                <td class="col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
                 <td class="weekly-col"></td>
@@ -799,17 +869,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL (TERMASUK PPN)</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($totalRapWithPpn, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="sticky-col col-upah"></td>
-                <td class="sticky-col col-material"></td>
-                <td class="sticky-col col-alat"></td>
-                <td class="text-end sticky-col col-total"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
+                <td class="col-upah"></td>
+                <td class="col-material"></td>
+                <td class="col-alat"></td>
+                <td class="text-end col-total"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
                 <?php else: ?>
-                <td class="text-end sticky-col col-upah"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
+                <td class="text-end col-upah"><strong><?= formatNumber($totalActualWithPpn, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= $diffWithPpn < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
+                <td class="text-end <?= $diffWithPpn < 0 ? 'text-danger' : 'text-success' ?> col-selisih">
                     <strong><?= ($diffWithPpn >= 0 ? '+' : '') . formatNumber($diffWithPpn, 2) ?></strong>
                 </td>
-                <td class="sticky-col col-progress"></td>
+                <td class="col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
                 <td class="weekly-col"></td>
@@ -821,17 +891,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL DIBULATKAN</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatRupiah($totalRapRounded) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
-                <td class="sticky-col col-upah"></td>
-                <td class="sticky-col col-material"></td>
-                <td class="sticky-col col-alat"></td>
-                <td class="text-end sticky-col col-total"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
+                <td class="col-upah"></td>
+                <td class="col-material"></td>
+                <td class="col-alat"></td>
+                <td class="text-end col-total"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
                 <?php else: ?>
-                <td class="text-end sticky-col col-upah"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
+                <td class="text-end col-upah"><strong><?= formatRupiah($totalActualRounded) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= $diffRounded < 0 ? 'text-danger' : 'text-success' ?> sticky-col col-selisih">
+                <td class="text-end <?= $diffRounded < 0 ? 'text-danger' : 'text-success' ?> col-selisih">
                     <strong><?= ($diffRounded >= 0 ? '+' : '') . formatRupiah($diffRounded) ?></strong>
                 </td>
-                <td class="sticky-col col-progress"></td>
+                <td class="col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
                 <td class="weekly-col"></td>
@@ -1252,6 +1322,44 @@ function escapeHtml(str) {
     div.appendChild(document.createTextNode(str));
     return div.innerHTML;
 }
+
+// Open PDF Preview in modal for Realisasi
+function openPdfPreviewActual() {
+    var modal = new bootstrap.Modal(document.getElementById('pdfPreviewModalActual'));
+    var iframe = document.getElementById('pdfPreviewIframeActual');
+    iframe.src = 'export_actual_pdf.php?id=<?= $projectId ?>';
+    modal.show();
+}
+
+// Print PDF from iframe for Realisasi
+function printPdfPreviewActual() {
+    var iframe = document.getElementById('pdfPreviewIframeActual');
+    if (iframe.contentWindow) {
+        iframe.contentWindow.print();
+    }
+}
 </script>
+
+<!-- PDF Preview Modal Actual -->
+<div class="modal fade" id="pdfPreviewModalActual" tabindex="-1" aria-labelledby="pdfPreviewModalActualLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title" id="pdfPreviewModalActualLabel">
+                    <i class="mdi mdi-file-pdf-box text-danger"></i> Preview Laporan Realisasi
+                </h5>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-success btn-sm" onclick="printPdfPreviewActual()">
+                        <i class="mdi mdi-printer"></i> Cetak / Export PDF
+                    </button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0">
+                <iframe id="pdfPreviewIframeActual" style="width:100%; height:100%; border:none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
 
 <?php endif; ?>

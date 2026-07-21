@@ -18,7 +18,7 @@ $allowedWhenRabSubmitted = ['reopen_rab'];
 $rabRapActions = [
     'add_category', 'add_subcategory', 'delete_category', 'delete_subcategory',
     'update_ppn', 'update_volume', 'submit_rab', 'reopen_rab',
-    'create_snapshot', 'delete_snapshot', 'import_rab',
+    'create_snapshot', 'delete_snapshot', 'import_rab', 'import_rap',
     'update_rap_volume', 'generate_rap', 'sync_from_reference'
 ];
 
@@ -328,6 +328,154 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     setFlash('warning', "Import selesai dengan beberapa error:<br>$errorMsg<br><br>Berhasil: $importedCategories kategori, $importedSubcategories sub-kategori");
                 } else {
                     setFlash('success', "Berhasil import $importedCategories kategori dan $importedSubcategories sub-kategori!");
+                }
+                break;
+                
+            case 'import_rap':
+                if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+                    throw new Exception('File tidak valid atau tidak diunggah.');
+                }
+                
+                $file = $_FILES['csv_file']['tmp_name'];
+                $handle = fopen($file, 'r');
+                if (!$handle) {
+                    throw new Exception('Tidak dapat membaca file CSV.');
+                }
+                
+                $firstLine = fgets($handle);
+                rewind($handle);
+                $delimiter = (strpos($firstLine, ';') !== false) ? ';' : ',';
+                
+                $ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY work_name", [$projectId]);
+                $ahspLookup = [];
+                foreach ($ahspList as $ahsp) {
+                    $code = strtolower(trim($ahsp['ahsp_code'] ?? ''));
+                    if (!empty($code)) {
+                        $ahspLookup[$code] = $ahsp;
+                    }
+                }
+                
+                $currentCategoryId = null;
+                $importedCategories = 0;
+                $updatedRapItems = 0;
+                $insertedRapItems = 0;
+                $errors = [];
+                $rowNum = 0;
+                
+                while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+                    $rowNum++;
+                    if (empty($row) || (count($row) === 1 && empty(trim($row[0])))) continue;
+                    
+                    $colA = trim($row[0] ?? '');
+                    $colB = trim($row[1] ?? '');
+                    $colC = trim($row[2] ?? '');
+                    
+                    if (!empty($colA)) {
+                        $existingCat = dbGetRow("SELECT id FROM rab_categories WHERE project_id = ? AND LOWER(name) = LOWER(?)", [$projectId, $colA]);
+                        if ($existingCat) {
+                            $currentCategoryId = $existingCat['id'];
+                        } else {
+                            $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY code DESC LIMIT 1", [$projectId]);
+                            if ($maxCode && $maxCode['code']) {
+                                $nextCode = chr(ord($maxCode['code']) + 1);
+                            } else {
+                                $nextCode = 'A';
+                            }
+                            $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_categories WHERE project_id = ?", [$projectId]);
+                            
+                            $currentCategoryId = dbInsert("INSERT INTO rab_categories (project_id, code, name, sort_order) VALUES (?, ?, ?, ?)", 
+                                [$projectId, $nextCode, $colA, $maxSort['next']]);
+                            $importedCategories++;
+                        }
+                    }
+                    
+                    if (empty($colB)) continue;
+                    
+                    if (!$currentCategoryId) {
+                        $errors[] = "Baris $rowNum: AHSP sebelum kategori.";
+                        continue;
+                    }
+                    
+                    $ahspCode = strtolower($colB);
+                    
+                    if (!isset($ahspLookup[$ahspCode])) {
+                        $errors[] = "Baris $rowNum: AHSP '$colB' tidak ditemukan";
+                        continue;
+                    }
+                    
+                    $ahsp = $ahspLookup[$ahspCode];
+                    
+                    $volumeRaw = str_replace(',', '.', str_replace('.', '', $colC));
+                    $volume = floatval($volumeRaw);
+                    if ($volume <= 0) {
+                        $errors[] = "Baris $rowNum: Volume tidak valid '$colC'";
+                        continue;
+                    }
+                    
+                    $existingSub = dbGetRow("
+                        SELECT id, name, unit, unit_price FROM rab_subcategories 
+                        WHERE category_id = ? AND ahsp_id = ?
+                    ", [$currentCategoryId, $ahsp['id']]);
+                    
+                    if ($existingSub) {
+                        $subcatId = $existingSub['id'];
+                        $existingRap = dbGetRow("SELECT id FROM rap_items WHERE subcategory_id = ?", [$subcatId]);
+                        if ($existingRap) {
+                            dbExecute("UPDATE rap_items SET volume = ? WHERE id = ?", [$volume, $existingRap['id']]);
+                            $updatedRapItems++;
+                        } else {
+                            $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
+                                [$subcatId, $volume, $existingSub['unit_price']]);
+                            
+                            $ahspDetails = dbGetAll("
+                                SELECT d.item_id, i.category, d.coefficient, i.price
+                                FROM project_ahsp_details d
+                                JOIN project_items i ON d.item_id = i.id
+                                WHERE d.ahsp_id = ?
+                            ", [$ahsp['id']]);
+                            
+                            foreach ($ahspDetails as $detail) {
+                                dbInsert("INSERT INTO rap_ahsp_details (rap_item_id, item_id, category, coefficient, unit_price) VALUES (?, ?, ?, ?, ?)",
+                                    [$rapItemId, $detail['item_id'], $detail['category'], $detail['coefficient'], $detail['price']]);
+                            }
+                            $insertedRapItems++;
+                        }
+                    } else {
+                        $category = dbGetRow("SELECT code FROM rab_categories WHERE id = ?", [$currentCategoryId]);
+                        $maxSubCode = dbGetRow("SELECT COUNT(*) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$currentCategoryId]);
+                        $nextSubCode = $category['code'] . '.' . $maxSubCode['next'];
+                        $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$currentCategoryId]);
+                        
+                        $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                            [$currentCategoryId, $ahsp['id'], $nextSubCode, $ahsp['work_name'], $ahsp['unit'], $volume, $ahsp['unit_price'], $maxSort['next']]);
+                        
+                        $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
+                            [$subcatId, $volume, $ahsp['unit_price']]);
+                        
+                        $ahspDetails = dbGetAll("
+                            SELECT d.item_id, i.category, d.coefficient, i.price
+                            FROM project_ahsp_details d
+                            JOIN project_items i ON d.item_id = i.id
+                            WHERE d.ahsp_id = ?
+                        ", [$ahsp['id']]);
+                        
+                        foreach ($ahspDetails as $detail) {
+                            dbInsert("INSERT INTO rap_ahsp_details (rap_item_id, item_id, category, coefficient, unit_price) VALUES (?, ?, ?, ?, ?)",
+                                [$rapItemId, $detail['item_id'], $detail['category'], $detail['coefficient'], $detail['price']]);
+                        }
+                        $insertedRapItems++;
+                    }
+                }
+                fclose($handle);
+                
+                if (!empty($errors)) {
+                    $errorMsg = implode('<br>', array_slice($errors, 0, 5));
+                    if (count($errors) > 5) {
+                        $errorMsg .= '<br>...dan ' . (count($errors) - 5) . ' error lainnya';
+                    }
+                    setFlash('warning', "Import selesai dengan beberapa error:<br>$errorMsg<br><br>Hasil: $importedCategories kategori baru, $insertedRapItems RAP item baru, $updatedRapItems RAP item diperbarui");
+                } else {
+                    setFlash('success', "Berhasil import RAP! ($importedCategories kategori baru, $insertedRapItems RAP item baru, $updatedRapItems RAP item diperbarui)");
                 }
                 break;
             

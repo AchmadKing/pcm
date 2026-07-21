@@ -737,6 +737,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+
+// Handle upload project images
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_project_images') {
+    $projectId = $_GET['id'] ?? null;
+    if ($projectId && hasPermission('projects.edit')) {
+        if (!empty($_FILES['images']['name'][0])) {
+            $uploadDir = __DIR__ . '/../../uploads/project_images/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+            $maxSize = 5 * 1024 * 1024; // 5MB
+            $uploadedCount = 0;
+            $errors = [];
+            
+            foreach ($_FILES['images']['tmp_name'] as $key => $tmpName) {
+                if ($_FILES['images']['error'][$key] !== UPLOAD_ERR_OK) {
+                    continue;
+                }
+                
+                $fileType = $_FILES['images']['type'][$key];
+                $fileSize = $_FILES['images']['size'][$key];
+                $originalName = $_FILES['images']['name'][$key];
+                
+                // Validate mime type & extension
+                $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+                $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+                
+                if (!in_array($fileType, $allowedTypes) || !in_array($ext, $allowedExtensions)) {
+                    $errors[] = "$originalName: Format file tidak didukung (hanya JPG, JPEG, PNG, WEBP).";
+                    continue;
+                }
+                if ($fileSize > $maxSize) {
+                    $errors[] = "$originalName: Ukuran file melebihi 5MB.";
+                    continue;
+                }
+                
+                // Generate unique filename
+                $filename = 'proj_' . $projectId . '_' . time() . '_' . $key . '_' . rand(1000, 9999) . '.' . $ext;
+                $filepath = $uploadDir . $filename;
+                
+                if (move_uploaded_file($tmpName, $filepath)) {
+                    $description = isset($_POST['descriptions'][$key]) ? trim($_POST['descriptions'][$key]) : '';
+                    dbInsert("
+                        INSERT INTO project_images (project_id, filename, original_name, description, uploaded_by)
+                        VALUES (?, ?, ?, ?, ?)
+                    ", [$projectId, $filename, $originalName, $description ?: null, $_SESSION['user_id']]);
+                    $uploadedCount++;
+                }
+            }
+            
+            if ($uploadedCount > 0) {
+                setFlash('success', "$uploadedCount foto lokasi proyek berhasil diunggah.");
+            }
+            if (!empty($errors)) {
+                setFlash('error', implode('<br>', $errors));
+            }
+        } else {
+            setFlash('error', 'Silakan pilih foto terlebih dahulu.');
+        }
+    }
+    header('Location: view.php?id=' . $projectId . '&tab=detail');
+    exit;
+}
+
+// Handle edit project image description
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_project_image_description') {
+    $projectId = $_GET['id'] ?? null;
+    $imageId = intval($_POST['image_id'] ?? 0);
+    $description = isset($_POST['description']) ? trim($_POST['description']) : '';
+    
+    if ($projectId && $imageId && hasPermission('projects.edit')) {
+        dbExecute("UPDATE project_images SET description = ? WHERE id = ? AND project_id = ?", [$description ?: null, $imageId, $projectId]);
+        setFlash('success', 'Keterangan foto berhasil diperbarui.');
+    }
+    header('Location: view.php?id=' . $projectId . '&tab=detail');
+    exit;
+}
+
+// Handle delete project image
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_project_image') {
+    $projectId = $_GET['id'] ?? null;
+    $imageId = intval($_POST['image_id'] ?? 0);
+    
+    if ($projectId && $imageId && hasPermission('projects.edit')) {
+        $img = dbGetRow("SELECT filename FROM project_images WHERE id = ? AND project_id = ?", [$imageId, $projectId]);
+        if ($img) {
+            $filepath = __DIR__ . '/../../uploads/project_images/' . $img['filename'];
+            if (file_exists($filepath)) {
+                unlink($filepath);
+            }
+            dbExecute("DELETE FROM project_images WHERE id = ? AND project_id = ?", [$imageId, $projectId]);
+            setFlash('success', 'Foto berhasil dihapus.');
+        } else {
+            setFlash('error', 'Foto tidak ditemukan.');
+        }
+    }
+    header('Location: view.php?id=' . $projectId . '&tab=detail');
+    exit;
+}
+
 // Include Master Data handlers for POST actions (must be before rab_rap_handlers)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $projectId = $_GET['id'] ?? null;

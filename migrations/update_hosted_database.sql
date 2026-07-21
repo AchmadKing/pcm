@@ -803,6 +803,32 @@ CALL AddColumnIfNotExists('weekly_progress', 'created_by', 'int(11) DEFAULT NULL
 CALL AddColumnIfNotExists('weekly_progress', 'created_at', 'timestamp NOT NULL DEFAULT current_timestamp()');
 CALL AddColumnIfNotExists('weekly_progress', 'updated_at', 'timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()');
 
+
+-- =====================================================
+-- PROSES TABEL: `project_images`
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `project_images` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `project_id` int(11) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `original_name` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `uploaded_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_project` (`project_id`),
+  KEY `idx_uploaded_by` (`uploaded_by`),
+  CONSTRAINT `fk_project_images_project_hosted` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_project_images_user_hosted` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CALL AddColumnIfNotExists('project_images', 'id', 'int(11) NOT NULL AUTO_INCREMENT');
+CALL AddColumnIfNotExists('project_images', 'project_id', 'int(11) NOT NULL');
+CALL AddColumnIfNotExists('project_images', 'filename', 'varchar(255) NOT NULL');
+CALL AddColumnIfNotExists('project_images', 'original_name', 'varchar(255) NOT NULL');
+CALL AddColumnIfNotExists('project_images', 'description', 'text DEFAULT NULL');
+CALL AddColumnIfNotExists('project_images', 'uploaded_by', 'int(11) DEFAULT NULL');
+CALL AddColumnIfNotExists('project_images', 'created_at', 'timestamp NOT NULL DEFAULT current_timestamp()');
+
 -- =====================================================
 -- STEP 3: MENGISI DATA SISTEM DAN PERMISSION (INSERT IGNORE)
 -- =====================================================

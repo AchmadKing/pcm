@@ -245,6 +245,23 @@ CREATE TABLE request_items (
     INDEX idx_rab_item (rab_item_id)
 ) ENGINE=InnoDB;
 
+
+-- =====================================================
+-- 13. PROJECT IMAGES TABLE (Galeri Foto Proyek)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS project_images (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    project_id INT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    original_name VARCHAR(255) NOT NULL,
+    description TEXT DEFAULT NULL,
+    uploaded_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_project (project_id)
+) ENGINE=InnoDB;
+
 -- =====================================================
 -- DEFAULT DATA
 -- =====================================================

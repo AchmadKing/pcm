@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $delimiter = ','; // Comma
                     }
                     
-                    if ($importType === 'items') {
+                    if ($importType === 'items' || $importType === 'items_rap') {
                         // Items format: 8 columns - Kode, Nama Utama, Jenis (opsional), Merk (opsional), Kategori, Satuan, Harga PU, Harga Aktual (opsional)
                         $header = fgetcsv($handle, 0, $delimiter);
                         
@@ -98,7 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             fclose($handle);
                         } else {
                             // Load existing item codes and names for duplicate checking
-                            $existingItemsRaw = dbGetAll("SELECT LOWER(item_code) as item_code, LOWER(name) as name FROM project_items WHERE project_id = ?", [$projectId]);
+                            $tableName = ($importType === 'items_rap') ? 'project_items_rap' : 'project_items';
+                            $existingItemsRaw = dbGetAll("SELECT LOWER(item_code) as item_code, LOWER(name) as name FROM {$tableName} WHERE project_id = ?", [$projectId]);
                             $existingItems = [
                                 'codes' => array_column($existingItemsRaw, 'item_code'),
                                 'names' => array_column($existingItemsRaw, 'name')
@@ -376,6 +377,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($importType === 'items') {
                     $successCount = importItems($previewData, $projectId);
                     $redirectUrl = 'view.php?id=' . $projectId . '&tab=master';
+                } elseif ($importType === 'items_rap') {
+                    $successCount = importItemsRap($previewData, $projectId);
+                    $redirectUrl = 'view.php?id=' . $projectId . '&tab=master&subtab=items_rap';
                 } elseif ($importType === 'ahsp') {
                     $successCount = importAhsp($previewData, $projectId);
                     $redirectUrl = 'view.php?id=' . $projectId . '&tab=master&subtab=ahsp';
@@ -588,7 +592,7 @@ function parseAhspRowSimplified($ahspCode, $ahspName, $ahspUnit, $itemIdentifier
 }
 
 /**
- * Import Items to database
+ * Import Items to database (RAB Import)
  */
 function importItems($data, $projectId) {
     $count = 0;
@@ -616,33 +620,124 @@ function importItems($data, $projectId) {
         $itemCode = $row['item_code'] ?? '';
         $brand = $row['brand'] ?? null;
         
-        // Check if item already exists by ITEM CODE (not name)
-        // This allows duplicate names with different codes
-        $existing = null;
+        // Check if item already exists by ITEM CODE (not name) in RAB
+        $existingRab = null;
         if (!empty($itemCode)) {
-            $existing = dbGetRow(
+            $existingRab = dbGetRow(
                 "SELECT id FROM project_items WHERE project_id = ? AND LOWER(item_code) = LOWER(?)",
                 [$projectId, $itemCode]
             );
         }
         
-        if ($existing) {
-            // Update existing by code
+        $rabItemId = null;
+        if ($existingRab) {
+            // Update existing RAB item
             dbExecute(
                 "UPDATE project_items SET name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ?",
-                [$itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $existing['id']]
+                [$itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $existingRab['id']]
             );
+            $rabItemId = $existingRab['id'];
         } else {
-            // Insert new
-            dbInsert(
+            // Insert new RAB item
+            $rabItemId = dbInsert(
                 "INSERT INTO project_items (project_id, item_code, name, brand, category, unit, price, actual_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [$projectId, $itemCode, $itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice]
             );
         }
         
-        // Auto-sync to RAP Master Data
+        // Update or Insert in RAP Master Data
+        if (!empty($itemCode) && $rabItemId) {
+            $existingRap = dbGetRow(
+                "SELECT id FROM project_items_rap WHERE project_id = ? AND LOWER(item_code) = LOWER(?)",
+                [$projectId, $itemCode]
+            );
+            if ($existingRap) {
+                // Update existing RAP item
+                dbExecute(
+                    "UPDATE project_items_rap SET name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ?, rab_item_id = ? WHERE id = ?",
+                    [$itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $rabItemId, $existingRap['id']]
+                );
+            } else {
+                // Insert new RAP item
+                dbInsert(
+                    "INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [$projectId, $itemCode, $itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $rabItemId]
+                );
+            }
+        }
+        
+        $count++;
+    }
+    return $count;
+}
+
+/**
+ * Import Items to database (RAP Import)
+ */
+function importItemsRap($data, $projectId) {
+    $count = 0;
+    foreach ($data as $row) {
+        if (!$row['valid']) continue;
+        
+        // Get item name - fallback to main_name + sub_type if name is empty
+        $itemName = $row['name'] ?? '';
+        if (empty($itemName)) {
+            $mainName = $row['main_name'] ?? '';
+            $subType = $row['sub_type'] ?? '';
+            if (!empty($subType)) {
+                $itemName = $mainName . ' - ' . $subType;
+            } else {
+                $itemName = $mainName;
+            }
+        }
+        
+        // Skip if still no name
+        if (empty($itemName)) {
+            continue;
+        }
+        
+        $actualPrice = $row['actual_price'] ?? null;
+        $itemCode = $row['item_code'] ?? '';
+        $brand = $row['brand'] ?? null;
+        
+        // Check if item already exists by ITEM CODE (not name) in RAP
+        $existingRap = null;
         if (!empty($itemCode)) {
-            syncItemCodeRabToRap($projectId, $itemCode);
+            $existingRap = dbGetRow(
+                "SELECT id, rab_item_id FROM project_items_rap WHERE project_id = ? AND LOWER(item_code) = LOWER(?)",
+                [$projectId, $itemCode]
+            );
+        }
+        
+        if ($existingRap) {
+            // Update existing RAP item only
+            dbExecute(
+                "UPDATE project_items_rap SET name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ?",
+                [$itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $existingRap['id']]
+            );
+        } else {
+            // This is a NEW item in RAP - check if it exists in RAB
+            $existingRab = dbGetRow(
+                "SELECT id FROM project_items WHERE project_id = ? AND LOWER(item_code) = LOWER(?)",
+                [$projectId, $itemCode]
+            );
+            
+            $rabItemId = null;
+            if ($existingRab) {
+                $rabItemId = $existingRab['id'];
+            } else {
+                // Insert into RAB first (ensuring list/count remains identical)
+                $rabItemId = dbInsert(
+                    "INSERT INTO project_items (project_id, item_code, name, brand, category, unit, price, actual_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [$projectId, $itemCode, $itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice]
+                );
+            }
+            
+            // Insert into RAP
+            dbInsert(
+                "INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [$projectId, $itemCode, $itemName, $brand, $row['category'], $row['unit'], $row['price'], $actualPrice, $rabItemId]
+            );
         }
         
         $count++;
@@ -785,7 +880,7 @@ require_once '../../includes/header.php';
                 <div class="col-12">
                     <div class="page-title-box d-flex align-items-center justify-content-between mb-2 mt-2">
                         <h4 class="mb-0">
-                            Import <?= $importType === 'items' ? 'Items' : 'AHSP' ?> - <?= sanitize($project['name']) ?>
+                            Import <?= ($importType === 'items' || $importType === 'items_rap') ? 'Items' : 'AHSP' ?> - <?= sanitize($project['name']) ?>
                         </h4>
                         <a href="view.php?id=<?= $projectId ?>&tab=master" class="btn btn-secondary">
                             <i class="mdi mdi-arrow-left"></i> Kembali
@@ -864,7 +959,7 @@ require_once '../../includes/header.php';
                                 Download Template
                             </h5>
                             
-                            <?php if ($importType === 'items'): ?>
+                            <?php if ($importType === 'items' || $importType === 'items_rap'): ?>
                             <p>Template untuk import Items (Upah, Material, Alat):</p>
                             <table class="table table-sm table-bordered mb-3" style="font-size: 12px;">
                                 <thead class="table-light">
@@ -978,7 +1073,7 @@ require_once '../../includes/header.php';
                     <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
                         <table class="table table-sm table-bordered mb-0" id="previewTable">
                             <thead class="table-light sticky-top">
-                                <?php if ($importType === 'items'): ?>
+                                <?php if ($importType === 'items' || $importType === 'items_rap'): ?>
                                 <tr>
                                     <th width="50">Row</th>
                                     <th width="50">Status</th>
@@ -1016,7 +1111,7 @@ require_once '../../includes/header.php';
                                         <span class="text-danger"><i class="mdi mdi-close-circle"></i></span>
                                         <?php endif; ?>
                                     </td>
-                                    <?php if ($importType === 'items'): ?>
+                                    <?php if ($importType === 'items' || $importType === 'items_rap'): ?>
                                         <?php if ($isViewingDraft): ?>
                                         <!-- Editable mode for draft -->
                                         <td>
@@ -1117,7 +1212,7 @@ require_once '../../includes/header.php';
                     // Ensure data is JSON-safe by cleaning each row
                     $jsonSafeData = [];
                     foreach ($previewData as $idx => $row) {
-                        if ($importType === 'items') {
+                        if ($importType === 'items' || $importType === 'items_rap') {
                             $jsonSafeData[$idx] = [
                                 'row' => $row['row'] ?? 0,
                                 'item_code' => mb_convert_encoding($row['item_code'] ?? '', 'UTF-8', 'UTF-8'),
@@ -1265,7 +1360,7 @@ require_once '../../includes/header.php';
                     
                     var errors = [];
                     
-                    if (importType === 'items') {
+                    if (importType === 'items' || importType === 'items_rap') {
                         // Check required fields
                         if (!row.item_code || row.item_code.trim() === '') {
                             errors.push('Kode item wajib diisi');
