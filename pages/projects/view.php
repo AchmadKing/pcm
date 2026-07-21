@@ -101,6 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Only load what we need for AJAX
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
+    require_once __DIR__ . '/../../includes/auth.php';
     
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
@@ -157,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     // Dependencies
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
+    require_once __DIR__ . '/../../includes/auth.php';
     
     // Auth Check
     if (session_status() === PHP_SESSION_NONE) { session_start(); }
@@ -357,6 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['ajax_update_rab_volume', 'ajax_update_rap_volume'])) {
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
+    require_once __DIR__ . '/../../includes/auth.php';
     
     header('Content-Type: application/json');
     

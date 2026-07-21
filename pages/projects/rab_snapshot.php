@@ -9,6 +9,7 @@
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'ajax_update_snapshot_volume') {
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
+    require_once __DIR__ . '/../../includes/auth.php';
     
     header('Content-Type: application/json');
     
