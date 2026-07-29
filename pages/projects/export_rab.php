@@ -47,44 +47,50 @@ $output = fopen('php://output', 'w');
 // BOM for Excel UTF-8
 fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
-// Get RAB data with AHSP codes
+ensureRabHeadSubsTableExists();
+
+// Get RAB data with AHSP codes and Head-Sub info
 $rabItems = dbGetAll("
     SELECT 
         rs.volume,
         rs.unit_price,
         rs.code as sub_code, rs.name as sub_name, rs.unit,
         rc.code as cat_code, rc.name as cat_name,
+        hs.code as hs_code, hs.name as hs_name,
         pa.ahsp_code
     FROM rab_subcategories rs
     JOIN rab_categories rc ON rs.category_id = rc.id
+    LEFT JOIN rab_head_subs hs ON rc.head_sub_id = hs.id
     LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
     WHERE rc.project_id = ?
-    ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+    ORDER BY COALESCE(hs.sort_order, 99999), hs.id, rc.sort_order, rc.code, rs.sort_order, rs.code
 ", [$projectId]);
 
 if ($format === 'import') {
     // ==========================================
-    // IMPORT FORMAT: Kategori | Kode AHSP | Volume
+    // IMPORT FORMAT: Head-Sub | Nama Kategori | Kode AHSP | Volume
     // ==========================================
     
     // Header row
-    fputcsv($output, ['Nama Kategori', 'Kode AHSP', 'Volume'], ';');
+    fputcsv($output, ['Head-Sub', 'Nama Kategori', 'Kode AHSP', 'Volume'], ';');
     
     $currentCat = '';
+    $currentHs = '';
     
     foreach ($rabItems as $item) {
-        // Check for new category
-        if ($currentCat !== $item['cat_name']) {
+        $hsDisplay = $item['hs_name'] ? ($item['hs_code'] ? $item['hs_code'] . ' - ' . $item['hs_name'] : $item['hs_name']) : '';
+        if ($currentCat !== $item['cat_name'] || $currentHs !== $hsDisplay) {
             $currentCat = $item['cat_name'];
-            // First item of new category: include category name
+            $currentHs = $hsDisplay;
             fputcsv($output, [
+                $hsDisplay,
                 $item['cat_name'],
                 $item['ahsp_code'] ?? '',
                 number_format($item['volume'], 2, ',', '')
             ], ';');
         } else {
-            // Same category: leave category column empty
             fputcsv($output, [
+                '',
                 '',
                 $item['ahsp_code'] ?? '',
                 number_format($item['volume'], 2, ',', '')
@@ -115,20 +121,38 @@ if ($format === 'import') {
     fputcsv($output, ['No', 'URAIAN PEKERJAAN', 'SAT', 'VOLUME', 'HARGA SATUAN (Rp)', 'JUMLAH HARGA (Rp)', 'KODE AHSP'], ';');
     
     $grandTotal = 0;
+    $currentHs = null;
     $currentCat = '';
     $catTotal = 0;
+    $hsTotal = 0;
     $itemNum = 0;
     
     foreach ($rabItems as $item) {
-        // Check for new category
-        if ($currentCat !== $item['cat_code']) {
-            // Print previous category total if not first
+        $hsName = $item['hs_name'] ? ($item['hs_code'] ? $item['hs_code'] . ' - ' . $item['hs_name'] : $item['hs_name']) : '';
+
+        // Check for new Head-Sub
+        if ($currentHs !== $hsName) {
             if ($currentCat !== '') {
                 fputcsv($output, ['', '', '', '', 'Jumlah Total ' . $currentCat, number_format($catTotal, 2, ',', '.'), ''], ';');
+                $currentCat = '';
+            }
+            if ($currentHs !== null && $currentHs !== '') {
+                fputcsv($output, ['', '', '', '', 'JUMLAH HEAD-SUB ' . $currentHs, number_format($hsTotal, 2, ',', '.'), ''], ';');
                 fputcsv($output, [''], ';');
             }
+            $currentHs = $hsName;
+            $hsTotal = 0;
+            if (!empty($hsName)) {
+                fputcsv($output, ['HEAD-SUB', strtoupper($hsName), '', '', '', '', ''], ';');
+            }
+        }
+
+        // Check for new category
+        if ($currentCat !== $item['cat_code']) {
+            if ($currentCat !== '') {
+                fputcsv($output, ['', '', '', '', 'Jumlah Total ' . $currentCat, number_format($catTotal, 2, ',', '.'), ''], ';');
+            }
             
-            // Print category header
             $currentCat = $item['cat_code'];
             $catTotal = 0;
             $itemNum = 0;
@@ -137,11 +161,11 @@ if ($format === 'import') {
         
         $itemNum++;
         
-        // Apply overhead markup to unit price (same as rab.php calculation)
         $unitPrice = $item['unit_price'] * (1 + ($overheadPct / 100));
         $totalPrice = $item['volume'] * $unitPrice;
         
         $catTotal += $totalPrice;
+        $hsTotal += $totalPrice;
         $grandTotal += $totalPrice;
         
         fputcsv($output, [
@@ -155,10 +179,14 @@ if ($format === 'import') {
         ], ';');
     }
     
-    // Last category total
+    // Last totals
     if ($currentCat !== '') {
         fputcsv($output, ['', '', '', '', 'Jumlah Total ' . $currentCat, number_format($catTotal, 2, ',', '.'), ''], ';');
     }
+    if ($currentHs !== null && $currentHs !== '') {
+        fputcsv($output, ['', '', '', '', 'JUMLAH HEAD-SUB ' . $currentHs, number_format($hsTotal, 2, ',', '.'), ''], ';');
+    }
+
     
     fputcsv($output, [''], ';');
     

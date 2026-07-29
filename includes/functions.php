@@ -612,6 +612,47 @@ function syncRapItemToAhsp($itemId, $projectId) {
 }
 
 /**
+ * Get RAP AHSP component breakdown from Master Data RAP tables
+ * Uses AHSP code matching to get data from project_ahsp_rap / project_ahsp_details_rap
+ * @param string $ahspCode
+ * @param int $projectId
+ * @return array ['upah' => float, 'material' => float, 'alat' => float]
+ */
+if (!function_exists('getRapAhspComponentBreakdown')) {
+    function getRapAhspComponentBreakdown($ahspCode, $projectId) {
+        $result = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        
+        if (!$ahspCode) return $result;
+        
+        // Find matching AHSP RAP by code
+        $ahspRap = dbGetRow("
+            SELECT id FROM project_ahsp_rap 
+            WHERE project_id = ? AND ahsp_code = ?
+        ", [$projectId, $ahspCode]);
+        
+        if (!$ahspRap) return $result;
+        
+        // Get component breakdown from project_ahsp_details_rap
+        $totals = dbGetAll("
+            SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
+            FROM project_ahsp_details_rap d
+            JOIN project_items_rap i ON d.item_id = i.id
+            WHERE d.ahsp_id = ?
+            GROUP BY i.category
+        ", [$ahspRap['id']]);
+        
+        foreach ($totals as $row) {
+            $cat = $row['category'] ?? '';
+            if (isset($result[$cat])) {
+                $result[$cat] = floatval($row['total']);
+            }
+        }
+        
+        return $result;
+    }
+}
+
+/**
  * Sync Master Data AHSP RAP to RAP Table (rap_ahsp_details)
  * Called when editing coefficient/price in Master Data AHSP RAP
  * 
@@ -1074,3 +1115,46 @@ function syncDeleteAhspRapToRab($ahspRapId, $projectId) {
     // 5. Delete RAB AHSP
     dbExecute("DELETE FROM project_ahsp WHERE id = ?", [$rabAhspId]);
 }
+
+/**
+ * Auto Migration: Ensure rab_head_subs table and head_sub_id column exist
+ */
+function ensureRabHeadSubsTableExists() {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    try {
+        dbExecute("
+            CREATE TABLE IF NOT EXISTS `rab_head_subs` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `project_id` int(11) NOT NULL,
+              `code` varchar(20) DEFAULT NULL,
+              `name` varchar(200) NOT NULL,
+              `sort_order` int(11) DEFAULT 0,
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`id`),
+              KEY `idx_project` (`project_id`),
+              CONSTRAINT `rab_head_subs_ibfk_1` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $colCheck = dbGetRow("
+            SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'rab_categories'
+              AND COLUMN_NAME = 'head_sub_id'
+        ");
+
+        if (empty($colCheck['cnt'])) {
+            dbExecute("
+                ALTER TABLE `rab_categories` 
+                ADD COLUMN `head_sub_id` int(11) DEFAULT NULL AFTER `project_id`,
+                ADD CONSTRAINT `fk_rab_categories_head_sub` FOREIGN KEY (`head_sub_id`) REFERENCES `rab_head_subs` (`id`) ON DELETE SET NULL
+            ");
+        }
+    } catch (Exception $e) {
+        // Ignore if already exists or schema error
+    }
+}
+

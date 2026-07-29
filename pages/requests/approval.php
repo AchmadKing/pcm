@@ -566,14 +566,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <br><small class="text-muted"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end">
-                                    <?php if (($item['item_type'] ?? '') === 'upah'): ?>
-                                        <?= formatNumber($item['coefficient'] / 6, 0) ?> org
-                                        <br><small class="text-muted">× 6 hari = <?= formatNumber($item['coefficient'], 4) ?></small>
-                                    <?php else: ?>
-                                        <?= formatNumber($item['coefficient'], 4) ?>
-                                    <?php endif; ?>
-                                </td>
+                                <td class="text-end"><?= formatNumber($item['coefficient'], 4) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><?= formatRupiah($hargaLapangan, false) ?></td>
                                 <td class="text-end">
@@ -594,13 +587,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                         <span class="badge bg-success">OK</span>
                                         <br><small class="text-success">Proyeksi sisa: <?= formatNumber($afterApproval, 4) ?></small>
                                         <?php endif; ?>
-                                        <br><small class="text-muted">RAP: <?= formatNumber($qtyRap, 4) ?> | Diajukan: 
-                                        <?php if (($item['item_type'] ?? '') === 'upah'): ?>
-                                            <?= formatNumber($item['coefficient'] / 6, 0) ?> org
-                                        <?php else: ?>
-                                            <?= formatNumber($item['coefficient'], 4) ?>
-                                        <?php endif; ?>
-                                        </small>
+                                        <br><small class="text-muted">RAP: <?= formatNumber($qtyRap, 4) ?> | Diajukan: <?= formatNumber($item['coefficient'], 4) ?></small>
                                     <?php else: ?>
                                         <span class="badge bg-secondary">-</span>
                                         <br><small class="text-muted">Tidak ada data RAP</small>

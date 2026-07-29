@@ -149,7 +149,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
     $rawItems = dbGetAll("
         SELECT d.id, pir.category as item_type, pir.item_code, pir.name, pir.unit, 
                d.coefficient as ahsp_coefficient, COALESCE(d.unit_price, pir.price) as unit_price, pir.actual_price,
-               rs.id as subcategory_id, rs.code as subcat_code, rs.name as subcat_name,
+               rs.id as subcategory_id, rs.code as subcat_code, rs.name as subcat_name, rs.unit as subcat_unit,
                ri.volume as rap_volume,
                (d.coefficient * COALESCE(ri.volume, 0)) as rap_qty,
                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
@@ -177,10 +177,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
             $grouped[$code] = [
                 'item_code' => $code,
                 'name' => $item['name'],
-                'unit' => $item['unit'],
+                'unit' => ($itemType === 'upah' && !empty($item['subcat_unit']) ? $item['subcat_unit'] : $item['unit']),
                 'item_type' => $item['item_type'],
                 'unit_price' => $item['unit_price'],
                 'actual_price' => $item['actual_price'],
+                'ahsp_coefficient' => floatval($item['ahsp_coefficient']),
                 'rap_qty' => 0,
                 'used_qty' => 0,
                 'subcat_details' => [] // per-subcategory capacity for sequential filling
@@ -194,6 +195,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
             'subcategory_id' => intval($item['subcategory_id']),
             'subcat_code' => $item['subcat_code'],
             'subcat_name' => $item['subcat_name'],
+            'subcat_unit' => $item['subcat_unit'],
+            'ahsp_coefficient' => floatval($item['ahsp_coefficient']),
             'rap_qty' => $rapQty,
             'used_qty' => $usedQty,
             'sisa' => $rapQty - $usedQty
@@ -912,7 +915,6 @@ $(document).ready(function() {
     // Render item checkboxes table (items grouped by item_code)
     function renderItemCheckboxes(items, itemType) {
         const isUpah = itemType === 'upah';
-        const coefHeader = isUpah ? 'Jml Orang' : 'Koefisien';
         
         let html = '<table class="table table-sm table-hover mb-0">';
         html += '<thead class="table-secondary" style="position:sticky;top:0;z-index:1;">';
@@ -920,19 +922,24 @@ $(document).ready(function() {
         html += '<th width="35" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllItems" title="Pilih Semua"></th>';
         html += '<th width="50">Kode</th>';
         html += '<th>Nama Item</th>';
-        html += '<th width="55">Satuan</th>';
+        html += '<th width="60">Satuan</th>';
         
-        // Hide Sisa column for Upah
-        if (!isUpah) {
+        if (isUpah) {
+            html += '<th width="85" class="text-center">Koef. AHSP</th>';
+            html += '<th width="110" class="text-center">Rencana Kerja <span class="text-danger">*</span></th>';
+            html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
+            html += '<th width="120" class="text-center">Jml Harga</th>';
+        } else {
             html += '<th width="80" class="text-center">Sisa Total</th>';
+            html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
+            html += '<th width="100" class="text-center">Koefisien <span class="text-danger">*</span></th>';
         }
         
-        html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
-        html += '<th width="100" class="text-center">' + coefHeader + ' <span class="text-danger">*</span></th>';
         html += '</tr></thead><tbody>';
         
         items.forEach(function(item, idx) {
             const price = item.actual_price || item.unit_price;
+            const ahspCoef = parseFloat(item.ahsp_coefficient) || 0;
             const rapQty = parseFloat(item.rap_qty) || 0;
             const usedQty = parseFloat(item.used_qty) || 0;
             const sisaQty = rapQty - usedQty;
@@ -960,6 +967,7 @@ $(document).ready(function() {
             html += 'data-name="' + escapeHtml(item.name) + '" ';
             html += 'data-unit="' + item.unit + '" ';
             html += 'data-price="' + price + '" ';
+            html += 'data-ahsp-coef="' + ahspCoef + '" ';
             html += 'data-sisa-qty="' + sisaQty + '" ';
             html += 'data-item-type="' + item.item_type + '" ';
             html += "data-subcat-details='" + subcatDetailsJson.replace(/'/g, '&#39;') + "'>";
@@ -973,13 +981,16 @@ $(document).ready(function() {
             html += '</td>';
             html += '<td><small>' + item.unit + '</small></td>';
             
-            // Hide Sisa column for Upah
-            if (!isUpah) {
+            if (isUpah) {
+                html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
+                html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
+                html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="0" data-idx="' + idx + '"></td>';
+                html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
+            } else {
                 html += '<td class="text-center"' + tooltipAttr + '><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + '">' + sisaText + '</small></td>';
+                html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="0" data-idx="' + idx + '"></td>';
+                html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
             }
-            
-            html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="0" data-idx="' + idx + '"></td>';
-            html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="' + (isUpah ? 'Org' : '0') + '" data-idx="' + idx + '"></td>';
             html += '</tr>';
         });
         
@@ -994,13 +1005,31 @@ $(document).ready(function() {
     // Auto-format price inputs in the checkbox table
     $(document).on('input', '.item-price-input', function() {
         autoFormatInput($(this));
+        updateRowJmlHarga($(this).closest('tr'));
     });
     
-    // Allow numbers and comma for coef inputs in the checkbox table
+    // Allow numbers and comma for workplan / coef inputs in the checkbox table
+    $(document).on('input', '.item-workplan-input', function() {
+        let val = $(this).val().replace(/[^\d,]/g, '');
+        $(this).val(val);
+        updateRowJmlHarga($(this).closest('tr'));
+    });
+    
     $(document).on('input', '.item-coef-input', function() {
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
     });
+
+    function updateRowJmlHarga(row) {
+        if ($('#itemTypeSelect').val() === 'upah') {
+            const cb = row.find('.item-checkbox');
+            const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
+            const workPlan = parseNumber(row.find('.item-workplan-input').val());
+            const price = parseNumber(row.find('.item-price-input').val());
+            const jmlHarga = ahspCoef * workPlan * price;
+            row.find('.item-total-price-cell').text(formatRupiah(jmlHarga));
+        }
+    }
     
     // Handle "Select All Items" checkbox
     $(document).on('change', '#selectAllItems', function() {
@@ -1042,23 +1071,28 @@ $(document).ready(function() {
             const cb = $(this);
             const row = cb.closest('tr');
             const price = parseNumber(row.find('.item-price-input').val());
-            const inputVal = parseNumber(row.find('.item-coef-input').val());
             const itemType = cb.data('item-type');
-            
-            if (price <= 0 || inputVal <= 0) {
-                errorCount++;
-                row.addClass('table-danger');
-                return; // skip this item
+            let actualCoef = 0;
+
+            if (itemType === 'upah') {
+                const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
+                const workPlan = parseNumber(row.find('.item-workplan-input').val());
+                if (price <= 0 || workPlan <= 0) {
+                    errorCount++;
+                    row.addClass('table-danger');
+                    return; // skip this item
+                }
+                actualCoef = ahspCoef * workPlan;
+            } else {
+                const inputVal = parseNumber(row.find('.item-coef-input').val());
+                if (price <= 0 || inputVal <= 0) {
+                    errorCount++;
+                    row.addClass('table-danger');
+                    return; // skip this item
+                }
+                actualCoef = inputVal;
             }
             row.removeClass('table-danger');
-            
-            // For upah: input is jumlah orang, actual coefficient = jumlah_orang × 6
-            let actualCoef = inputVal;
-            let jumlahOrang = null;
-            if (itemType === 'upah') {
-                jumlahOrang = inputVal;
-                actualCoef = inputVal * 6;
-            }
             
             // Get subcat_details for sequential filling
             let subcatDetails = [];
@@ -1078,7 +1112,6 @@ $(document).ready(function() {
                 unit: cb.data('unit'),
                 unit_price: price,
                 coefficient: actualCoef,
-                jumlah_orang: jumlahOrang,
                 subcat_details: subcatDetails,
                 rap_unit_price: parseFloat(cb.data('price')) || 0,
                 sisa_qty: parseFloat(cb.data('sisa-qty')) || 0,
@@ -1092,6 +1125,8 @@ $(document).ready(function() {
             row.removeClass('selected');
             row.find('.item-price-input').val('');
             row.find('.item-coef-input').val('');
+            row.find('.item-workplan-input').val('');
+            row.find('.item-total-price-cell').text('Rp 0');
         });
         
         // Update select all and counter
@@ -1102,7 +1137,7 @@ $(document).ready(function() {
             showToast(addedCount + ' item berhasil ditambahkan', 'success');
         }
         if (errorCount > 0) {
-            showToast(errorCount + ' item dilewati (harga/koefisien belum diisi)', 'warning');
+            showToast(errorCount + ' item dilewati (harga/koefisien/rencana kerja belum diisi)', 'warning');
         }
     });
     
@@ -1212,16 +1247,7 @@ $(document).ready(function() {
         const readonlyUnit = data.is_readonly ? 'readonly class="form-control form-control-sm readonly-field"' : 'class="form-control form-control-sm"';
         
         const totalPrice = data.unit_price * data.coefficient;
-        const isUpah = data.item_type === 'upah';
-        
-        let coefDisplay = '';
-        let coefLabel = '';
-        if (isUpah && data.jumlah_orang !== null) {
-            coefDisplay = data.jumlah_orang.toString().replace('.', ',');
-            coefLabel = '<small class="text-info d-block">× 6 hari = ' + data.coefficient + '</small>';
-        } else {
-            coefDisplay = data.coefficient > 0 ? data.coefficient.toString().replace('.', ',') : '';
-        }
+        const coefDisplay = data.coefficient > 0 ? data.coefficient.toString().replace('.', ',') : '';
         
         // Status Harga: compare unit_price (field) vs rap_unit_price
         let statusHargaHtml = '<span class="badge bg-secondary">-</span>';
@@ -1281,19 +1307,10 @@ $(document).ready(function() {
                            placeholder="0" required>
                 </td>
                 <td>
-                    ${isUpah ? 
-                        `<input type="text" name="items[${itemIndex}][coefficient]" 
-                               value="${coefDisplay}" 
-                               class="form-control form-control-sm text-end coef-input" 
-                               data-is-upah="1" data-jumlah-orang="${data.jumlah_orang || ''}" 
-                               placeholder="Jml Orang" required>
-                         ${coefLabel}` 
-                    : 
-                        `<input type="text" name="items[${itemIndex}][coefficient]" 
-                               value="${coefDisplay}" 
-                               class="form-control form-control-sm text-end coef-input" 
-                               placeholder="0" required>`
-                    }
+                    <input type="text" name="items[${itemIndex}][coefficient]" 
+                           value="${coefDisplay}" 
+                           class="form-control form-control-sm text-end coef-input" 
+                           placeholder="0" required>
                 </td>
                 <td>
                     <input type="text" name="items[${itemIndex}][total_price]" 
@@ -1347,20 +1364,6 @@ $(document).ready(function() {
         $(this).val(val);
         
         const row = $(this).closest('tr');
-        const isUpah = $(this).data('is-upah') == 1;
-        
-        if (isUpah) {
-            // For upah: input = jumlah orang, actual coef = jumlah_orang × 6
-            const jumlahOrang = parseNumber(val);
-            const actualCoef = jumlahOrang * 6;
-            $(this).data('jumlah-orang', jumlahOrang);
-            // Update the ×6 label
-            $(this).siblings('small').remove();
-            if (jumlahOrang > 0) {
-                $(this).after('<small class="text-info d-block">× 6 hari = ' + actualCoef + '</small>');
-            }
-        }
-        
         calculateRowTotal(row);
     });
     
@@ -1370,14 +1373,7 @@ $(document).ready(function() {
     function calculateRowTotal(row) {
         const price = parseNumber(row.find('.price-input').val());
         const coefInput = row.find('.coef-input');
-        const isUpah = coefInput.data('is-upah') == 1;
-        let coef = parseNumber(coefInput.val());
-        
-        // For upah: multiply by 6 to get actual coefficient
-        if (isUpah) {
-            coef = coef * 6;
-        }
-        
+        const coef = parseNumber(coefInput.val());
         const total = price * coef;
         
         row.find('.total-price').val(formatNumber(total));
@@ -1421,12 +1417,7 @@ $(document).ready(function() {
             const unit = row.find('input[name*="[unit]"]').val();
             const unitPrice = parseNumber(row.find('.price-input').val());
             const coefInput = row.find('.coef-input');
-            const isUpah = coefInput.data('is-upah') == 1;
-            let coefficient = parseNumber(coefInput.val());
-            
-            if (isUpah) {
-                coefficient = coefficient * 6;
-            }
+            const coefficient = parseNumber(coefInput.val());
             
             if (!itemName || !unit || unitPrice <= 0 || coefficient <= 0) {
                 hasError = true;

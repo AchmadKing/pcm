@@ -305,14 +305,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($item['unit']) ?></td>
-                                <td class="text-end">
-                                    <?php if (($item['item_type'] ?? '') === 'upah'): ?>
-                                        <?= formatNumber($item['coefficient'] / 6, 0) ?> org
-                                        <br><small class="text-muted">× 6 hari = <?= formatNumber($item['coefficient'], 2) ?></small>
-                                    <?php else: ?>
-                                        <?= formatNumber($item['coefficient'], 4) ?>
-                                    <?php endif; ?>
-                                </td>
+                                <td class="text-end"><?= formatNumber($item['coefficient'], 4) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><strong><?= formatRupiah($item['total_price'], false) ?></strong></td>
                             </tr>

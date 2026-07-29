@@ -63,10 +63,22 @@ function getAhspBreakdownForPdf($ahspId) {
     return $result;
 }
 
-// Get enriched data (same logic as rab.php)
+ensureRabHeadSubsTableExists();
+
+// Get Head-Subs and Categories for PDF
+$headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
 $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
 
-$rabData = [];
+$headSubMap = [];
+foreach ($headSubs as $hs) {
+    $headSubMap[$hs['id']] = [
+        'head_sub' => $hs,
+        'categories' => [],
+        'total' => 0
+    ];
+}
+
+$standaloneCats = [];
 $grandTotal = 0;
 
 foreach ($categories as $cat) {
@@ -86,12 +98,21 @@ foreach ($categories as $cat) {
     }
     
     $grandTotal += $catTotal;
-    $rabData[$cat['id']] = [
+    $catData = [
         'category' => $cat,
         'subcategories' => $enrichedSubcats,
         'total' => $catTotal
     ];
+
+    if (!empty($cat['head_sub_id']) && isset($headSubMap[$cat['head_sub_id']])) {
+        $hsId = $cat['head_sub_id'];
+        $headSubMap[$hsId]['categories'][$cat['id']] = $catData;
+        $headSubMap[$hsId]['total'] += $catTotal;
+    } else {
+        $standaloneCats[$cat['id']] = $catData;
+    }
 }
+
 
 $ppnAmount = $grandTotal * ($ppnPercentage / 100);
 $totalWithPpn = $grandTotal + $ppnAmount;
@@ -283,12 +304,22 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
         </thead>
         <tbody>
             <?php 
-            foreach ($rabData as $catId => $data):
+            // Render Head-Sub Groups
+            foreach ($headSubMap as $hsId => $hsGroup):
+                $hs = $hsGroup['head_sub'];
+                $hsCats = $hsGroup['categories'];
+            ?>
+            <tr style="background:#2c3e50; color:#ffffff; font-weight:bold;">
+                <td colspan="6" style="padding:6px 8px;">
+                    <?= !empty($hs['code']) ? htmlspecialchars($hs['code']) . ' - ' : '' ?><?= strtoupper(htmlspecialchars($hs['name'])) ?>
+                </td>
+            </tr>
+
+            <?php foreach ($hsCats as $catId => $data):
                 $cat = $data['category'];
                 $subcats = $data['subcategories'];
                 $catTotal = $data['total'];
             ?>
-            <!-- Category Header -->
             <tr class="cat-header">
                 <td><?= htmlspecialchars($cat['code']) ?></td>
                 <td colspan="5"><?= strtoupper(htmlspecialchars($cat['name'])) ?></td>
@@ -308,12 +339,57 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
             </tr>
             <?php endforeach; ?>
             
-            <!-- Category Total -->
             <tr class="cat-total">
                 <td colspan="5" class="text-end">Jumlah Total <?= htmlspecialchars($cat['code']) ?></td>
                 <td class="text-end"><?= number_format($catTotal, 2, ',', '.') ?></td>
             </tr>
             <?php endforeach; ?>
+
+            <tr style="background:#d1ecf1; font-weight:bold;">
+                <td colspan="5" class="text-end">JUMLAH <?= !empty($hs['code']) ? htmlspecialchars($hs['code']) : htmlspecialchars($hs['name']) ?></td>
+                <td class="text-end"><?= number_format($hsGroup['total'], 2, ',', '.') ?></td>
+            </tr>
+            <?php endforeach; ?>
+
+            <!-- Render Standalone Categories -->
+            <?php if (!empty($standaloneCats)): ?>
+                <?php if (!empty($headSubs)): ?>
+                <tr style="background:#4a6572; color:#ffffff; font-weight:bold;">
+                    <td colspan="6" style="padding:6px 8px;">KATEGORI TANPA HEAD-SUB</td>
+                </tr>
+                <?php endif; ?>
+
+                <?php foreach ($standaloneCats as $catId => $data):
+                    $cat = $data['category'];
+                    $subcats = $data['subcategories'];
+                    $catTotal = $data['total'];
+                ?>
+                <tr class="cat-header">
+                    <td><?= htmlspecialchars($cat['code']) ?></td>
+                    <td colspan="5"><?= strtoupper(htmlspecialchars($cat['name'])) ?></td>
+                </tr>
+                
+                <?php $itemNum = 0; foreach ($subcats as $sub): $itemNum++; 
+                    $unitPrice = $sub['unit_price_display'];
+                    $totalPrice = $sub['volume'] * $unitPrice;
+                ?>
+                <tr>
+                    <td class="text-center"><?= $itemNum ?></td>
+                    <td><?= htmlspecialchars($sub['name']) ?></td>
+                    <td class="text-center"><?= htmlspecialchars($sub['unit']) ?></td>
+                    <td class="text-end"><?= number_format($sub['volume'], 2, ',', '.') ?></td>
+                    <td class="text-end"><?= number_format($unitPrice, 2, ',', '.') ?></td>
+                    <td class="text-end"><?= number_format($totalPrice, 2, ',', '.') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                
+                <tr class="cat-total">
+                    <td colspan="5" class="text-end">Jumlah Total <?= htmlspecialchars($cat['code']) ?></td>
+                    <td class="text-end"><?= number_format($catTotal, 2, ',', '.') ?></td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+
         </tbody>
         <tfoot>
             <!-- Grand Total -->

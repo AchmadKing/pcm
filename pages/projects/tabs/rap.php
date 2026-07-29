@@ -26,35 +26,37 @@ if ($rabSourceId > 0) {
 
 // Function to get RAP AHSP component breakdown from Master Data RAP
 // Uses AHSP code matching to get data from project_ahsp_rap / project_ahsp_details_rap
-function getRapAhspComponentBreakdown($ahspCode, $projectId) {
-    $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
-    
-    if (!$ahspCode) return $result;
-    
-    // Find matching AHSP RAP by code
-    $ahspRap = dbGetRow("
-        SELECT id FROM project_ahsp_rap 
-        WHERE project_id = ? AND ahsp_code = ?
-    ", [$projectId, $ahspCode]);
-    
-    if (!$ahspRap) return $result;
-    
-    // Get component breakdown from project_ahsp_details_rap
-    $totals = dbGetAll("
-        SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details_rap d
-        JOIN project_items_rap i ON d.item_id = i.id
-        WHERE d.ahsp_id = ?
-        GROUP BY i.category
-    ", [$ahspRap['id']]);
-    
-    foreach ($totals as $row) {
-        if (isset($result[$row['category']])) {
-            $result[$row['category']] = $row['total'];
+if (!function_exists('getRapAhspComponentBreakdown')) {
+    function getRapAhspComponentBreakdown($ahspCode, $projectId) {
+        $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
+        
+        if (!$ahspCode) return $result;
+        
+        // Find matching AHSP RAP by code
+        $ahspRap = dbGetRow("
+            SELECT id FROM project_ahsp_rap 
+            WHERE project_id = ? AND ahsp_code = ?
+        ", [$projectId, $ahspCode]);
+        
+        if (!$ahspRap) return $result;
+        
+        // Get component breakdown from project_ahsp_details_rap
+        $totals = dbGetAll("
+            SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
+            FROM project_ahsp_details_rap d
+            JOIN project_items_rap i ON d.item_id = i.id
+            WHERE d.ahsp_id = ?
+            GROUP BY i.category
+        ", [$ahspRap['id']]);
+        
+        foreach ($totals as $row) {
+            if (isset($result[$row['category']])) {
+                $result[$row['category']] = $row['total'];
+            }
         }
+        
+        return $result;
     }
-    
-    return $result;
 }
 
 
@@ -83,14 +85,32 @@ function getAhspComponentBreakdown($ahspId) {
     return $result;
 }
 
-// Get RAP data grouped by category
+ensureRabHeadSubsTableExists();
+
+// Get Head-Subs and Categories for RAP
+$headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
 $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
 
-$rapData = [];
+$headSubMap = [];
+foreach ($headSubs as $hs) {
+    $headSubMap[$hs['id']] = [
+        'head_sub' => $hs,
+        'categories' => [],
+        'total' => 0,
+        'total_tenaga' => 0,
+        'total_bahan' => 0,
+        'total_alat' => 0,
+        'rab_total' => 0
+    ];
+}
+
+$standaloneCats = [];
 $grandTotal = 0;
 $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
+$grandRabTotal = 0;
+$overheadPct = $project['overhead_percentage'] ?? 10;
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
@@ -109,13 +129,10 @@ foreach ($categories as $cat) {
     $catAlat = 0;
     $catRabTotal = 0;
     
-    $overheadPct = $project['overhead_percentage'] ?? 10;
-    
     $enrichedSubcats = [];
     foreach ($subcats as $sub) {
         $volume = $sub['rap_volume'] ?? $sub['volume'];
         
-        // Get AHSP component breakdown from Master Data RAP
         $ahspCode = $sub['ahsp_code'] ?? null;
         if ($ahspCode) {
             $components = getRapAhspComponentBreakdown($ahspCode, $projectId);
@@ -123,11 +140,7 @@ foreach ($categories as $cat) {
             $components = ['upah' => 0, 'material' => 0, 'alat' => 0];
         }
         
-        // Derive baseUnitPrice directly from component totals (D = A+B+C)
-        // This guarantees: harga satuan = tenaga + bahan + alat (same as AHSP RAP master data)
         $baseUnitPrice = $components['upah'] + $components['material'] + $components['alat'];
-        
-        // If no AHSP RAP data available, fallback to stored value
         if ($baseUnitPrice <= 0) {
             $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['unit_price'];
         }
@@ -136,21 +149,17 @@ foreach ($categories as $cat) {
         $subTotal = $volume * $unitPriceWithOverhead;
         $catTotal += $subTotal;
         
-        // Calculate RAB total for comparison
         $rabVolume = $sub['volume'];
         
         if ($usingSnapshot) {
-             // If using snapshot, use stored price
             $rabPrice = $sub['unit_price'];
         } else {
-             // If NOT using snapshot (Current RAB), calculate dynamically from AHSP components
-             // This matches logic in rab.php
-             if ($sub['ahsp_id']) {
-                 $rabComponents = getAhspComponentBreakdown($sub['ahsp_id']);
-                 $rabPrice = $rabComponents['total'];
-             } else {
-                 $rabPrice = $sub['unit_price'];
-             }
+            if ($sub['ahsp_id']) {
+                $rabComponents = getAhspComponentBreakdown($sub['ahsp_id']);
+                $rabPrice = $rabComponents['total'];
+            } else {
+                $rabPrice = $sub['unit_price'];
+            }
         }
         
         if ($usingSnapshot && $sub['id']) {
@@ -172,7 +181,6 @@ foreach ($categories as $cat) {
         $sub['selisih'] = $rabTotal - $subTotal;
         $catRabTotal += $rabTotal;
         
-        // Component budgets = component unit price × volume (without overhead)
         $sub['display_volume'] = $volume;
         $sub['display_unit_price'] = $unitPriceWithOverhead;
         $sub['display_total'] = $subTotal;
@@ -191,8 +199,9 @@ foreach ($categories as $cat) {
     $grandTotalTenaga += $catTenaga;
     $grandTotalBahan += $catBahan;
     $grandTotalAlat += $catAlat;
+    $grandRabTotal += $catRabTotal;
     
-    $rapData[$cat['id']] = [
+    $catData = [
         'category' => $cat,
         'subcategories' => $enrichedSubcats,
         'total' => $catTotal,
@@ -202,7 +211,20 @@ foreach ($categories as $cat) {
         'rab_total' => $catRabTotal,
         'selisih' => $catRabTotal - $catTotal
     ];
+
+    if (!empty($cat['head_sub_id']) && isset($headSubMap[$cat['head_sub_id']])) {
+        $hsId = $cat['head_sub_id'];
+        $headSubMap[$hsId]['categories'][$cat['id']] = $catData;
+        $headSubMap[$hsId]['total'] += $catTotal;
+        $headSubMap[$hsId]['total_tenaga'] += $catTenaga;
+        $headSubMap[$hsId]['total_bahan'] += $catBahan;
+        $headSubMap[$hsId]['total_alat'] += $catAlat;
+        $headSubMap[$hsId]['rab_total'] += $catRabTotal;
+    } else {
+        $standaloneCats[$cat['id']] = $catData;
+    }
 }
+
 
 // Check if there are RAB items but no RAP items
 $rabSubcatCount = dbGetRow("
@@ -229,11 +251,7 @@ $ppnAmount = $grandTotal * ($ppnPercentage / 100);
 $totalWithPpn = $grandTotal + $ppnAmount;
 $totalRounded = ceil($totalWithPpn / 10) * 10;
 
-// Calculate grand RAB total for comparison
-$grandRabTotal = 0;
-foreach ($rapData as $data) {
-    $grandRabTotal += $data['rab_total'];
-}
+// Calculate grand selisih
 $grandSelisih = $grandRabTotal - $grandTotal;
 
 // Calculate RAB totals with PPN for rounded comparison
@@ -260,6 +278,14 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
     <h5 class="mb-0"><?= sanitize($project['name']) ?></h5>
     <div class="d-flex flex-wrap gap-2">
+        <!-- Expand / Collapse All -->
+        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" onclick="toggleAllRapRows(true)" title="Buka Semua Tampilan Tabel">
+            <i class="mdi mdi-unfold-more-horizontal"></i> Buka Semua
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" onclick="toggleAllRapRows(false)" title="Tutup Semua Tampilan Tabel">
+            <i class="mdi mdi-unfold-less-horizontal"></i> Tutup Semua
+        </button>
+
         <!-- Acuan RAB Dropdown -->
         <div class="dropdown">
             <button class="btn btn-sm btn-info dropdown-toggle text-nowrap" type="button" data-bs-toggle="dropdown">
@@ -350,118 +376,285 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
             </tr>
         </thead>
         <tbody>
-            <?php if (empty($rapData) || $rabSubcatCount == 0): ?>
+            <?php if (empty($headSubs) && empty($categories)): ?>
             <tr>
                 <td colspan="11" class="text-center text-muted py-4">
                     Belum ada data RAB. <a href="?id=<?= $projectId ?>&tab=rab">Tambahkan item di RAB</a> terlebih dahulu.
                 </td>
             </tr>
             <?php else: ?>
-            
-            <?php foreach ($rapData as $catId => $data): 
-                $cat = $data['category'];
-                $subcats = $data['subcategories'];
-                $catTotal = $data['total'];
-                $catTenaga = $data['total_tenaga'];
-                $catBahan = $data['total_bahan'];
-                $catAlat = $data['total_alat'];
+
+            <!-- Render Head-Sub Groups -->
+            <?php foreach ($headSubMap as $hsId => $hsGroup):
+                $hs = $hsGroup['head_sub'];
+                $hsCats = $hsGroup['categories'];
             ?>
-            <tr class="table-primary">
-                <td colspan="11">
-                    <strong><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
-                </td>
-            </tr>
-            
-            <?php foreach ($subcats as $sub): ?>
-                <tr data-category-id="<?= $cat['id'] ?>" data-rap-id="<?= $sub['rap_id'] ?? '' ?>">
-                    <td><?= sanitize($sub['code']) ?></td>
-                    <td><?= sanitize($sub['name']) ?></td>
-                    <td><?= sanitize($sub['unit']) ?></td>
-                    <td>
-                        <?php if ($sub['rap_id'] && $isEditable): ?>
-                        <input type="text" 
-                               class="form-control form-control-sm border-0 text-end inline-ajax" 
-                               value="<?= formatVolume($sub['display_volume']) ?>" 
-                               style="width:80px;"
-                               data-ajax-url="view.php?id=<?= $projectId ?>"
-                               data-action="ajax_update_rap_volume"
-                               data-id="<?= $sub['rap_id'] ?>"
-                               data-field="volume"
-                               data-format="decimal"
-                               data-unit-price="<?= $sub['display_unit_price'] ?>"
-                               data-unit-price-tenaga="<?= $sub['ahsp_tenaga'] ?? 0 ?>"
-                               data-unit-price-bahan="<?= $sub['ahsp_bahan'] ?? 0 ?>"
-                               data-unit-price-alat="<?= $sub['ahsp_alat'] ?? 0 ?>">
-                        <?php else: ?>
-                        <span class="text-end d-block"><?= formatVolume($sub['display_volume']) ?></span>
-                        <?php endif; ?>
+                <!-- Head-Sub Row -->
+                <tr class="table-dark head-sub-row-rap" data-hs-id="<?= $hsId ?>">
+                    <td colspan="11" class="py-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-light p-0 px-2 toggle-hs-rap-btn" onclick="toggleHeadSubRap(<?= $hsId ?>)" title="Tutup / Buka Head-Sub">
+                                <i class="mdi mdi-chevron-down font-size-16" id="hs-rap-chevron-<?= $hsId ?>"></i>
+                            </button>
+                            <strong class="font-size-14 text-uppercase text-warning">
+                                <?php if (!empty($hs['code'])): ?>
+                                    <span class="badge bg-warning text-dark me-2"><?= sanitize($hs['code']) ?></span>
+                                <?php endif; ?>
+                                <?= sanitize($hs['name']) ?>
+                            </strong>
+                        </div>
                     </td>
-                    <td class="text-end"><?= formatNumber($sub['display_unit_price'], 2) ?></td>
-                    <td class="text-end" id="jumlah-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['display_total'], 2) ?></td>
-                    <td class="text-end" id="tenaga-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_tenaga']) ?></td>
-                    <td class="text-end" id="bahan-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_bahan']) ?></td>
-                    <td class="text-end" id="alat-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_alat']) ?></td>
-                    <?php 
-                        $rapSubTotal = $sub['display_total'] ?? 0;
-                        $rabTotal = $sub['rab_total'] ?? 0;
-                        $selisih = $rabTotal - $rapSubTotal;
-                        $selisihPct = $rabTotal > 0 ? ($selisih / $rabTotal) * 100 : 0;
-                        
-                        // Inverted Logic:
-                        // Positive (Savings) = Green
-                        // Negative (Over Budget) = Red
-                        $selisihClass = $selisih > 0 ? 'text-success' : ($selisih < 0 ? 'text-danger' : 'text-muted');
+                </tr>
+
+                <?php if (empty($hsCats)): ?>
+                <tr class="hs-rap-item-<?= $hsId ?> table-light">
+                    <td colspan="11" class="text-center text-muted py-2 small fs-13">
+                        <em>Belum ada kategori di dalam Head-Sub ini.</em>
+                    </td>
+                </tr>
+                <?php else: ?>
+                    <?php foreach ($hsCats as $catId => $data):
+                        $cat = $data['category'];
+                        $subcats = $data['subcategories'];
+                        $catTotal = $data['total'];
+                        $catTenaga = $data['total_tenaga'];
+                        $catBahan = $data['total_bahan'];
+                        $catAlat = $data['total_alat'];
                     ?>
-                    <td class="text-end <?= $selisihClass ?>" 
+                        <!-- Category Header Row -->
+                        <tr class="table-primary category-row hs-rap-item-<?= $hsId ?>" data-cat-id="<?= $catId ?>">
+                            <td colspan="11" class="py-2">
+                                <div class="d-flex align-items-center gap-2" style="padding-left: 15px;">
+                                    <button type="button" class="btn btn-sm btn-primary p-0 px-2 toggle-cat-rap-btn" onclick="toggleCategoryRap(<?= $catId ?>)" title="Tutup / Buka Kategori">
+                                        <i class="mdi mdi-chevron-down font-size-15" id="cat-rap-chevron-<?= $catId ?>"></i>
+                                    </button>
+                                    <strong class="font-size-14"><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Subcategories -->
+                        <?php foreach ($subcats as $sub): ?>
+                        <tr class="hs-rap-item-<?= $hsId ?> cat-rap-item-<?= $catId ?>" data-category-id="<?= $cat['id'] ?>" data-rap-id="<?= $sub['rap_id'] ?? '' ?>">
+                            <td><?= sanitize($sub['code']) ?></td>
+                            <td><?= sanitize($sub['name']) ?></td>
+                            <td><?= sanitize($sub['unit']) ?></td>
+                            <td>
+                                <?php if ($sub['rap_id'] && $isEditable): ?>
+                                <input type="text" 
+                                       class="form-control form-control-sm border-0 text-end inline-ajax" 
+                                       value="<?= formatVolume($sub['display_volume']) ?>" 
+                                       style="width:80px;"
+                                       data-ajax-url="view.php?id=<?= $projectId ?>"
+                                       data-action="ajax_update_rap_volume"
+                                       data-id="<?= $sub['rap_id'] ?>"
+                                       data-field="volume"
+                                       data-format="decimal"
+                                       data-unit-price="<?= $sub['display_unit_price'] ?>"
+                                       data-unit-price-tenaga="<?= $sub['ahsp_tenaga'] ?? 0 ?>"
+                                       data-unit-price-bahan="<?= $sub['ahsp_bahan'] ?? 0 ?>"
+                                       data-unit-price-alat="<?= $sub['ahsp_alat'] ?? 0 ?>">
+                                <?php else: ?>
+                                <span class="text-end d-block"><?= formatVolume($sub['display_volume']) ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-end"><?= formatNumber($sub['display_unit_price'], 2) ?></td>
+                            <td class="text-end" id="jumlah-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['display_total'], 2) ?></td>
+                            <td class="text-end" id="tenaga-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_tenaga']) ?></td>
+                            <td class="text-end" id="bahan-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_bahan']) ?></td>
+                            <td class="text-end" id="alat-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_alat']) ?></td>
+                            <?php 
+                                $rapSubTotal = $sub['display_total'] ?? 0;
+                                $rabTotal = $sub['rab_total'] ?? 0;
+                                $selisih = $rabTotal - $rapSubTotal;
+                                $selisihPct = $rabTotal > 0 ? ($selisih / $rabTotal) * 100 : 0;
+                                $selisihClass = $selisih > 0 ? 'text-success' : ($selisih < 0 ? 'text-danger' : 'text-muted');
+                            ?>
+                            <td class="text-end <?= $selisihClass ?>" 
+                                data-bs-toggle="tooltip" 
+                                data-bs-placement="left"
+                                data-bs-html="true"
+                                title="Selisih: <?= ($selisihPct >= 0 ? '+' : '') . formatNumber($selisihPct, 2) ?>%<br>RAB: <?= formatRupiah($rabTotal) ?>"
+                                style="cursor: help;">
+                                <strong><?= ($selisih >= 0 ? '+' : '') . formatNumber($selisih) ?></strong>
+                            </td>
+                            <td>
+                                <?php if ($sub['rap_id'] && !empty($sub['ahsp_code'])): ?>
+                                <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>')">
+                                    <i class="mdi mdi-file-table-outline"></i>
+                                </button>
+                                <?php else: ?>
+                                <span class="text-muted">-</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+
+                        <!-- Category Total -->
+                        <?php 
+                            $catRabTotal = $data['rab_total'] ?? 0;
+                            $catSelisih = $catRabTotal - $catTotal;
+                            $catSelisihPct = $catRabTotal > 0 ? ($catSelisih / $catRabTotal) * 100 : 0;
+                            $catSelisihClass = $catSelisih > 0 ? 'text-success' : ($catSelisih < 0 ? 'text-danger' : 'text-muted');
+                        ?>
+                        <tr class="table-secondary hs-rap-item-<?= $hsId ?> cat-rap-item-<?= $catId ?>">
+                            <td colspan="5" class="text-end"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
+                            <td class="text-end" id="cat-total-<?= $cat['id'] ?>"><strong><?= formatNumber($catTotal, 2) ?></strong></td>
+                            <td class="text-end" id="cat-tenaga-<?= $cat['id'] ?>"><strong><?= formatNumber($catTenaga, 2) ?></strong></td>
+                            <td class="text-end" id="cat-bahan-<?= $cat['id'] ?>"><strong><?= formatNumber($catBahan, 2) ?></strong></td>
+                            <td class="text-end" id="cat-alat-<?= $cat['id'] ?>"><strong><?= formatNumber($catAlat, 2) ?></strong></td>
+                            <td class="text-end <?= $catSelisihClass ?>"
+                                data-bs-toggle="tooltip" 
+                                data-bs-placement="left"
+                                data-bs-html="true"
+                                title="Selisih: <?= ($catSelisihPct >= 0 ? '+' : '') . formatNumber($catSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($catRabTotal) ?>"
+                                style="cursor: help;">
+                                <strong><?= ($catSelisih >= 0 ? '+' : '') . formatNumber($catSelisih, 2) ?></strong>
+                            </td>
+                            <td></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+                <!-- Head-Sub Total Row -->
+                <?php 
+                    $hsRabTotal = $hsGroup['rab_total'] ?? 0;
+                    $hsTotal = $hsGroup['total'] ?? 0;
+                    $hsSelisih = $hsRabTotal - $hsTotal;
+                    $hsSelisihPct = $hsRabTotal > 0 ? ($hsSelisih / $hsRabTotal) * 100 : 0;
+                    $hsSelisihClass = $hsSelisih > 0 ? 'text-success' : ($hsSelisih < 0 ? 'text-danger' : 'text-muted');
+                ?>
+                <tr class="table-info hs-rap-item-<?= $hsId ?>">
+                    <td colspan="5" class="text-end"><strong>JUMLAH <?= !empty($hs['code']) ? sanitize($hs['code']) : sanitize($hs['name']) ?></strong></td>
+                    <td class="text-end"><strong><?= formatNumber($hsTotal, 2) ?></strong></td>
+                    <td class="text-end"><strong><?= formatNumber($hsGroup['total_tenaga'], 2) ?></strong></td>
+                    <td class="text-end"><strong><?= formatNumber($hsGroup['total_bahan'], 2) ?></strong></td>
+                    <td class="text-end"><strong><?= formatNumber($hsGroup['total_alat'], 2) ?></strong></td>
+                    <td class="text-end <?= $hsSelisihClass ?>"
                         data-bs-toggle="tooltip" 
                         data-bs-placement="left"
                         data-bs-html="true"
-                        title="Selisih: <?= ($selisihPct >= 0 ? '+' : '') . formatNumber($selisihPct, 2) ?>%<br>RAB: <?= formatRupiah($rabTotal) ?>"
+                        title="Selisih: <?= ($hsSelisihPct >= 0 ? '+' : '') . formatNumber($hsSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($hsRabTotal) ?>"
                         style="cursor: help;">
-                        <strong><?= ($selisih >= 0 ? '+' : '') . formatNumber($selisih) ?></strong>
+                        <strong><?= ($hsSelisih >= 0 ? '+' : '') . formatNumber($hsSelisih, 2) ?></strong>
                     </td>
-                    <td>
-                        <?php if ($sub['rap_id'] && !empty($sub['ahsp_code'])): ?>
-                        <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>')">
-                            <i class="mdi mdi-file-table-outline"></i>
-                        </button>
-                        <?php else: ?>
-                        <span class="text-muted">-</span>
-                        <?php endif; ?>
-                    </td>
+                    <td></td>
                 </tr>
             <?php endforeach; ?>
-            
-            <!-- Category Total -->
-            <?php 
-                $catRabTotal = $data['rab_total'] ?? 0;
-                $catSelisih = $catRabTotal - $catTotal;
-                $catSelisihPct = $catRabTotal > 0 ? ($catSelisih / $catRabTotal) * 100 : 0;
-                
-                // Inverted Logic:
-                // Positive (Savings) = Green
-                // Negative (Over Budget) = Red
-                $catSelisihClass = $catSelisih > 0 ? 'text-success' : ($catSelisih < 0 ? 'text-danger' : 'text-muted');
-            ?>
-            <tr class="table-secondary">
-                <td colspan="5" class="text-end"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
-                <td class="text-end" id="cat-total-<?= $cat['id'] ?>"><strong><?= formatNumber($catTotal, 2) ?></strong></td>
-                <td class="text-end" id="cat-tenaga-<?= $cat['id'] ?>"><strong><?= formatNumber($catTenaga, 2) ?></strong></td>
-                <td class="text-end" id="cat-bahan-<?= $cat['id'] ?>"><strong><?= formatNumber($catBahan, 2) ?></strong></td>
-                <td class="text-end" id="cat-alat-<?= $cat['id'] ?>"><strong><?= formatNumber($catAlat, 2) ?></strong></td>
-                <td class="text-end <?= $catSelisihClass ?>"
-                    data-bs-toggle="tooltip" 
-                    data-bs-placement="left"
-                    data-bs-html="true"
-                    title="Selisih: <?= ($catSelisihPct >= 0 ? '+' : '') . formatNumber($catSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($catRabTotal) ?>"
-                    style="cursor: help;">
-                    <strong><?= ($catSelisih >= 0 ? '+' : '') . formatNumber($catSelisih, 2) ?></strong>
-                </td>
-                <td></td>
-            </tr>
-            <?php endforeach; ?>
-            
+
+            <!-- Render Standalone Categories -->
+            <?php if (!empty($standaloneCats)): ?>
+                <?php if (!empty($headSubs)): ?>
+                <tr class="table-dark">
+                    <td colspan="11" class="py-2"><strong class="font-size-14 text-uppercase">KATEGORI TANPA HEAD-SUB</strong></td>
+                </tr>
+                <?php endif; ?>
+
+                <?php foreach ($standaloneCats as $catId => $data):
+                    $cat = $data['category'];
+                    $subcats = $data['subcategories'];
+                    $catTotal = $data['total'];
+                    $catTenaga = $data['total_tenaga'];
+                    $catBahan = $data['total_bahan'];
+                    $catAlat = $data['total_alat'];
+                ?>
+                    <!-- Standalone Category Header Row -->
+                    <tr class="table-primary category-row" data-cat-id="<?= $catId ?>">
+                        <td colspan="11" class="py-2">
+                            <div class="d-flex align-items-center gap-2" style="padding-left: 15px;">
+                                <button type="button" class="btn btn-sm btn-primary p-0 px-2 toggle-cat-rap-btn" onclick="toggleCategoryRap(<?= $catId ?>)" title="Tutup / Buka Kategori">
+                                    <i class="mdi mdi-chevron-down font-size-15" id="cat-rap-chevron-<?= $catId ?>"></i>
+                                </button>
+                                <strong class="font-size-14"><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- Subcategories -->
+                    <?php foreach ($subcats as $sub): ?>
+                    <tr class="cat-rap-item-<?= $catId ?>" data-category-id="<?= $cat['id'] ?>" data-rap-id="<?= $sub['rap_id'] ?? '' ?>">
+                        <td><?= sanitize($sub['code']) ?></td>
+                        <td><?= sanitize($sub['name']) ?></td>
+                        <td><?= sanitize($sub['unit']) ?></td>
+                        <td>
+                            <?php if ($sub['rap_id'] && $isEditable): ?>
+                            <input type="text" 
+                                   class="form-control form-control-sm border-0 text-end inline-ajax" 
+                                   value="<?= formatVolume($sub['display_volume']) ?>" 
+                                   style="width:80px;"
+                                   data-ajax-url="view.php?id=<?= $projectId ?>"
+                                   data-action="ajax_update_rap_volume"
+                                   data-id="<?= $sub['rap_id'] ?>"
+                                   data-field="volume"
+                                   data-format="decimal"
+                                   data-unit-price="<?= $sub['display_unit_price'] ?>"
+                                   data-unit-price-tenaga="<?= $sub['ahsp_tenaga'] ?? 0 ?>"
+                                   data-unit-price-bahan="<?= $sub['ahsp_bahan'] ?? 0 ?>"
+                                   data-unit-price-alat="<?= $sub['ahsp_alat'] ?? 0 ?>">
+                            <?php else: ?>
+                            <span class="text-end d-block"><?= formatVolume($sub['display_volume']) ?></span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="text-end"><?= formatNumber($sub['display_unit_price'], 2) ?></td>
+                        <td class="text-end" id="jumlah-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['display_total'], 2) ?></td>
+                        <td class="text-end" id="tenaga-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_tenaga']) ?></td>
+                        <td class="text-end" id="bahan-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_bahan']) ?></td>
+                        <td class="text-end" id="alat-rap-<?= $sub['rap_id'] ?? $sub['id'] ?>"><?= formatNumber($sub['anggaran_alat']) ?></td>
+                        <?php 
+                            $rapSubTotal = $sub['display_total'] ?? 0;
+                            $rabTotal = $sub['rab_total'] ?? 0;
+                            $selisih = $rabTotal - $rapSubTotal;
+                            $selisihPct = $rabTotal > 0 ? ($selisih / $rabTotal) * 100 : 0;
+                            $selisihClass = $selisih > 0 ? 'text-success' : ($selisih < 0 ? 'text-danger' : 'text-muted');
+                        ?>
+                        <td class="text-end <?= $selisihClass ?>" 
+                            data-bs-toggle="tooltip" 
+                            data-bs-placement="left"
+                            data-bs-html="true"
+                            title="Selisih: <?= ($selisihPct >= 0 ? '+' : '') . formatNumber($selisihPct, 2) ?>%<br>RAB: <?= formatRupiah($rabTotal) ?>"
+                            style="cursor: help;">
+                            <strong><?= ($selisih >= 0 ? '+' : '') . formatNumber($selisih) ?></strong>
+                        </td>
+                        <td>
+                            <?php if ($sub['rap_id'] && !empty($sub['ahsp_code'])): ?>
+                            <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>')">
+                                <i class="mdi mdi-file-table-outline"></i>
+                            </button>
+                            <?php else: ?>
+                            <span class="text-muted">-</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+
+                    <!-- Standalone Category Total -->
+                    <?php 
+                        $catRabTotal = $data['rab_total'] ?? 0;
+                        $catSelisih = $catRabTotal - $catTotal;
+                        $catSelisihPct = $catRabTotal > 0 ? ($catSelisih / $catRabTotal) * 100 : 0;
+                        $catSelisihClass = $catSelisih > 0 ? 'text-success' : ($catSelisih < 0 ? 'text-danger' : 'text-muted');
+                    ?>
+                    <tr class="table-secondary cat-rap-item-<?= $catId ?>">
+                        <td colspan="5" class="text-end"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
+                        <td class="text-end" id="cat-total-<?= $cat['id'] ?>"><strong><?= formatNumber($catTotal, 2) ?></strong></td>
+                        <td class="text-end" id="cat-tenaga-<?= $cat['id'] ?>"><strong><?= formatNumber($catTenaga, 2) ?></strong></td>
+                        <td class="text-end" id="cat-bahan-<?= $cat['id'] ?>"><strong><?= formatNumber($catBahan, 2) ?></strong></td>
+                        <td class="text-end" id="cat-alat-<?= $cat['id'] ?>"><strong><?= formatNumber($catAlat, 2) ?></strong></td>
+                        <td class="text-end <?= $catSelisihClass ?>"
+                            data-bs-toggle="tooltip" 
+                            data-bs-placement="left"
+                            data-bs-html="true"
+                            title="Selisih: <?= ($catSelisihPct >= 0 ? '+' : '') . formatNumber($catSelisihPct, 2) ?>%<br>RAB: <?= formatRupiah($catRabTotal) ?>"
+                            style="cursor: help;">
+                            <strong><?= ($catSelisih >= 0 ? '+' : '') . formatNumber($catSelisih, 2) ?></strong>
+                        </td>
+                        <td></td>
+                    </tr>
+                <?php endforeach; ?>
             <?php endif; ?>
+
+            <?php endif; ?>
+
         </tbody>
         <tfoot>
             <!-- Grand Total Row -->
@@ -545,6 +738,40 @@ function confirmSyncReference(sourceId, sourceName) {
     modal.show();
 }
 
+function toggleHeadSubRap(hsId) {
+    var icon = $('#hs-rap-chevron-' + hsId);
+    if (icon.hasClass('mdi-chevron-right')) {
+        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.hs-rap-item-' + hsId).show();
+    } else {
+        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.hs-rap-item-' + hsId).hide();
+    }
+}
+
+function toggleCategoryRap(catId) {
+    var icon = $('#cat-rap-chevron-' + catId);
+    if (icon.hasClass('mdi-chevron-right')) {
+        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.cat-rap-item-' + catId).show();
+    } else {
+        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.cat-rap-item-' + catId).hide();
+    }
+}
+
+function toggleAllRapRows(expand) {
+    if (expand) {
+        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').show();
+    } else {
+        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').hide();
+    }
+}
+
 // Initialize tooltips
 $(document).ready(function() {
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -553,6 +780,7 @@ $(document).ready(function() {
     });
 });
 </script>
+
 
 <!-- Modal Konfirmasi Sync Reference -->
 <div class="modal fade" id="syncReferenceModal" tabindex="-1">

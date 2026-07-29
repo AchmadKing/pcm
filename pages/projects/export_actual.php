@@ -105,47 +105,6 @@ $categories = dbGetAll("
     ORDER BY rc.sort_order, rc.code
 ", [$projectId]);
 
-// Function to get RAP AHSP component breakdown
-function getActualRapComponentBreakdownForCsv($rapItemId) {
-    $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
-    if (!$rapItemId) return $result;
-    
-    $rapItem = dbGetRow("SELECT subcategory_id FROM rap_items WHERE id = ?", [$rapItemId]);
-    if ($rapItem) {
-        $totals = dbGetAll("
-            SELECT pir.category, SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as total 
-            FROM rab_subcategories rs
-            JOIN project_ahsp pa ON rs.ahsp_id = pa.id
-            JOIN project_ahsp_rap par ON par.ahsp_code = pa.ahsp_code AND par.project_id = pa.project_id
-            JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
-            JOIN project_items_rap pir ON d.item_id = pir.id
-            WHERE rs.id = ?
-            GROUP BY pir.category
-        ", [$rapItem['subcategory_id']]);
-    }
-    
-    if (empty($totals)) {
-        $totals = dbGetAll("
-            SELECT pi.category, SUM(pad.coefficient * pi.price) as total
-            FROM rap_items rap
-            JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-            JOIN project_ahsp_details pad ON pad.ahsp_id = rs.ahsp_id
-            JOIN project_items pi ON pad.item_id = pi.id
-            WHERE rap.id = ?
-            GROUP BY pi.category
-        ", [$rapItemId]);
-    }
-    
-    foreach ($totals as $row) {
-        $cat = $row['category'] ?? '';
-        if ($cat === 'upah') $result['upah'] = floatval($row['total']);
-        elseif ($cat === 'material') $result['material'] = floatval($row['total']);
-        elseif ($cat === 'alat') $result['alat'] = floatval($row['total']);
-    }
-    
-    return $result;
-}
-
 // Set Headers for CSV
 $filename = 'REALISASI_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd') . '.csv';
 header('Content-Type: text/csv; charset=utf-8');
@@ -206,9 +165,11 @@ foreach ($categories as $cat) {
     // Subcategories
     $subcats = dbGetAll("
         SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
-               rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price
+               rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+               pa.ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
+        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
         WHERE rs.category_id = ?
         ORDER BY rs.sort_order, rs.code
     ", [$catId]);
@@ -237,8 +198,20 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         $itemNum++;
         
-        $volume = $sub['rap_volume'] ?? $sub['rab_volume'];
-        $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['rab_unit_price'];
+        $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
+        
+        $ahspCode = $sub['ahsp_code'] ?? null;
+        if ($ahspCode) {
+            $rapComponents = getRapAhspComponentBreakdown($ahspCode, $projectId);
+        } else {
+            $rapComponents = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        }
+        
+        $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
+        if ($baseUnitPrice <= 0) {
+            $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+        }
+        
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $subRapTotal = $volume * $unitPriceWithOverhead;
         

@@ -14,9 +14,13 @@ $isRabEditable = ($project['status'] === 'draft' && !$project['rab_submitted']);
 $action = $_POST['action'] ?? '';
 $allowedWhenRabSubmitted = ['reopen_rab'];
 
+// Ensure database tables for Head-Subs are present
+ensureRabHeadSubsTableExists();
+
 // Define actions that THIS handler processes (prevents intercepting master_data actions)
 $rabRapActions = [
-    'add_category', 'add_subcategory', 'delete_category', 'delete_subcategory',
+    'add_head_sub', 'edit_head_sub', 'delete_head_sub',
+    'add_category', 'edit_category', 'add_subcategory', 'delete_category', 'delete_subcategory',
     'update_ppn', 'update_volume', 'submit_rab', 'reopen_rab',
     'create_snapshot', 'delete_snapshot', 'import_rab', 'import_rap',
     'update_rap_volume', 'generate_rap', 'sync_from_reference'
@@ -30,20 +34,75 @@ if (!in_array($action, $rabRapActions)) {
 if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($action, 'rap') !== false || $action === 'generate_rap' || $action === 'update_rap_volume' || $action === 'sync_from_reference') {
     try {
         switch ($action) {
+            // ======= RAB Head-Sub Actions =======
+            case 'add_head_sub':
+                $name = trim($_POST['name'] ?? '');
+                $code = trim($_POST['code'] ?? '');
+                if (empty($name)) {
+                    throw new Exception('Nama Head-Sub tidak boleh kosong!');
+                }
+                if (empty($code)) {
+                    $code = null;
+                }
+                $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_head_subs WHERE project_id = ?", [$projectId]);
+                dbInsert("INSERT INTO rab_head_subs (project_id, code, name, sort_order) VALUES (?, ?, ?, ?)",
+                    [$projectId, $code, $name, $maxSort['next']]);
+                setFlash('success', 'Head-Sub berhasil ditambahkan!');
+                break;
+
+            case 'edit_head_sub':
+                $headSubId = intval($_POST['head_sub_id'] ?? 0);
+                $name = trim($_POST['name'] ?? '');
+                $code = trim($_POST['code'] ?? '');
+                if (empty($headSubId) || empty($name)) {
+                    throw new Exception('Data Head-Sub tidak valid!');
+                }
+                if (empty($code)) {
+                    $code = null;
+                }
+                dbExecute("UPDATE rab_head_subs SET code = ?, name = ? WHERE id = ? AND project_id = ?",
+                    [$code, $name, $headSubId, $projectId]);
+                setFlash('success', 'Head-Sub berhasil diperbarui!');
+                break;
+
+
+            case 'delete_head_sub':
+                $headSubId = intval($_POST['head_sub_id'] ?? 0);
+                if (empty($headSubId)) {
+                    throw new Exception('Head-Sub tidak valid!');
+                }
+                dbExecute("DELETE FROM rab_head_subs WHERE id = ? AND project_id = ?", [$headSubId, $projectId]);
+                setFlash('success', 'Head-Sub berhasil dihapus!');
+                break;
+
             // ======= RAB Actions =======
             case 'add_category':
                 $name = trim($_POST['name']);
-                $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY code DESC LIMIT 1", [$projectId]);
+                $headSubId = !empty($_POST['head_sub_id']) ? intval($_POST['head_sub_id']) : null;
+                $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY id DESC LIMIT 1", [$projectId]);
                 if ($maxCode && $maxCode['code']) {
-                    $nextCode = chr(ord($maxCode['code']) + 1);
+                    $nextCode = chr(ord(strtoupper($maxCode['code'])) + 1);
                 } else {
                     $nextCode = 'A';
                 }
                 $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_categories WHERE project_id = ?", [$projectId]);
-                dbInsert("INSERT INTO rab_categories (project_id, code, name, sort_order) VALUES (?, ?, ?, ?)", 
-                    [$projectId, $nextCode, $name, $maxSort['next']]);
+                dbInsert("INSERT INTO rab_categories (project_id, head_sub_id, code, name, sort_order) VALUES (?, ?, ?, ?, ?)", 
+                    [$projectId, $headSubId, $nextCode, $name, $maxSort['next']]);
                 setFlash('success', 'Kategori berhasil ditambahkan!');
                 break;
+
+            case 'edit_category':
+                $catId = intval($_POST['category_id'] ?? 0);
+                $name = trim($_POST['name'] ?? '');
+                $headSubId = !empty($_POST['head_sub_id']) ? intval($_POST['head_sub_id']) : null;
+                if (empty($catId) || empty($name)) {
+                    throw new Exception('Data Kategori tidak valid!');
+                }
+                dbExecute("UPDATE rab_categories SET name = ?, head_sub_id = ? WHERE id = ? AND project_id = ?",
+                    [$name, $headSubId, $catId, $projectId]);
+                setFlash('success', 'Kategori berhasil diperbarui!');
+                break;
+
                 
             case 'add_subcategory':
                 $categoryId = $_POST['category_id'] ?? '';

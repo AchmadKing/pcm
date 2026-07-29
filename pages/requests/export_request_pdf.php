@@ -359,14 +359,7 @@ $baseUrl = getBaseUrl();
                     <?php endif; ?>
                 </td>
                 <td class="text-center"><?= htmlspecialchars($item['unit']) ?></td>
-                <td class="text-end">
-                    <?php if (($item['item_type'] ?? '') === 'upah'): ?>
-                        <?= number_format($item['coefficient'] / 6, 0, ',', '.') ?> org
-                        <br><small style="font-size: 8pt; color: #555;">× 6 hari = <?= number_format($item['coefficient'], 2, ',', '.') ?></small>
-                    <?php else: ?>
-                        <?= number_format($item['coefficient'], 4, ',', '.') ?>
-                    <?php endif; ?>
-                </td>
+                <td class="text-end"><?= number_format($item['coefficient'], 4, ',', '.') ?></td>
                 <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?></td>
                 <td class="text-end"><?= number_format($item['total_price'], 2, ',', '.') ?></td>
             </tr>

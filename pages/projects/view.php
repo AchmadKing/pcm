@@ -355,8 +355,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// AJAX Handler for RAB/RAP Volume Updates
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['ajax_update_rab_volume', 'ajax_update_rap_volume'])) {
+// AJAX Handler for RAB/RAP Volume Updates & Drag-and-Drop Category Head-Sub
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['ajax_update_rab_volume', 'ajax_update_rap_volume', 'ajax_move_category_head_sub'])) {
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
     require_once __DIR__ . '/../../includes/auth.php';
@@ -375,10 +375,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     }
     
     $action = $_POST['action'];
-    $id = intval($_POST['id'] ?? 0);
-    $value = floatval($_POST['value'] ?? 0);
     
     try {
+        if ($action === 'ajax_move_category_head_sub') {
+            $catId = intval($_POST['category_id'] ?? 0);
+            $headSubId = !empty($_POST['head_sub_id']) ? intval($_POST['head_sub_id']) : null;
+            if (!$catId) {
+                die(json_encode(['success' => false, 'message' => 'Kategori tidak valid!']));
+            }
+            dbExecute("UPDATE rab_categories SET head_sub_id = ? WHERE id = ?", [$headSubId, $catId]);
+            die(json_encode(['success' => true, 'message' => 'Kategori berhasil dipindahkan!']));
+        }
+        
+        $id = intval($_POST['id'] ?? 0);
+        $value = floatval($_POST['value'] ?? 0);
+        
         if ($action === 'ajax_update_rab_volume') {
             // Update RAB subcategory volume
             dbExecute("UPDATE rab_subcategories SET volume = ? WHERE id = ?", [$value, $id]);
@@ -406,6 +417,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
     }
 }
+
 
 // AJAX Handler: Toggle Request Lock
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'toggle_request_lock') {
