@@ -24,72 +24,17 @@ if ($rabSourceId > 0) {
     }
 }
 
-// Function to get RAP AHSP component breakdown from Master Data RAP
-// Uses AHSP code matching to get data from project_ahsp_rap / project_ahsp_details_rap
-if (!function_exists('getRapAhspComponentBreakdown')) {
-    function getRapAhspComponentBreakdown($ahspCode, $projectId) {
-        $result = ['upah' => 0, 'material' => 0, 'alat' => 0];
-        
-        if (!$ahspCode) return $result;
-        
-        // Find matching AHSP RAP by code
-        $ahspRap = dbGetRow("
-            SELECT id FROM project_ahsp_rap 
-            WHERE project_id = ? AND ahsp_code = ?
-        ", [$projectId, $ahspCode]);
-        
-        if (!$ahspRap) return $result;
-        
-        // Get component breakdown from project_ahsp_details_rap
-        $totals = dbGetAll("
-            SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-            FROM project_ahsp_details_rap d
-            JOIN project_items_rap i ON d.item_id = i.id
-            WHERE d.ahsp_id = ?
-            GROUP BY i.category
-        ", [$ahspRap['id']]);
-        
-        foreach ($totals as $row) {
-            if (isset($result[$row['category']])) {
-                $result[$row['category']] = $row['total'];
-            }
-        }
-        
-        return $result;
-    }
-}
+// Batch-load ALL RAP AHSP component breakdowns in 1 query (instead of N×2 queries in loop)
+$rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
 
-
-// Function to get RAB AHSP component breakdown (dynamically calculated)
-// Copied from rab.php to ensure consistency
-function getAhspComponentBreakdown($ahspId) {
-    $result = ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
-    
-    if (!$ahspId) return $result;
-    
-    $totals = dbGetAll("
-        SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details d 
-        JOIN project_items i ON d.item_id = i.id 
-        WHERE d.ahsp_id = ?
-        GROUP BY i.category
-    ", [$ahspId]);
-    
-    foreach ($totals as $row) {
-        if (isset($result[$row['category']])) {
-            $result[$row['category']] = $row['total'];
-        }
-        $result['total'] += $row['total'];
-    }
-    
-    return $result;
-}
+// Batch-load ALL RAB AHSP component breakdowns in 1 query (instead of N queries in loop)
+$rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 
 ensureRabHeadSubsTableExists();
 
 // Get Head-Subs and Categories for RAP
 $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
-$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
+$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
 
 $headSubMap = [];
 foreach ($headSubs as $hs) {
@@ -133,12 +78,9 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         $volume = $sub['rap_volume'] ?? $sub['volume'];
         
+        // Use pre-loaded batch map instead of per-subcategory query (was 2 queries per subcategory)
         $ahspCode = $sub['ahsp_code'] ?? null;
-        if ($ahspCode) {
-            $components = getRapAhspComponentBreakdown($ahspCode, $projectId);
-        } else {
-            $components = ['upah' => 0, 'material' => 0, 'alat' => 0];
-        }
+        $components = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0, 'material' => 0, 'alat' => 0]) : ['upah' => 0, 'material' => 0, 'alat' => 0];
         
         $baseUnitPrice = $components['upah'] + $components['material'] + $components['alat'];
         if ($baseUnitPrice <= 0) {
@@ -155,7 +97,8 @@ foreach ($categories as $cat) {
             $rabPrice = $sub['unit_price'];
         } else {
             if ($sub['ahsp_id']) {
-                $rabComponents = getAhspComponentBreakdown($sub['ahsp_id']);
+                // Use pre-loaded batch map instead of per-subcategory query
+                $rabComponents = $rabAhspBreakdownMap[$sub['ahsp_id']] ?? ['total' => 0];
                 $rabPrice = $rabComponents['total'];
             } else {
                 $rabPrice = $sub['unit_price'];
@@ -738,26 +681,45 @@ function confirmSyncReference(sourceId, sourceName) {
     modal.show();
 }
 
+var pIdRap = <?= intval($projectId) ?>;
+var hsKeyRap = 'pcm_rap_collapsed_hs_' + pIdRap;
+var catKeyRap = 'pcm_rap_collapsed_cat_' + pIdRap;
+
+function getCollapsedRap(key) {
+    try { return JSON.parse(sessionStorage.getItem(key) || '[]'); } catch(e) { return []; }
+}
+function saveCollapsedRap(key, list) {
+    sessionStorage.setItem(key, JSON.stringify(list));
+}
+
 function toggleHeadSubRap(hsId) {
     var icon = $('#hs-rap-chevron-' + hsId);
+    var list = getCollapsedRap(hsKeyRap);
     if (icon.hasClass('mdi-chevron-right')) {
         icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.hs-rap-item-' + hsId).show();
+        list = list.filter(function(id) { return id != hsId; });
     } else {
         icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.hs-rap-item-' + hsId).hide();
+        if (list.indexOf(hsId) === -1) list.push(hsId);
     }
+    saveCollapsedRap(hsKeyRap, list);
 }
 
 function toggleCategoryRap(catId) {
     var icon = $('#cat-rap-chevron-' + catId);
+    var list = getCollapsedRap(catKeyRap);
     if (icon.hasClass('mdi-chevron-right')) {
         icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.cat-rap-item-' + catId).show();
+        list = list.filter(function(id) { return id != catId; });
     } else {
         icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.cat-rap-item-' + catId).hide();
+        if (list.indexOf(catId) === -1) list.push(catId);
     }
+    saveCollapsedRap(catKeyRap, list);
 }
 
 function toggleAllRapRows(expand) {
@@ -765,12 +727,47 @@ function toggleAllRapRows(expand) {
         $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').show();
+        saveCollapsedRap(hsKeyRap, []);
+        saveCollapsedRap(catKeyRap, []);
     } else {
         $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').hide();
+        
+        var allHs = [];
+        $('.toggle-hs-rap-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allHs.push(parseInt(match[0]));
+        });
+        var allCat = [];
+        $('.toggle-cat-rap-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allCat.push(parseInt(match[0]));
+        });
+        saveCollapsedRap(hsKeyRap, allHs);
+        saveCollapsedRap(catKeyRap, allCat);
     }
 }
+
+function restoreRapCollapsedState() {
+    var hsList = getCollapsedRap(hsKeyRap);
+    hsList.forEach(function(hsId) {
+        $('#hs-rap-chevron-' + hsId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.hs-rap-item-' + hsId).hide();
+    });
+
+    var catList = getCollapsedRap(catKeyRap);
+    catList.forEach(function(catId) {
+        $('#cat-rap-chevron-' + catId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.cat-rap-item-' + catId).hide();
+    });
+}
+
+$(document).ready(function() {
+    restoreRapCollapsedState();
+});
 
 // Initialize tooltips
 $(document).ready(function() {

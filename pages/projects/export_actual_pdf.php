@@ -49,48 +49,13 @@ if ($showWeeklyColumns) {
     }
 }
 
-// Actualization adjustments (FIFO sisa pooling)
-$actualizationAdjustments = [];
-$actualizedRequests = dbGetAll("
-    SELECT r.id as request_id, 
-           GREATEST(ra.remaining_upah - ra.consumed_upah, 0) + 
-           GREATEST(ra.remaining_material - ra.consumed_material, 0) + 
-           GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
-    FROM requests r
-    JOIN request_actuals ra ON ra.request_id = r.id
-    WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
-    HAVING total_remaining > 0
-", [$projectId]);
+// Actualization adjustments - batch loaded
+$actualizationAdjustments = batchGetActualizationAdjustments($projectId);
 
-foreach ($actualizedRequests as $ar) {
-    $totalRemaining = floatval($ar['total_remaining']);
-    if ($totalRemaining <= 0) continue;
-    
-    $reqItems = dbGetAll("
-        SELECT reqi.subcategory_id, SUM(reqi.total_price) as subcat_total
-        FROM request_items reqi
-        WHERE reqi.request_id = ?
-        GROUP BY reqi.subcategory_id
-    ", [$ar['request_id']]);
-    
-    $reqTotal = 0;
-    foreach ($reqItems as $ri) {
-        $reqTotal += floatval($ri['subcat_total']);
-    }
-    
-    if ($reqTotal > 0) {
-        foreach ($reqItems as $ri) {
-            $subcatId = intval($ri['subcategory_id']);
-            $proportion = floatval($ri['subcat_total']) / $reqTotal;
-            $deduction = $totalRemaining * $proportion;
-            
-            if (!isset($actualizationAdjustments[$subcatId])) {
-                $actualizationAdjustments[$subcatId] = 0;
-            }
-            $actualizationAdjustments[$subcatId] += $deduction;
-        }
-    }
-}
+// Batch-load all data needed (instead of per-subcategory queries)
+$rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
+$batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
 
 // Get categories
 $categories = dbGetAll("
@@ -115,7 +80,7 @@ foreach ($categories as $cat) {
     
     $subcats = dbGetAll("
         SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
-               rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+               rap.volume as rap_volume, rap.unit_price as rap_unit_price,
                pa.ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
@@ -138,12 +103,9 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
         
+        // Use pre-loaded batch map instead of per-subcategory query
         $ahspCode = $sub['ahsp_code'] ?? null;
-        if ($ahspCode) {
-            $rapComponents = getRapAhspComponentBreakdown($ahspCode, $projectId);
-        } else {
-            $rapComponents = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-        }
+        $rapComponents = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
         
         $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
         if ($baseUnitPrice <= 0) {
@@ -153,40 +115,14 @@ foreach ($categories as $cat) {
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $subRapTotal = $volume * $unitPriceWithOverhead;
         
-        // Actual spending
-        $actualRow = dbGetRow("
-            SELECT COALESCE(SUM(reqi.total_price), 0) as total
-            FROM request_items reqi
-            JOIN requests req ON reqi.request_id = req.id
-            WHERE reqi.subcategory_id = ? 
-            AND req.status = 'approved'
-            AND req.project_id = ?
-        ", [$sub['id'], $projectId]);
-        $subActualTotal = floatval($actualRow['total'] ?? 0);
+        // Use pre-loaded actual spending
+        $subActualTotal = $batchActualSpending[$sub['id']] ?? 0.0;
         
-        // Breakdowns
-        $actualBreakdown = dbGetAll("
-            SELECT 
-                pi.category as item_category,
-                COALESCE(SUM(reqi.unit_price * reqi.coefficient), 0) as category_total
-            FROM request_items reqi
-            JOIN requests req ON reqi.request_id = req.id
-            JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = req.project_id
-            WHERE reqi.subcategory_id = ? 
-            AND req.status = 'approved'
-            AND req.project_id = ?
-            GROUP BY pi.category
-        ", [$sub['id'], $projectId]);
-        
-        $subActualUpah = 0;
-        $subActualMaterial = 0;
-        $subActualAlat = 0;
-        foreach ($actualBreakdown as $row) {
-            $itemCat = $row['item_category'] ?? '';
-            if ($itemCat === 'upah') $subActualUpah = floatval($row['category_total']);
-            elseif ($itemCat === 'material') $subActualMaterial = floatval($row['category_total']);
-            elseif ($itemCat === 'alat') $subActualAlat = floatval($row['category_total']);
-        }
+        // Use pre-loaded actual breakdown
+        $breakdown = $batchActualBreakdown[$sub['id']] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        $subActualUpah = $breakdown['upah'];
+        $subActualMaterial = $breakdown['material'];
+        $subActualAlat = $breakdown['alat'];
         
         // Adjust for actualization deduction
         $adjTotal = $actualizationAdjustments[$sub['id']] ?? 0;

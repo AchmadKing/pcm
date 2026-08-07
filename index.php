@@ -33,10 +33,11 @@ try {
         $stats['pending_requests'] = $pendingCount['cnt'] ?? 0;
     }
 
-    if (hasPermission('projects.edit')) {
+    if (hasPermission('projects.edit') || hasPermission('projects.view')) {
+        // Admin/PM: lihat semua proyek
         $recentProjects = dbGetAll("SELECT * FROM projects ORDER BY updated_at DESC LIMIT 5");
     } else {
-        // Field team only sees assigned projects
+        // Field team: hanya lihat proyek yang ditugaskan
         $recentProjects = dbGetAll("
             SELECT p.* FROM projects p
             INNER JOIN project_assignments pa ON pa.project_id = p.id
@@ -46,15 +47,23 @@ try {
     }
 
     if (hasPermission('requests.approve')) {
-        $recentRequests = dbGetAll("SELECT req.*, p.name as project_name, u.full_name as created_by_name
+        $recentRequests = dbGetAll("SELECT req.*, p.name as project_name, u.full_name as created_by_name,
+                upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
+                ua.full_name as approved_by_name, ua.role as approved_by_role
             FROM requests req
             LEFT JOIN projects p ON req.project_id = p.id
             LEFT JOIN users u ON req.created_by = u.id
+            LEFT JOIN users upm ON req.pm_approved_by = upm.id
+            LEFT JOIN users ua ON req.approved_by = ua.id
             ORDER BY req.created_at DESC LIMIT 5");
     } else {
-        $recentRequests = dbGetAll("SELECT req.*, p.name as project_name
+        $recentRequests = dbGetAll("SELECT req.*, p.name as project_name,
+                upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
+                ua.full_name as approved_by_name, ua.role as approved_by_role
             FROM requests req
             LEFT JOIN projects p ON req.project_id = p.id
+            LEFT JOIN users upm ON req.pm_approved_by = upm.id
+            LEFT JOIN users ua ON req.approved_by = ua.id
             WHERE req.created_by = ?
             ORDER BY req.created_at DESC LIMIT 5", [getCurrentUserId()]);
     }
@@ -219,7 +228,7 @@ try {
                             <tr>
                                 <td><?= sanitize($request['request_number']) ?></td>
                                 <td><?= sanitize($request['project_name']) ?></td>
-                                <td><?= getStatusBadge($request['status']) ?></td>
+                                <td><?= getDetailedStatusBadge($request) ?></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

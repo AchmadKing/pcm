@@ -50,6 +50,16 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
 </head>
 
 <body data-sidebar="dark">
+    <script>
+        (function() {
+            var collapsed = sessionStorage.getItem('pcm_sidebar_collapsed');
+            if (collapsed === '1' && window.innerWidth >= 992) {
+                document.body.classList.add('vertical-collpsed');
+            } else if (collapsed === '0') {
+                document.body.classList.remove('vertical-collpsed');
+            }
+        })();
+    </script>
     <div id="layout-wrapper">
         
         <!-- Header -->
@@ -120,7 +130,7 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                         <?php if (hasPermission('projects.create')): ?>
                         <?php endif; ?>
                         
-                        <!-- Projects - All Users -->
+                        <!-- Projects - All logged-in users (access control handled per-page) -->
                         <li class="<?= $currentDir == 'projects' ? 'mm-active' : '' ?>">
                             <a href="javascript:void(0);">
                                 <i class="mdi mdi-briefcase"></i>

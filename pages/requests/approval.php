@@ -271,10 +271,14 @@ if ($projectFilter) {
 
 $pendingRequests = dbGetAll("
     SELECT req.*, p.name as project_name, u.full_name as created_by_name,
+        upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
+        ua.full_name as approved_by_name, ua.role as approved_by_role,
         (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
+    LEFT JOIN users upm ON req.pm_approved_by = upm.id
+    LEFT JOIN users ua ON req.approved_by = ua.id
     WHERE $where
     ORDER BY req.created_at ASC
 ", $params);
@@ -288,10 +292,14 @@ $selectedItems = [];
 if ($requestId) {
     $statusFilter = $isAdmin ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
     $selectedRequest = dbGetRow("
-        SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name
+        SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name,
+               upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
+               ua.full_name as approved_by_name, ua.role as approved_by_role
         FROM requests req
         LEFT JOIN projects p ON req.project_id = p.id
         LEFT JOIN users u ON req.created_by = u.id
+        LEFT JOIN users upm ON req.pm_approved_by = upm.id
+        LEFT JOIN users ua ON req.approved_by = ua.id
         WHERE req.id = ? AND $statusFilter
     ", [$requestId]);
     

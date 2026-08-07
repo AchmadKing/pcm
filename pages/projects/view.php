@@ -889,11 +889,28 @@ if (!$project) {
     exit;
 }
 
-// Check access for field team
-if (!hasPermission('projects.edit') && $project['status'] === 'draft') {
-    setFlash('error', 'Proyek masih dalam tahap draft.');
-    header('Location: index.php');
-    exit;
+// Check access - 3 level permission
+if (!hasPermission('projects.edit') && !hasPermission('projects.view')) {
+    // Field team: harus di-assign ke proyek ini
+    $assignment = dbGetRow(
+        "SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ? AND is_active = 1",
+        [$projectId, getCurrentUserId()]
+    );
+    if (!$assignment) {
+        setFlash('error', 'Anda tidak memiliki akses ke proyek ini.');
+        header('Location: index.php');
+        exit;
+    }
+    // Field team tidak bisa lihat proyek draft
+    if ($project['status'] === 'draft') {
+        setFlash('error', 'Proyek masih dalam tahap draft.');
+        header('Location: index.php');
+        exit;
+    }
+} elseif (!hasPermission('projects.edit') && $project['status'] === 'draft') {
+    // PM: bisa lihat semua proyek kecuali draft (optional, bisa disesuaikan)
+    // Untuk saat ini PM boleh lihat draft juga karena punya projects.view
+    // Jadi tidak ada block di sini
 }
 
 // Handle actions
@@ -919,18 +936,19 @@ if (isset($_GET['action']) && hasPermission('projects.edit')) {
 $itemCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 $ahspCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 
-// RAB Summary - base total
+// RAB Summary - base total (optimized: JOIN instead of correlated subquery)
 $rabBaseTotal = dbGetRow("
     SELECT COALESCE(SUM(
-        rs.volume * (
-            SELECT COALESCE(SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)), 0)
-            FROM project_ahsp_details pad
-            JOIN project_items pi ON pad.item_id = pi.id
-            WHERE pad.ahsp_id = rs.ahsp_id
-        )
+        rs.volume * COALESCE(ahsp_totals.unit_price, 0)
     ), 0) as total
     FROM rab_subcategories rs
     JOIN rab_categories rc ON rs.category_id = rc.id
+    LEFT JOIN (
+        SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
+        FROM project_ahsp_details pad
+        JOIN project_items pi ON pad.item_id = pi.id
+        GROUP BY pad.ahsp_id
+    ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
     WHERE rc.project_id = ?
 ", [$projectId])['total'] ?? 0;
 
@@ -942,25 +960,23 @@ $rabWithOverhead = $rabBaseTotal * (1 + ($overheadPct / 100));
 $rabPpn = $rabWithOverhead * ($ppnPct / 100);
 $rabTotal = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
 
-// RAP Summary - base total (calculated from AHSP RAP components, matching rap.php formula)
+// RAP Summary - base total (optimized: JOIN instead of correlated subquery)
 $rapBaseTotal = dbGetRow("
     SELECT COALESCE(SUM(
         rap.volume * 
-        COALESCE(
-            (
-                SELECT SUM(d.coefficient * COALESCE(d.unit_price, pir.price))
-                FROM project_ahsp_rap par
-                JOIN project_ahsp pa ON par.ahsp_code = pa.ahsp_code AND par.project_id = rc.project_id
-                JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
-                JOIN project_items_rap pir ON d.item_id = pir.id
-                WHERE pa.id = rs.ahsp_id
-            ),
-            rap.unit_price
-        )
+        COALESCE(rap_ahsp_totals.unit_price, rap.unit_price)
     ), 0) as total
     FROM rap_items rap
     JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
     JOIN rab_categories rc ON rs.category_id = rc.id
+    LEFT JOIN project_ahsp pa ON pa.id = rs.ahsp_id
+    LEFT JOIN (
+        SELECT par.ahsp_code, par.project_id, SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as unit_price
+        FROM project_ahsp_rap par
+        JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
+        JOIN project_items_rap pir ON d.item_id = pir.id
+        GROUP BY par.ahsp_code, par.project_id
+    ) rap_ahsp_totals ON rap_ahsp_totals.ahsp_code = pa.ahsp_code AND rap_ahsp_totals.project_id = rc.project_id
     WHERE rc.project_id = ?
 ", [$projectId])['total'] ?? 0;
 

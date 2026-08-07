@@ -71,9 +71,17 @@
             });
             
             // Initialize Bootstrap tooltips
-            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-            tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl);
+            function initTooltips() {
+                var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                tooltipTriggerList.map(function (tooltipTriggerEl) {
+                    return new bootstrap.Tooltip(tooltipTriggerEl);
+                });
+            }
+            initTooltips();
+
+            // Re-initialize tooltips on DataTables redraw
+            $(document).on('draw.dt', function () {
+                initTooltips();
             });
         });
         
@@ -427,6 +435,124 @@ document.getElementById('confirmActionBtn').addEventListener('click', function()
         confirmCallbackFn();
     }
 });
+</script>
+
+<script>
+/* ==========================================================================
+   PCM Scroll & View Position Preservation System
+   Preserves exact user view position and scroll location across all page actions,
+   reloads, form submissions, edit/delete/add operations on Master Data, RAB, RAP.
+   ========================================================================== */
+(function() {
+    var urlKey = 'pcm_scroll_pos_' + window.location.pathname + window.location.search;
+    var pathKey = 'pcm_scroll_pos_path_' + window.location.pathname;
+    var projId = new URLSearchParams(window.location.search).get('id') || '';
+    var projectKey = 'pcm_scroll_pos_proj_' + projId;
+    var accordionKey = 'pcm_open_accordions_' + projId;
+
+    if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+    }
+
+    function saveCurrentScroll() {
+        var y = window.scrollY || document.documentElement.scrollTop || 0;
+        sessionStorage.setItem(urlKey, y);
+        sessionStorage.setItem(pathKey, y);
+        if (projId) {
+            sessionStorage.setItem(projectKey, y);
+        }
+    }
+
+    var scrollTimer = null;
+    window.addEventListener('scroll', function() {
+        if (scrollTimer) clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(saveCurrentScroll, 100);
+    }, { passive: true });
+
+    $(document).on('submit', 'form', saveCurrentScroll);
+    $(document).on('click', 'button, a, input[type="submit"], .btn, .btn-delete, .btn-action, [data-preserve-scroll]', function() {
+        saveCurrentScroll();
+    });
+    window.addEventListener('beforeunload', saveCurrentScroll);
+
+    // Save sidebar collapsed state
+    $(document).on('click', '#vertical-menu-btn', function() {
+        setTimeout(function() {
+            var isCollapsed = $('body').hasClass('vertical-collpsed') ? '1' : '0';
+            sessionStorage.setItem('pcm_sidebar_collapsed', isCollapsed);
+        }, 50);
+    });
+
+    $(document).on('shown.bs.collapse', '.accordion-collapse', function() {
+        if (!this.id) return;
+        var openAccs = JSON.parse(sessionStorage.getItem(accordionKey) || '[]');
+        if (openAccs.indexOf(this.id) === -1) {
+            openAccs.push(this.id);
+        }
+        sessionStorage.setItem(accordionKey, JSON.stringify(openAccs));
+    });
+
+    $(document).on('hidden.bs.collapse', '.accordion-collapse', function() {
+        if (!this.id) return;
+        var openAccs = JSON.parse(sessionStorage.getItem(accordionKey) || '[]');
+        openAccs = openAccs.filter(function(id) { return id !== this.id; });
+        sessionStorage.setItem(accordionKey, JSON.stringify(openAccs));
+    });
+
+    function restoreAccordions() {
+        if (!projId) return;
+        var openAccs = JSON.parse(sessionStorage.getItem(accordionKey) || '[]');
+        openAccs.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && !el.classList.contains('show')) {
+                if (window.bootstrap && bootstrap.Collapse) {
+                    try {
+                        var collapse = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+                        collapse.show();
+                    } catch (e) {
+                        $(el).addClass('show');
+                        $(el).prev('.accordion-header').find('.accordion-button').removeClass('collapsed');
+                    }
+                } else {
+                    $(el).addClass('show');
+                    $(el).prev('.accordion-header').find('.accordion-button').removeClass('collapsed');
+                }
+            }
+        });
+    }
+
+    function restoreScroll() {
+        var savedY = sessionStorage.getItem(urlKey);
+        if (savedY === null && projId) {
+            savedY = sessionStorage.getItem(projectKey);
+        }
+        if (savedY === null) {
+            savedY = sessionStorage.getItem(pathKey);
+        }
+
+        if (savedY !== null && parseFloat(savedY) > 0) {
+            var targetY = parseFloat(savedY);
+            window.scrollTo({ top: targetY, behavior: 'instant' });
+            
+            var delays = [10, 30, 80, 150, 300, 500, 800];
+            delays.forEach(function(delay) {
+                setTimeout(function() {
+                    window.scrollTo({ top: targetY, behavior: 'instant' });
+                }, delay);
+            });
+        }
+    }
+
+    $(document).ready(function() {
+        restoreAccordions();
+        restoreScroll();
+    });
+
+    window.addEventListener('load', function() {
+        restoreAccordions();
+        restoreScroll();
+    });
+})();
 </script>
 
 </body>

@@ -388,7 +388,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
     } elseif (strpos($action, 'ahsp') !== false) {
         $subtab = '&subtab=ahsp';
     }
-    echo '<script>window.location.href = "view.php?id=' . $projectId . '&tab=master' . $subtab . '";</script>';
+
+    $ahspParam = '';
+    if (!empty($_POST['ahsp_id'])) {
+        $ahspParam = '&ahsp_id=' . intval($_POST['ahsp_id']);
+    }
+    echo '<script>window.location.href = "view.php?id=' . $projectId . '&tab=master' . $subtab . $ahspParam . '";</script>';
     exit;
 }
 

@@ -249,6 +249,200 @@ function getStatusBadge($status) {
 }
 
 /**
+ * Convert 1-based index to letter code (1 -> A, 26 -> Z, 27 -> AA, 28 -> AB, etc.)
+ * @param int $index
+ * @return string
+ */
+function getCategoryCodeFromIndex($index) {
+    $index = intval($index);
+    if ($index <= 0) return 'A';
+    $code = '';
+    while ($index > 0) {
+        $index--;
+        $code = chr(65 + ($index % 26)) . $code;
+        $index = intdiv($index, 26);
+    }
+    return $code;
+}
+
+/**
+ * Get next RAB Category letter code (A -> B, Z -> AA, AA -> AB, etc.)
+ * @param string|null $currentCode
+ * @return string
+ */
+function getNextCategoryCode($currentCode = null) {
+    if (empty($currentCode)) {
+        return 'A';
+    }
+    
+    $code = strtoupper(trim($currentCode));
+    if (preg_match('/^[A-Z]+$/', $code)) {
+        return ++$code;
+    }
+    
+    $cleaned = preg_replace('/[^A-Z]/', '', $code);
+    if (!empty($cleaned)) {
+        return ++$cleaned;
+    }
+    
+    return 'A';
+}
+
+/**
+ * Get detailed status badge with PM & Admin PIC symbols and tooltips
+ * @param array|string $request (Request data array or status string)
+ * @return string HTML
+ */
+function getDetailedStatusBadge($request) {
+    if (is_string($request)) {
+        return getStatusBadge($request);
+    }
+    
+    if (!is_array($request)) {
+        return getStatusBadge('pending');
+    }
+    
+    $status = $request['status'] ?? 'pending';
+    
+    $pmName = $request['pm_approved_by_name'] ?? '';
+    $pmAt = !empty($request['pm_approved_at']) ? formatDateTime($request['pm_approved_at']) : '';
+    $pmNotes = $request['pm_notes'] ?? '';
+    
+    $approverName = $request['approved_by_name'] ?? '';
+    $approverRole = $request['approved_by_role'] ?? '';
+    $approvedAt = !empty($request['approved_at']) ? formatDateTime($request['approved_at']) : '';
+    $adminNotes = $request['admin_notes'] ?? '';
+    
+    // PM PIC Status defaults
+    $pmBadgeClass = 'bg-secondary text-white';
+    $pmSymbolText = '-';
+    $pmTooltip = 'PM: Belum diproses';
+    
+    // Admin PIC Status defaults
+    $adminBadgeClass = 'bg-secondary text-white';
+    $adminSymbolText = '-';
+    $adminTooltip = 'Admin: Belum diproses';
+    
+    if ($status === 'pending') {
+        // Pending
+        $pmBadgeClass = 'bg-warning text-dark';
+        $pmSymbolText = 'Pending';
+        $pmTooltip = 'PM: Menunggu persetujuan / verifikasi PM';
+        
+        $adminBadgeClass = 'bg-secondary text-white';
+        $adminSymbolText = 'Pending';
+        $adminTooltip = 'Admin: Menunggu persetujuan Admin (setelah review PM)';
+        
+    } elseif ($status === 'pm_approved') {
+        // PM Approved (waiting for Admin)
+        $pmBadgeClass = 'bg-info text-white';
+        $pmSymbolText = 'Verif';
+        $pmTooltip = 'PM: Disetujui / Diverifikasi oleh PM' . ($pmName ? ' (' . sanitize($pmName) . ')' : '') . ($pmAt ? ' tgl ' . $pmAt : '');
+        if ($pmNotes) {
+            $pmTooltip .= ' - Catatan: ' . sanitize($pmNotes);
+        }
+        
+        $adminBadgeClass = 'bg-warning text-dark';
+        $adminSymbolText = 'Pending';
+        $adminTooltip = 'Admin: Menunggu persetujuan Admin';
+        
+    } elseif ($status === 'approved') {
+        // Fully Approved by Admin
+        if (!empty($request['pm_approved_by']) || !empty($pmName)) {
+            // Verified by PM first, then Approved by Admin
+            $pmBadgeClass = 'bg-info text-white';
+            $pmSymbolText = 'Verif';
+            $pmTooltip = 'PM: Sudah diverifikasi oleh PM' . ($pmName ? ' (' . sanitize($pmName) . ')' : '') . ($pmAt ? ' tgl ' . $pmAt : '');
+            if ($pmNotes) {
+                $pmTooltip .= ' - Catatan: ' . sanitize($pmNotes);
+            }
+            
+            $adminBadgeClass = 'bg-success text-white';
+            $adminSymbolText = 'Approved';
+            $adminTooltip = 'Admin: Disetujui oleh Admin' . ($approverName ? ' (' . sanitize($approverName) . ')' : '') . ($approvedAt ? ' tgl ' . $approvedAt : '');
+            if ($adminNotes) {
+                $adminTooltip .= ' - Catatan: ' . sanitize($adminNotes);
+            }
+        } else {
+            // Directly Approved by Admin (Skipped PM)
+            $pmBadgeClass = 'bg-secondary text-white';
+            $pmSymbolText = 'Direct';
+            $pmTooltip = 'PM: Tanpa verifikasi PM (Disetujui langsung oleh Admin)';
+            
+            $adminBadgeClass = 'bg-success text-white';
+            $adminSymbolText = 'Approved';
+            $adminTooltip = 'Admin: Disetujui langsung oleh Admin' . ($approverName ? ' (' . sanitize($approverName) . ')' : '') . ($approvedAt ? ' tgl ' . $approvedAt : '');
+            if ($adminNotes) {
+                $adminTooltip .= ' - Catatan: ' . sanitize($adminNotes);
+            }
+        }
+        
+    } elseif ($status === 'rejected') {
+        // Rejected
+        $isRejectedByPm = ($approverRole === 'project_manager') || (!empty($request['approved_by']) && !empty($request['pm_approved_by']) && $request['pm_approved_by'] == $request['approved_by']);
+        
+        if ($isRejectedByPm) {
+            // Rejected by PM
+            $pmBadgeClass = 'bg-danger text-white';
+            $pmSymbolText = 'Rejected';
+            $pmTooltip = 'PM: Ditolak oleh PM' . ($approverName ? ' (' . sanitize($approverName) . ')' : '') . ($approvedAt ? ' tgl ' . $approvedAt : '');
+            if ($adminNotes) {
+                $pmTooltip .= ' - Catatan: ' . sanitize($adminNotes);
+            } elseif ($pmNotes) {
+                $pmTooltip .= ' - Catatan: ' . sanitize($pmNotes);
+            }
+            
+            $adminBadgeClass = 'bg-secondary text-white';
+            $adminSymbolText = '-';
+            $adminTooltip = 'Admin: Dibatalkan / Ditolak di tingkat PM';
+        } else {
+            // Rejected by Admin
+            if (!empty($request['pm_approved_by']) || !empty($pmName)) {
+                // Was approved by PM, but rejected by Admin
+                $pmBadgeClass = 'bg-info text-white';
+                $pmSymbolText = 'Verif';
+                $pmTooltip = 'PM: Sempat disetujui oleh PM' . ($pmName ? ' (' . sanitize($pmName) . ')' : '') . ($pmAt ? ' tgl ' . $pmAt : '');
+                
+                $adminBadgeClass = 'bg-danger text-white';
+                $adminSymbolText = 'Rejected';
+                $adminTooltip = 'Admin: Ditolak oleh Admin' . ($approverName ? ' (' . sanitize($approverName) . ')' : '') . ($approvedAt ? ' tgl ' . $approvedAt : '');
+                if ($adminNotes) {
+                    $adminTooltip .= ' - Catatan: ' . sanitize($adminNotes);
+                }
+            } else {
+                // Rejected directly by Admin before PM review
+                $pmBadgeClass = 'bg-secondary text-white';
+                $pmSymbolText = '-';
+                $pmTooltip = 'PM: Belum sempat diproses PM (Ditolak langsung oleh Admin)';
+                
+                $adminBadgeClass = 'bg-danger text-white';
+                $adminSymbolText = 'Rejected';
+                $adminTooltip = 'Admin: Ditolak langsung oleh Admin' . ($approverName ? ' (' . sanitize($approverName) . ')' : '') . ($approvedAt ? ' tgl ' . $approvedAt : '');
+                if ($adminNotes) {
+                    $adminTooltip .= ' - Catatan: ' . sanitize($adminNotes);
+                }
+            }
+        }
+    }
+    
+    $mainBadge = getStatusBadge($status);
+    
+    $html = '<div class="d-inline-flex flex-column align-items-start gap-1">';
+    $html .= '  <div class="d-flex gap-1 align-items-center mb-1" style="font-size: 0.7rem; line-height: 1.2;">';
+    $html .= '    <span class="badge ' . $pmBadgeClass . ' px-1 py-1" data-bs-toggle="tooltip" data-bs-placement="top" title="' . $pmTooltip . '" style="cursor: pointer;">';
+    $html .= '      <i class="mdi mdi-account-tie me-1"></i>PM: ' . $pmSymbolText;
+    $html .= '    </span>';
+    $html .= '    <span class="badge ' . $adminBadgeClass . ' px-1 py-1" data-bs-toggle="tooltip" data-bs-placement="top" title="' . $adminTooltip . '" style="cursor: pointer;">';
+    $html .= '      <i class="mdi mdi-shield-account me-1"></i>Admin: ' . $adminSymbolText;
+    $html .= '    </span>';
+    $html .= '  </div>';
+    $html .= '  <div>' . $mainBadge . '</div>';
+    $html .= '</div>';
+    
+    return $html;
+}
+
+/**
  * Get quality badge HTML
  * @param string $quality
  * @return string
@@ -1157,4 +1351,405 @@ function ensureRabHeadSubsTableExists() {
         // Ignore if already exists or schema error
     }
 }
+
+/**
+ * Calculate real-time RAB, RAP, and Actual statistics for a single project.
+ * Uses exact dynamic AHSP component prices, overhead percentage, PPN, and actualization adjustments.
+ * 
+ * @param int $projectId
+ * @return array|null
+ */
+function calculateProjectRealtimeStats($projectId) {
+    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+    if (!$project) return null;
+
+    $overheadPct = floatval($project['overhead_percentage'] ?? 10);
+    $ppnPct = floatval($project['ppn_percentage'] ?? 11);
+
+    // Pre-calculate RAB AHSP component totals
+    $ahspPrices = [];
+    $ahspRows = dbGetAll("
+        SELECT d.ahsp_id, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
+        FROM project_ahsp_details d 
+        JOIN project_items i ON d.item_id = i.id 
+        JOIN project_ahsp pa ON d.ahsp_id = pa.id
+        WHERE pa.project_id = ?
+        GROUP BY d.ahsp_id
+    ", [$projectId]);
+    foreach ($ahspRows as $r) {
+        $ahspPrices[$r['ahsp_id']] = floatval($r['total']);
+    }
+
+    // Pre-calculate RAP AHSP component totals
+    $ahspRapPrices = [];
+    $ahspRapRows = dbGetAll("
+        SELECT pa.ahsp_code, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
+        FROM project_ahsp_details_rap d 
+        JOIN project_items_rap i ON d.item_id = i.id 
+        JOIN project_ahsp_rap pa ON d.ahsp_id = pa.id
+        WHERE pa.project_id = ?
+        GROUP BY pa.ahsp_code
+    ", [$projectId]);
+    foreach ($ahspRapRows as $r) {
+        $ahspRapPrices[$r['ahsp_code']] = floatval($r['total']);
+    }
+
+    // Pre-compute actualization adjustments per subcategory
+    $actualizationAdjustments = [];
+    $actualizedRequests = dbGetAll("
+        SELECT r.id as request_id, 
+               GREATEST(ra.remaining_upah - ra.consumed_upah, 0) + 
+               GREATEST(ra.remaining_material - ra.consumed_material, 0) + 
+               GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
+        FROM requests r
+        JOIN request_actuals ra ON ra.request_id = r.id
+        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
+        HAVING total_remaining > 0
+    ", [$projectId]);
+
+    foreach ($actualizedRequests as $ar) {
+        $totalRemaining = floatval($ar['total_remaining']);
+        if ($totalRemaining <= 0) continue;
+
+        $reqItems = dbGetAll("
+            SELECT reqi.subcategory_id, SUM(reqi.total_price) as subcat_total
+            FROM request_items reqi
+            WHERE reqi.request_id = ?
+            GROUP BY reqi.subcategory_id
+        ", [$ar['request_id']]);
+
+        $reqTotal = 0;
+        foreach ($reqItems as $ri) {
+            $reqTotal += floatval($ri['subcat_total']);
+        }
+
+        if ($reqTotal > 0) {
+            foreach ($reqItems as $ri) {
+                $subcatId = intval($ri['subcategory_id']);
+                $proportion = floatval($ri['subcat_total']) / $reqTotal;
+                $deduction = $totalRemaining * $proportion;
+                $actualizationAdjustments[$subcatId] = ($actualizationAdjustments[$subcatId] ?? 0) + $deduction;
+            }
+        }
+    }
+
+    // Fetch categories and subcategories
+    $categories = dbGetAll("
+        SELECT rc.id, rc.code, rc.name, rc.sort_order
+        FROM rab_categories rc
+        WHERE rc.project_id = ?
+        ORDER BY rc.sort_order, rc.code
+    ", [$projectId]);
+
+    $categoryStats = [];
+    $subtotalRab = 0;
+    $totalRap = 0;
+    $totalActual = 0;
+
+    foreach ($categories as $cat) {
+        $subcats = dbGetAll("
+            SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price, rs.ahsp_id,
+                   rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+                   pa.ahsp_code
+            FROM rab_subcategories rs
+            LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
+            LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+            WHERE rs.category_id = ?
+            ORDER BY rs.sort_order, rs.code
+        ", [$cat['id']]);
+
+        $catRab = 0;
+        $catRap = 0;
+        $catActual = 0;
+
+        foreach ($subcats as $sub) {
+            // RAB calculation
+            $rabBasePrice = isset($ahspPrices[$sub['ahsp_id']]) ? $ahspPrices[$sub['ahsp_id']] : floatval($sub['rab_unit_price']);
+            $rabUnitPrice = $rabBasePrice * (1 + ($overheadPct / 100));
+            $subRab = floatval($sub['rab_volume']) * $rabUnitPrice;
+            $catRab += $subRab;
+
+            // RAP calculation
+            $rapVol = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
+            $ahspCode = $sub['ahsp_code'] ?? null;
+            $rapBasePrice = 0;
+            if ($ahspCode && isset($ahspRapPrices[$ahspCode])) {
+                $rapBasePrice = $ahspRapPrices[$ahspCode];
+            }
+            if ($rapBasePrice <= 0) {
+                $rapBasePrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+            }
+            $rapUnitPrice = $rapBasePrice * (1 + ($overheadPct / 100));
+            $subRap = $rapVol * $rapUnitPrice;
+            $catRap += $subRap;
+
+            // Actual calculation
+            $actRow = dbGetRow("
+                SELECT COALESCE(SUM(reqi.total_price), 0) as total
+                FROM request_items reqi
+                JOIN requests req ON reqi.request_id = req.id
+                WHERE reqi.subcategory_id = ? AND req.status = 'approved' AND req.project_id = ?
+            ", [$sub['id'], $projectId]);
+            $subAct = floatval($actRow['total'] ?? 0);
+            $adj = $actualizationAdjustments[$sub['id']] ?? 0;
+            $subAct -= $adj;
+            if ($subAct < 0) $subAct = 0;
+            $catActual += $subAct;
+        }
+
+        $categoryStats[] = [
+            'id' => $cat['id'],
+            'code' => $cat['code'],
+            'name' => $cat['name'],
+            'rab_total' => $catRab,
+            'rap_total' => $catRap,
+            'actual_total' => $catActual
+        ];
+
+        $subtotalRab += $catRab;
+        $totalRap += $catRap;
+        $totalActual += $catActual;
+    }
+
+    $ppnAmount = $subtotalRab * ($ppnPct / 100);
+    $totalRabWithPpn = $subtotalRab + $ppnAmount;
+    $totalRabRounded = ceil($totalRabWithPpn / 10) * 10;
+
+    return [
+        'project' => $project,
+        'name' => $project['name'],
+        'id' => $project['id'],
+        'subtotal_rab' => $subtotalRab,
+        'ppn_amount' => $ppnAmount,
+        'total_rab' => $totalRabRounded,
+        'total_rab_raw' => $totalRabWithPpn,
+        'total_rap' => $totalRap,
+        'total_actual' => $totalActual,
+        'category_stats' => $categoryStats
+    ];
+}
+
+/**
+ * Batch-load ALL AHSP component breakdowns for a project (RAB Master Data).
+ * Returns a lookup map: [ahsp_id => ['upah' => float, 'material' => float, 'alat' => float, 'total' => float]]
+ * Replaces per-subcategory getAhspComponentBreakdown() calls with a single query.
+ *
+ * @param int $projectId
+ * @return array
+ */
+function batchGetAhspComponentBreakdowns($projectId) {
+    $rows = dbGetAll("
+        SELECT d.ahsp_id, i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total
+        FROM project_ahsp_details d
+        JOIN project_items i ON d.item_id = i.id
+        JOIN project_ahsp pa ON d.ahsp_id = pa.id
+        WHERE pa.project_id = ?
+        GROUP BY d.ahsp_id, i.category
+    ", [$projectId]);
+
+    $map = [];
+    foreach ($rows as $row) {
+        $ahspId = $row['ahsp_id'];
+        if (!isset($map[$ahspId])) {
+            $map[$ahspId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+        }
+        $cat = $row['category'] ?? '';
+        if (isset($map[$ahspId][$cat])) {
+            $map[$ahspId][$cat] = floatval($row['total']);
+        }
+        $map[$ahspId]['total'] += floatval($row['total']);
+    }
+
+    return $map;
+}
+
+/**
+ * Batch-load ALL RAP AHSP component breakdowns for a project.
+ * Returns a lookup map: [ahsp_code => ['upah' => float, 'material' => float, 'alat' => float]]
+ * Replaces per-subcategory getRapAhspComponentBreakdown() calls with a single query.
+ *
+ * @param int $projectId
+ * @return array
+ */
+function batchGetRapAhspComponentBreakdowns($projectId) {
+    $rows = dbGetAll("
+        SELECT par.ahsp_code, pir.category, SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as total
+        FROM project_ahsp_details_rap d
+        JOIN project_items_rap pir ON d.item_id = pir.id
+        JOIN project_ahsp_rap par ON d.ahsp_id = par.id
+        WHERE par.project_id = ?
+        GROUP BY par.ahsp_code, pir.category
+    ", [$projectId]);
+
+    $map = [];
+    foreach ($rows as $row) {
+        $code = $row['ahsp_code'];
+        if (!isset($map[$code])) {
+            $map[$code] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        }
+        $cat = $row['category'] ?? '';
+        if (isset($map[$code][$cat])) {
+            $map[$code][$cat] = floatval($row['total']);
+        }
+    }
+
+    return $map;
+}
+
+/**
+ * Batch-load actual spending per subcategory for a project.
+ * Returns a lookup map: [subcategory_id => float total]
+ *
+ * @param int $projectId
+ * @return array
+ */
+function batchGetActualSpendingBySubcategory($projectId) {
+    $rows = dbGetAll("
+        SELECT reqi.subcategory_id, COALESCE(SUM(reqi.total_price), 0) as total
+        FROM request_items reqi
+        JOIN requests req ON reqi.request_id = req.id
+        WHERE req.project_id = ? AND req.status = 'approved'
+        GROUP BY reqi.subcategory_id
+    ", [$projectId]);
+
+    $map = [];
+    foreach ($rows as $row) {
+        $map[$row['subcategory_id']] = floatval($row['total']);
+    }
+    return $map;
+}
+
+/**
+ * Batch-load actual spending breakdown by component (upah/material/alat) per subcategory.
+ * Returns: [subcategory_id => ['upah' => float, 'material' => float, 'alat' => float]]
+ *
+ * @param int $projectId
+ * @return array
+ */
+function batchGetActualBreakdownBySubcategory($projectId) {
+    $rows = dbGetAll("
+        SELECT reqi.subcategory_id, 
+               pi.category as item_category,
+               COALESCE(SUM(reqi.unit_price * reqi.coefficient), 0) as category_total
+        FROM request_items reqi
+        JOIN requests req ON reqi.request_id = req.id
+        JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = req.project_id
+        WHERE req.project_id = ? AND req.status = 'approved'
+        GROUP BY reqi.subcategory_id, pi.category
+    ", [$projectId]);
+
+    $map = [];
+    foreach ($rows as $row) {
+        $subId = $row['subcategory_id'];
+        if (!isset($map[$subId])) {
+            $map[$subId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        }
+        $cat = $row['item_category'] ?? '';
+        if (isset($map[$subId][$cat])) {
+            $map[$subId][$cat] = floatval($row['category_total']);
+        }
+    }
+    return $map;
+}
+
+/**
+ * Batch-load actualization adjustments per subcategory.
+ * Returns: [subcategory_id => float deduction_amount]
+ *
+ * @param int $projectId
+ * @return array
+ */
+function batchGetActualizationAdjustments($projectId) {
+    // Get all actualized requests with remaining budget
+    $actualizedRequests = dbGetAll("
+        SELECT r.id as request_id, 
+               GREATEST(ra.remaining_upah - ra.consumed_upah, 0) + 
+               GREATEST(ra.remaining_material - ra.consumed_material, 0) + 
+               GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
+        FROM requests r
+        JOIN request_actuals ra ON ra.request_id = r.id
+        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
+        HAVING total_remaining > 0
+    ", [$projectId]);
+
+    if (empty($actualizedRequests)) {
+        return [];
+    }
+
+    // Get all request items grouped by request_id and subcategory in ONE query
+    $requestIds = array_column($actualizedRequests, 'request_id');
+    $placeholders = implode(',', array_fill(0, count($requestIds), '?'));
+    $allReqItems = dbGetAll("
+        SELECT reqi.request_id, reqi.subcategory_id, SUM(reqi.total_price) as subcat_total
+        FROM request_items reqi
+        WHERE reqi.request_id IN ($placeholders)
+        GROUP BY reqi.request_id, reqi.subcategory_id
+    ", $requestIds);
+
+    // Build lookup: [request_id => [subcategory_id => total, ...]]
+    $reqItemMap = [];
+    $reqTotals = [];
+    foreach ($allReqItems as $ri) {
+        $reqId = $ri['request_id'];
+        $reqItemMap[$reqId][$ri['subcategory_id']] = floatval($ri['subcat_total']);
+        $reqTotals[$reqId] = ($reqTotals[$reqId] ?? 0) + floatval($ri['subcat_total']);
+    }
+
+    // Calculate adjustments
+    $adjustments = [];
+    foreach ($actualizedRequests as $ar) {
+        $totalRemaining = floatval($ar['total_remaining']);
+        if ($totalRemaining <= 0) continue;
+
+        $reqId = $ar['request_id'];
+        $reqTotal = $reqTotals[$reqId] ?? 0;
+        if ($reqTotal <= 0) continue;
+
+        foreach (($reqItemMap[$reqId] ?? []) as $subcatId => $subcatTotal) {
+            $proportion = $subcatTotal / $reqTotal;
+            $deduction = $totalRemaining * $proportion;
+            $adjustments[$subcatId] = ($adjustments[$subcatId] ?? 0) + $deduction;
+        }
+    }
+
+    return $adjustments;
+}
+
+/**
+ * Calculate overall real-time RAB, RAP, and Actual statistics across all non-draft projects.
+ * 
+ * @return array
+ */
+function getOverallProjectsRealtimeStats() {
+    $projects = dbGetAll("SELECT id, status FROM projects WHERE status != 'draft'");
+    
+    $totalProjects = count($projects);
+    $activeProjects = 0;
+    $completedProjects = 0;
+    $totalRab = 0;
+    $totalRap = 0;
+    $totalActual = 0;
+
+    foreach ($projects as $p) {
+        if ($p['status'] === 'on_progress') $activeProjects++;
+        if ($p['status'] === 'completed') $completedProjects++;
+
+        $stats = calculateProjectRealtimeStats($p['id']);
+        if ($stats) {
+            $totalRab += $stats['total_rab'];
+            $totalRap += $stats['total_rap'];
+            $totalActual += $stats['total_actual'];
+        }
+    }
+
+    return [
+        'total_projects' => $totalProjects,
+        'active_projects' => $activeProjects,
+        'completed_projects' => $completedProjects,
+        'total_rab' => $totalRab,
+        'total_rap' => $totalRap,
+        'total_actual' => $totalActual
+    ];
+}
+
 

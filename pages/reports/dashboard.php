@@ -18,63 +18,14 @@ $projects = dbGetAll("SELECT id, name FROM projects WHERE status != 'draft' ORDE
 $projectStats = null;
 $categoryStats = [];
 if ($projectId) {
-    $projectStats = dbGetRow("
-        SELECT p.*,
-            (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
-             FROM rab_subcategories rs 
-             JOIN rab_categories rc ON rs.category_id = rc.id 
-             WHERE rc.project_id = p.id) as total_rab,
-            (SELECT COALESCE(SUM(rap.total_price), 0) FROM rap_items rap 
-             JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-             JOIN rab_categories rc ON rs.category_id = rc.id 
-             WHERE rc.project_id = p.id) as total_rap,
-            (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi 
-             JOIN requests req ON reqi.request_id = req.id 
-             WHERE req.project_id = p.id AND req.status = 'approved') as total_actual
-        FROM projects p
-        WHERE p.id = ?
-    ", [$projectId]);
-    
-    // Get stats by category
-    $categoryStats = dbGetAll("
-        SELECT rc.code, rc.name,
-            COALESCE(SUM(rs.volume * rs.unit_price), 0) as rab_total,
-            COALESCE(SUM(rap.total_price), 0) as rap_total,
-            COALESCE((
-                SELECT SUM(reqi.total_price) 
-                FROM request_items reqi 
-                JOIN requests req ON reqi.request_id = req.id
-                WHERE reqi.subcategory_id IN (
-                    SELECT rs2.id FROM rab_subcategories rs2 WHERE rs2.category_id = rc.id
-                ) AND req.status = 'approved'
-            ), 0) as actual_total
-        FROM rab_categories rc
-        LEFT JOIN rab_subcategories rs ON rs.category_id = rc.id
-        LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
-        WHERE rc.project_id = ?
-        GROUP BY rc.id, rc.code, rc.name
-        ORDER BY rc.sort_order, rc.code
-    ", [$projectId]);
+    $projectStats = calculateProjectRealtimeStats($projectId);
+    if ($projectStats) {
+        $categoryStats = $projectStats['category_stats'];
+    }
 }
 
-// Get overall stats
-$overallStats = dbGetRow("
-    SELECT 
-        (SELECT COUNT(*) FROM projects WHERE status != 'draft') as total_projects,
-        (SELECT COUNT(*) FROM projects WHERE status = 'on_progress') as active_projects,
-        (SELECT COUNT(*) FROM projects WHERE status = 'completed') as completed_projects,
-        (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
-         FROM rab_subcategories rs 
-         JOIN rab_categories rc ON rs.category_id = rc.id
-         JOIN projects p ON rc.project_id = p.id WHERE p.status != 'draft') as total_rab,
-        (SELECT COALESCE(SUM(rap.total_price), 0) FROM rap_items rap 
-         JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-         JOIN rab_categories rc ON rs.category_id = rc.id
-         JOIN projects p ON rc.project_id = p.id WHERE p.status != 'draft') as total_rap,
-        (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi 
-         JOIN requests req ON reqi.request_id = req.id 
-         WHERE req.status = 'approved') as total_actual
-");
+// Get overall stats across all non-draft projects
+$overallStats = getOverallProjectsRealtimeStats();
 ?>
 
 <!-- Page Title -->
@@ -233,13 +184,25 @@ $overallStats = dbGetRow("
                         </tbody>
                         <tfoot class="table-dark">
                             <tr>
-                                <th>TOTAL</th>
-                                <th class="text-end"><?= formatRupiah($projectStats['total_rab']) ?></th>
+                                <th>SUBTOTAL</th>
+                                <th class="text-end"><?= formatRupiah($projectStats['subtotal_rab']) ?></th>
                                 <th class="text-end"><?= formatRupiah($projectStats['total_rap']) ?></th>
                                 <th class="text-end"><?= formatRupiah($projectStats['total_actual']) ?></th>
                                 <th class="text-end"><?= formatRupiah($projectStats['total_rap'] - $projectStats['total_actual']) ?></th>
-                                <th class="text-end"><?= formatRupiah($projectStats['total_rab'] - $projectStats['total_actual']) ?></th>
+                                <th class="text-end"><?= formatRupiah($projectStats['subtotal_rab'] - $projectStats['total_actual']) ?></th>
                             </tr>
+                            <?php if (($projectStats['ppn_amount'] ?? 0) > 0): ?>
+                            <tr>
+                                <th>PPN (<?= number_format($projectStats['project']['ppn_percentage'] ?? 11, 2, ',', '.') ?>%)</th>
+                                <th class="text-end"><?= formatRupiah($projectStats['ppn_amount']) ?></th>
+                                <th colspan="4"></th>
+                            </tr>
+                            <tr>
+                                <th>TOTAL RAB (DIBULATKAN)</th>
+                                <th class="text-end"><?= formatRupiah($projectStats['total_rab']) ?></th>
+                                <th colspan="4"></th>
+                            </tr>
+                            <?php endif; ?>
                         </tfoot>
                     </table>
                 </div>

@@ -11,6 +11,21 @@ require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
 
+// Cek akses: harus punya projects.view ATAU projects.edit, 
+// ATAU punya project_assignments (field_team)
+if (!hasPermission('projects.view') && !hasPermission('projects.edit')) {
+    // Field team tanpa projects.view - cek apakah punya assignment aktif
+    $hasAssignment = dbGetRow(
+        "SELECT 1 FROM project_assignments WHERE user_id = ? AND is_active = 1 LIMIT 1",
+        [getCurrentUserId()]
+    );
+    if (!$hasAssignment) {
+        setFlash('error', 'Anda tidak memiliki akses ke halaman proyek.');
+        header('Location: ' . getBaseUrl() . '/index.php');
+        exit;
+    }
+}
+
 // Handle delete (admin only) - MUST BE BEFORE header.php include
 if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id']) && hasPermission('projects.delete')) {
     $id = $_GET['id'];
@@ -87,6 +102,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
 }
 
 if (hasPermission('projects.edit')) {
+    // Admin/Super Admin: lihat semua proyek + bisa edit
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
             (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
@@ -98,19 +114,21 @@ if (hasPermission('projects.edit')) {
         LEFT JOIN users u ON p.created_by = u.id
         ORDER BY p.created_at DESC
     ");
-    
-    // Calculate total_rab with overhead, PPN, and rounding for each project
-    foreach ($projects as &$proj) {
-        $baseRab = $proj['base_rab'];
-        $overheadPct = $proj['overhead_percentage'] ?? 10;
-        $ppnPct = $proj['ppn_percentage'] ?? 11;
-        $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
-        $rabPpn = $rabWithOverhead * ($ppnPct / 100);
-        $proj['total_rab'] = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
-    }
-    unset($proj);
+} elseif (hasPermission('projects.view')) {
+    // PM: lihat semua proyek tapi read-only (tidak perlu project_assignments)
+    $projects = dbGetAll("
+        SELECT p.*, u.full_name as created_by_name,
+            (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
+            (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
+             FROM rab_subcategories rs 
+             JOIN rab_categories rc ON rs.category_id = rc.id 
+             WHERE rc.project_id = p.id) as base_rab
+        FROM projects p 
+        LEFT JOIN users u ON p.created_by = u.id
+        ORDER BY p.created_at DESC
+    ");
 } else {
-    // Field team only sees assigned projects
+    // Field team: hanya lihat proyek yang ditugaskan (via project_assignments)
     $projects = dbGetAll("
         SELECT p.*,
             (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
@@ -122,18 +140,18 @@ if (hasPermission('projects.edit')) {
         WHERE pa.user_id = ? AND pa.is_active = 1
         ORDER BY p.name ASC
     ", [getCurrentUserId()]);
-    
-    // Calculate total_rab with overhead, PPN, and rounding for each project
-    foreach ($projects as &$proj) {
-        $baseRab = $proj['base_rab'];
-        $overheadPct = $proj['overhead_percentage'] ?? 10;
-        $ppnPct = $proj['ppn_percentage'] ?? 11;
-        $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
-        $rabPpn = $rabWithOverhead * ($ppnPct / 100);
-        $proj['total_rab'] = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
-    }
-    unset($proj);
 }
+
+// Calculate total_rab with overhead, PPN, and rounding for each project
+foreach ($projects as &$proj) {
+    $baseRab = $proj['base_rab'];
+    $overheadPct = $proj['overhead_percentage'] ?? 10;
+    $ppnPct = $proj['ppn_percentage'] ?? 11;
+    $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
+    $rabPpn = $rabWithOverhead * ($ppnPct / 100);
+    $proj['total_rab'] = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
+}
+unset($proj);
 
 // NOW include header (after all possible redirects)
 $pageTitle = 'Daftar Proyek';
@@ -219,7 +237,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                         <i class="mdi mdi-delete"></i>
                                     </a>
                                     <?php endif; ?>
-                                    <?php else: ?>
+                                    <?php elseif (hasPermission('requests.create')): ?>
                                     <?php if (empty($project['request_locked'])): ?>
                                     <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $project['id'] ?>" 
                                        class="btn btn-sm btn-success btn-action" title="Buat Pengajuan">

@@ -79,9 +79,9 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
             case 'add_category':
                 $name = trim($_POST['name']);
                 $headSubId = !empty($_POST['head_sub_id']) ? intval($_POST['head_sub_id']) : null;
-                $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY id DESC LIMIT 1", [$projectId]);
-                if ($maxCode && $maxCode['code']) {
-                    $nextCode = chr(ord(strtoupper($maxCode['code'])) + 1);
+                $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY sort_order DESC, id DESC LIMIT 1", [$projectId]);
+                if ($maxCode && !empty($maxCode['code'])) {
+                    $nextCode = getNextCategoryCode($maxCode['code']);
                 } else {
                     $nextCode = 'A';
                 }
@@ -154,19 +154,21 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
             case 'delete_category':
                 $deletedCatId = $_POST['category_id'];
                 dbExecute("DELETE FROM rab_categories WHERE id = ? AND project_id = ?", [$deletedCatId, $projectId]);
-                $remainingCats = dbGetAll("SELECT id, code FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
+                $remainingCats = dbGetAll("SELECT id, code FROM rab_categories WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
                 $letterCode = 'A';
                 foreach ($remainingCats as $cat) {
                     $newCode = $letterCode;
                     if ($cat['code'] !== $newCode) {
                         dbExecute("UPDATE rab_categories SET code = ? WHERE id = ?", [$newCode, $cat['id']]);
-                        $subcats = dbGetAll("SELECT id FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order", [$cat['id']]);
-                        $subNum = 1;
-                        foreach ($subcats as $subcat) {
-                            $newSubCode = $newCode . '.' . $subNum;
+                    }
+                    $subcats = dbGetAll("SELECT id, code FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, id", [$cat['id']]);
+                    $subNum = 1;
+                    foreach ($subcats as $subcat) {
+                        $newSubCode = $newCode . '.' . $subNum;
+                        if ($subcat['code'] !== $newSubCode) {
                             dbExecute("UPDATE rab_subcategories SET code = ? WHERE id = ?", [$newSubCode, $subcat['id']]);
-                            $subNum++;
                         }
+                        $subNum++;
                     }
                     $letterCode++;
                 }
@@ -316,9 +318,9 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     $colC = trim($row[2] ?? '');
                     
                     if (!empty($colA)) {
-                        $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY code DESC LIMIT 1", [$projectId]);
-                        if ($maxCode && $maxCode['code']) {
-                            $nextCode = chr(ord($maxCode['code']) + 1);
+                        $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY sort_order DESC, id DESC LIMIT 1", [$projectId]);
+                        if ($maxCode && !empty($maxCode['code'])) {
+                            $nextCode = getNextCategoryCode($maxCode['code']);
                         } else {
                             $nextCode = 'A';
                         }
@@ -434,9 +436,9 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                         if ($existingCat) {
                             $currentCategoryId = $existingCat['id'];
                         } else {
-                            $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY code DESC LIMIT 1", [$projectId]);
-                            if ($maxCode && $maxCode['code']) {
-                                $nextCode = chr(ord($maxCode['code']) + 1);
+                            $maxCode = dbGetRow("SELECT code FROM rab_categories WHERE project_id = ? ORDER BY sort_order DESC, id DESC LIMIT 1", [$projectId]);
+                            if ($maxCode && !empty($maxCode['code'])) {
+                                $nextCode = getNextCategoryCode($maxCode['code']);
                             } else {
                                 $nextCode = 'A';
                             }

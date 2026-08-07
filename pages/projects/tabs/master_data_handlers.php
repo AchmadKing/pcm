@@ -287,5 +287,10 @@ if (strpos($action, 'ahsp_rap') !== false || strpos($action, 'ahsp_detail_rap') 
     $subtab = '&subtab=ahsp';
 }
 
-header('Location: view.php?id=' . $projectId . '&tab=master' . $subtab);
+$ahspParam = '';
+if (!empty($_POST['ahsp_id'])) {
+    $ahspParam = '&ahsp_id=' . intval($_POST['ahsp_id']);
+}
+
+header('Location: view.php?id=' . $projectId . '&tab=master' . $subtab . $ahspParam);
 exit;

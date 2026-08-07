@@ -38,7 +38,7 @@ $rabItems = dbGetAll("
     JOIN rab_categories rc ON rs.category_id = rc.id
     LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
     WHERE rc.project_id = ?
-    ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+    ORDER BY rc.sort_order, LENGTH(rc.code), rc.code, rs.sort_order, LENGTH(rs.code), rs.code
 ", [$projectId]);
 
 // Function to get AHSP component breakdown
@@ -67,7 +67,7 @@ ensureRabHeadSubsTableExists();
 
 // Get Head-Subs and Categories for PDF
 $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
-$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
+$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
 
 $headSubMap = [];
 foreach ($headSubs as $hs) {

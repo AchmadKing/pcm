@@ -14,35 +14,12 @@ $isEditable = ($project['status'] === 'draft' && !$project['rab_submitted'] && !
 // Get available AHSP for this project
 $ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY work_name", [$projectId]);
 
-// Function to get AHSP component breakdown (tenaga, bahan, peralatan) and total
-if (!function_exists('getAhspComponentBreakdown')) {
-    function getAhspComponentBreakdown($ahspId) {
-        $result = ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
-        
-        if (!$ahspId) return $result;
-        
-        $totals = dbGetAll("
-            SELECT i.category, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-            FROM project_ahsp_details d 
-            JOIN project_items i ON d.item_id = i.id 
-            WHERE d.ahsp_id = ?
-            GROUP BY i.category
-        ", [$ahspId]);
-        
-        foreach ($totals as $row) {
-            if (isset($result[$row['category']])) {
-                $result[$row['category']] = $row['total'];
-            }
-            $result['total'] += $row['total'];
-        }
-        
-        return $result;
-    }
-}
+// Batch-load ALL AHSP component breakdowns in 1 query (instead of N queries in loop)
+$ahspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 
 // Get Head-Subs and Categories
 $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
-$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$projectId]);
+$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
 
 // Build Head-Sub map
 $headSubMap = [];
@@ -73,7 +50,8 @@ foreach ($categories as $cat) {
     
     $enrichedSubcats = [];
     foreach ($subcats as $sub) {
-        $components = getAhspComponentBreakdown($sub['ahsp_id']);
+        // Use pre-loaded batch map instead of per-subcategory query
+        $components = $ahspBreakdownMap[$sub['ahsp_id']] ?? ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
         
         $baseUnitPrice = $components['total'];
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
@@ -1058,28 +1036,47 @@ $(document).ready(function() {
     });
 });
 
+var pIdRab = <?= intval($projectId) ?>;
+var hsKeyRab = 'pcm_rab_collapsed_hs_' + pIdRab;
+var catKeyRab = 'pcm_rab_collapsed_cat_' + pIdRab;
+
+function getCollapsedRab(key) {
+    try { return JSON.parse(sessionStorage.getItem(key) || '[]'); } catch(e) { return []; }
+}
+function saveCollapsedRab(key, list) {
+    sessionStorage.setItem(key, JSON.stringify(list));
+}
+
 // Toggle Head-Sub rows visibility
 function toggleHeadSub(hsId) {
     var icon = $('#hs-chevron-' + hsId);
+    var list = getCollapsedRab(hsKeyRab);
     if (icon.hasClass('mdi-chevron-right')) {
         icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.hs-item-' + hsId).show();
+        list = list.filter(function(id) { return id != hsId; });
     } else {
         icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.hs-item-' + hsId).hide();
+        if (list.indexOf(hsId) === -1) list.push(hsId);
     }
+    saveCollapsedRab(hsKeyRab, list);
 }
 
 // Toggle Category rows visibility
 function toggleCategory(catId) {
     var icon = $('#cat-chevron-' + catId);
+    var list = getCollapsedRab(catKeyRab);
     if (icon.hasClass('mdi-chevron-right')) {
         icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.cat-item-' + catId).show();
+        list = list.filter(function(id) { return id != catId; });
     } else {
         icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.cat-item-' + catId).hide();
+        if (list.indexOf(catId) === -1) list.push(catId);
     }
+    saveCollapsedRab(catKeyRab, list);
 }
 
 // Toggle All Rows
@@ -1088,12 +1085,47 @@ function toggleAllRabRows(expand) {
         $('.toggle-hs-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.toggle-cat-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('[class*="hs-item-"], [class*="cat-item-"]').show();
+        saveCollapsedRab(hsKeyRab, []);
+        saveCollapsedRab(catKeyRab, []);
     } else {
         $('.toggle-hs-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('.toggle-cat-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
         $('[class*="hs-item-"], [class*="cat-item-"]').hide();
+        
+        var allHs = [];
+        $('.toggle-hs-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allHs.push(parseInt(match[0]));
+        });
+        var allCat = [];
+        $('.toggle-cat-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allCat.push(parseInt(match[0]));
+        });
+        saveCollapsedRab(hsKeyRab, allHs);
+        saveCollapsedRab(catKeyRab, allCat);
     }
 }
+
+function restoreRabCollapsedState() {
+    var hsList = getCollapsedRab(hsKeyRab);
+    hsList.forEach(function(hsId) {
+        $('#hs-chevron-' + hsId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.hs-item-' + hsId).hide();
+    });
+
+    var catList = getCollapsedRab(catKeyRab);
+    catList.forEach(function(catId) {
+        $('#cat-chevron-' + catId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.cat-item-' + catId).hide();
+    });
+}
+
+$(document).ready(function() {
+    restoreRabCollapsedState();
+});
 
 function moveCategoryToHeadSub(catId, hsId) {
 

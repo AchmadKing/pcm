@@ -63,7 +63,7 @@ $rabItems = dbGetAll("
     LEFT JOIN rab_head_subs hs ON rc.head_sub_id = hs.id
     LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
     WHERE rc.project_id = ?
-    ORDER BY COALESCE(hs.sort_order, 99999), hs.id, rc.sort_order, rc.code, rs.sort_order, rs.code
+    ORDER BY COALESCE(hs.sort_order, 99999), hs.id, rc.sort_order, LENGTH(rc.code), rc.code, rs.sort_order, LENGTH(rs.code), rs.code
 ", [$projectId]);
 
 if ($format === 'import') {

@@ -22,8 +22,8 @@ if (!$requestId) {
 $request = dbGetRow("
     SELECT req.*, p.name as project_name, p.id as project_id,
            u.full_name as created_by_name,
-           ua.full_name as approved_by_name,
-           upm.full_name as pm_approved_by_name
+           ua.full_name as approved_by_name, ua.role as approved_by_role,
+           upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -140,8 +140,8 @@ require_once __DIR__ . '/../../includes/header.php';
         <div class="card bg-light">
             <div class="card-body py-2">
                 <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        Status: <?= getStatusBadge($request['status']) ?>
+                    <div class="d-flex align-items-center gap-2">
+                        <span>Status:</span> <?= getDetailedStatusBadge($request) ?>
                         <span class="ms-3">Proyek: <strong><?= sanitize($request['project_name']) ?></strong></span>
                     </div>
                     <a href="index.php" class="btn btn-sm btn-outline-dark">

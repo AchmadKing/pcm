@@ -103,9 +103,13 @@ foreach ($assignedUsers as $au) {
 
 // Fetch requests for this project (enhanced query)
 $requests = dbGetAll("
-    SELECT r.*, u.full_name as created_by_name, ua.full_name as approved_by_name
+    SELECT r.*, u.full_name as created_by_name,
+           upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
+           ua.full_name as approved_by_name, ua.role as approved_by_role,
+           (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount
     FROM requests r
     LEFT JOIN users u ON r.created_by = u.id
+    LEFT JOIN users upm ON r.pm_approved_by = upm.id
     LEFT JOIN users ua ON r.approved_by = ua.id
     WHERE r.project_id = ?
     ORDER BY r.created_at DESC
@@ -348,7 +352,7 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                 <td class="text-center"><?= $req['target_week'] ?? $req['week_number'] ?? '-' ?></td>
                                 <td><?= sanitize($req['description'] ?: '-') ?></td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
-                                <td class="text-center"><?= $statusBadges[$req['status']] ?? $req['status'] ?></td>
+                                <td class="text-center"><?= getDetailedStatusBadge($req) ?></td>
                                 <td><?= sanitize($req['created_by_name']) ?></td>
                                 <td class="text-center">
                                     <?php if ($req['status'] === 'approved'): ?>
