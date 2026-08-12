@@ -38,9 +38,38 @@ if (!$request) {
     exit;
 }
 
-// Check access - admin, PM, or creator can view
-if (!hasPermission('requests.view') && $request['created_by'] != getCurrentUserId()) {
+// Check access - creator or users with requests.view and project access
+$canView = false;
+if (isSuperAdmin() || hasPermission('projects.edit')) {
+    $canView = true;
+} elseif ($request['created_by'] == getCurrentUserId()) {
+    $canView = true;
+} elseif (hasPermission('requests.view') && canAccessProject($request['project_id'])) {
+    $canView = true;
+}
+
+if (!$canView) {
     setFlash('error', 'Anda tidak memiliki akses ke pengajuan ini!');
+    header('Location: index.php');
+    exit;
+}
+
+// Handle Delete Request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_request') {
+    if (!hasPermission('requests.delete')) {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus pengajuan!');
+        header('Location: view_request.php?id=' . $requestId);
+        exit;
+    }
+    
+    if (!canAccessProject($request['project_id'])) {
+        setFlash('error', 'Anda tidak memiliki akses ke proyek pengajuan ini!');
+        header('Location: view_request.php?id=' . $requestId);
+        exit;
+    }
+    
+    deleteRequest($requestId);
+    setFlash('success', 'Pengajuan ' . ($request['request_number'] ?: 'REQ-' . $request['id']) . ' berhasil dihapus.');
     header('Location: index.php');
     exit;
 }
@@ -144,14 +173,42 @@ require_once __DIR__ . '/../../includes/header.php';
                         <span>Status:</span> <?= getDetailedStatusBadge($request) ?>
                         <span class="ms-3">Proyek: <strong><?= sanitize($request['project_name']) ?></strong></span>
                     </div>
-                    <a href="index.php" class="btn btn-sm btn-outline-dark">
-                        <i class="mdi mdi-arrow-left"></i> Kembali
-                    </a>
+                    <div class="d-flex gap-2">
+                        <?php if ($request['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($request['project_id'])): ?>
+                        <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>" class="btn btn-sm btn-warning">
+                            <i class="mdi mdi-refresh"></i> Ajukan Ulang
+                        </a>
+                        <?php endif; ?>
+                        <?php if (hasPermission('requests.delete')): ?>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="confirmDeleteRequest(<?= $requestId ?>, '<?= addslashes(sanitize($request['request_number'] ?: 'REQ-' . $requestId)) ?>')">
+                            <i class="mdi mdi-delete"></i> Hapus Pengajuan
+                        </button>
+                        <?php endif; ?>
+                        <a href="index.php" class="btn btn-sm btn-outline-dark">
+                            <i class="mdi mdi-arrow-left"></i> Kembali
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<?php if ($request['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($request['project_id'])): ?>
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-warning border-warning d-flex align-items-center justify-content-between py-2 mb-0">
+            <div>
+                <i class="mdi mdi-alert-circle-outline fs-5 me-2 text-warning align-middle"></i>
+                <span>Pengajuan ini berstatus <strong>Rejected</strong>. Anda dapat mengajukan ulang dengan memuat seluruh item dan lampiran yang sama secara otomatis.</span>
+            </div>
+            <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>" class="btn btn-sm btn-warning text-nowrap ms-3">
+                <i class="mdi mdi-refresh"></i> Ajukan Ulang Sekarang
+            </a>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="row">
     <!-- Request Info -->
@@ -253,22 +310,47 @@ require_once __DIR__ . '/../../includes/header.php';
 
         <!-- Request Attachments Card -->
         <?php if (!empty($requestAttachments)): ?>
-        <div class="card border-secondary">
+        <div class="card border-secondary mb-3">
             <div class="card-body">
-                <h6 class="header-title mb-2"><i class="mdi mdi-paperclip"></i> Lampiran Pengajuan</h6>
+                <h6 class="header-title mb-3"><i class="mdi mdi-paperclip text-info"></i> Lampiran Nota Pengajuan (<?= count($requestAttachments) ?>)</h6>
                 <div class="row g-2">
-                    <?php foreach ($requestAttachments as $att): ?>
-                    <div class="col-auto">
-                        <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
-                        <a href="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" target="_blank" title="<?= sanitize($att['original_name']) ?>">
-                            <img src="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" 
-                                 style="height: 60px; width: auto;" class="rounded border">
-                        </a>
-                        <?php else: ?>
-                        <a href="<?= $baseUrl ?>/uploads/receipts/<?= $att['filename'] ?>" target="_blank" class="btn btn-outline-danger btn-sm" title="<?= sanitize($att['original_name']) ?>">
-                            <i class="mdi mdi-file-pdf-box text-danger"></i> PDF
-                        </a>
-                        <?php endif; ?>
+                    <?php foreach ($requestAttachments as $att): 
+                        $isImg = in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
+                        $fileUrl = $baseUrl . '/uploads/receipts/' . $att['filename'];
+                        $fileSize = !empty($att['file_size']) ? (round($att['file_size'] / 1024, 1) . ' KB') : '';
+                    ?>
+                    <div class="col-12">
+                        <div class="border rounded p-2 d-flex align-items-center bg-light">
+                            <?php if ($isImg): ?>
+                            <div class="me-2 position-relative" style="width: 48px; height: 48px; cursor: pointer;" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', true)">
+                                <img src="<?= $fileUrl ?>" style="width: 48px; height: 48px; object-fit: cover;" class="rounded border" alt="<?= sanitize($att['original_name']) ?>">
+                            </div>
+                            <?php else: ?>
+                            <div class="me-2 d-flex align-items-center justify-content-center rounded bg-soft-danger text-danger border border-danger" style="width: 48px; height: 48px; cursor: pointer;" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', false)">
+                                <i class="mdi mdi-file-pdf-box fs-3"></i>
+                            </div>
+                            <?php endif; ?>
+                            <div class="flex-grow-1 text-truncate">
+                                <div class="fw-semibold text-dark text-truncate small" title="<?= sanitize($att['original_name']) ?>">
+                                    <?= sanitize($att['original_name']) ?>
+                                </div>
+                                <div class="text-muted" style="font-size: 0.75rem;">
+                                    <?php if ($fileSize): ?><span class="badge bg-light text-dark border me-1"><?= $fileSize ?></span><?php endif; ?>
+                                    <span class="badge bg-soft-info text-info"><?= strtoupper(pathinfo($att['filename'], PATHINFO_EXTENSION)) ?></span>
+                                </div>
+                            </div>
+                            <div class="ms-2">
+                                <?php if ($isImg): ?>
+                                <button type="button" class="btn btn-outline-primary btn-sm py-1 px-2" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', true)" title="Preview Gambar">
+                                    <i class="mdi mdi-eye"></i>
+                                </button>
+                                <?php else: ?>
+                                <a href="<?= $fileUrl ?>" target="_blank" class="btn btn-outline-danger btn-sm py-1 px-2" title="Buka PDF">
+                                    <i class="mdi mdi-open-in-new"></i>
+                                </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -388,20 +470,34 @@ require_once __DIR__ . '/../../includes/header.php';
                 </div>
                 
                 <?php if (!empty($actualAttachments)): ?>
-                <h6 class="mt-3 mb-2"><i class="mdi mdi-camera"></i> Lampiran Nota</h6>
+                <h6 class="mt-3 mb-2"><i class="mdi mdi-camera text-info"></i> Lampiran Nota / Bukti Transaksi Aktual (<?= count($actualAttachments) ?>)</h6>
                 <div class="row g-2">
-                    <?php foreach ($actualAttachments as $att): ?>
-                    <div class="col-auto">
-                        <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
-                        <a href="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" target="_blank">
-                            <img src="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" 
-                                 style="height: 80px; width: auto;" class="rounded border">
-                        </a>
-                        <?php else: ?>
-                        <a href="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" target="_blank" class="btn btn-outline-danger btn-sm">
-                            <i class="mdi mdi-file-pdf-box"></i> <?= sanitize($att['original_name']) ?>
-                        </a>
-                        <?php endif; ?>
+                    <?php foreach ($actualAttachments as $att): 
+                        $isImg = in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
+                        $fileUrl = $baseUrl . '/uploads/actuals/' . $att['filename'];
+                        $fileSize = !empty($att['file_size']) ? (round($att['file_size'] / 1024, 1) . ' KB') : '';
+                    ?>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="border rounded p-2 d-flex align-items-center bg-light">
+                            <?php if ($isImg): ?>
+                            <div class="me-2 position-relative" style="width: 48px; height: 48px; cursor: pointer;" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', true)">
+                                <img src="<?= $fileUrl ?>" style="width: 48px; height: 48px; object-fit: cover;" class="rounded border" alt="<?= sanitize($att['original_name']) ?>">
+                            </div>
+                            <?php else: ?>
+                            <div class="me-2 d-flex align-items-center justify-content-center rounded bg-soft-danger text-danger border border-danger" style="width: 48px; height: 48px; cursor: pointer;" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', false)">
+                                <i class="mdi mdi-file-pdf-box fs-3"></i>
+                            </div>
+                            <?php endif; ?>
+                            <div class="flex-grow-1 overflow-hidden">
+                                <div class="text-truncate fw-semibold small" title="<?= sanitize($att['original_name']) ?>">
+                                    <?= sanitize($att['original_name']) ?>
+                                </div>
+                                <span class="text-muted" style="font-size: 0.75rem;"><?= $fileSize ?></span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary ms-2 py-0 px-2" onclick="openViewModal('<?= $fileUrl ?>', '<?= sanitize($att['original_name']) ?>', '<?= $fileSize ?>', <?= $isImg ? 'true' : 'false' ?>)" title="Lihat">
+                                <i class="mdi mdi-eye"></i>
+                            </button>
+                        </div>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -426,5 +522,74 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 <?php endif; ?>
+<!-- Modal Preview Lampiran -->
+<div class="modal fade" id="viewAttachmentModal" tabindex="-1" aria-labelledby="viewAttachmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white py-2">
+                <h5 class="modal-title fs-6 d-flex align-items-center" id="viewAttachmentModalLabel">
+                    <i class="mdi mdi-eye me-2"></i> <span id="viewModalFileName">Preview Dokumen</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center p-3 bg-light" style="min-height: 250px; display: flex; align-items: center; justify-content: center;">
+                <div id="viewModalContent" class="w-100"></div>
+            </div>
+            <div class="modal-footer py-2 d-flex justify-content-between">
+                <span class="text-muted small" id="viewModalFileSize"></span>
+                <div>
+                    <a href="#" id="viewModalOpenNewTab" target="_blank" class="btn btn-outline-primary btn-sm me-1">
+                        <i class="mdi mdi-open-in-new"></i> Buka Ukuran Penuh
+                    </a>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openViewModal(fileUrl, fileName, fileSize, isImage) {
+    document.getElementById('viewModalFileName').textContent = fileName;
+    document.getElementById('viewModalFileSize').textContent = fileSize ? ('Ukuran: ' + fileSize) : '';
+    document.getElementById('viewModalOpenNewTab').href = fileUrl;
+    
+    var container = document.getElementById('viewModalContent');
+    if (isImage) {
+        container.innerHTML = '<img src="' + fileUrl + '" class="img-fluid rounded shadow-sm" style="max-height: 70vh; object-fit: contain;" alt="' + fileName + '">';
+    } else {
+        container.innerHTML = '<div class="py-4 text-center">' +
+            '<i class="mdi mdi-file-pdf-box text-danger" style="font-size: 5rem;"></i>' +
+            '<h5 class="mt-3">' + fileName + '</h5>' +
+            '<a href="' + fileUrl + '" target="_blank" class="btn btn-danger btn-sm mt-2">' +
+            '<i class="mdi mdi-open-in-new"></i> Buka Dokumen PDF di Tab Baru</a></div>';
+    }
+    
+    var modal = new bootstrap.Modal(document.getElementById('viewAttachmentModal'));
+    modal.show();
+}
+
+function confirmDeleteRequest(reqId, reqNumber) {
+    confirmDelete(function() {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'view_request.php?id=' + reqId;
+        
+        var actInput = document.createElement('input');
+        actInput.type = 'hidden';
+        actInput.name = 'action';
+        actInput.value = 'delete_request';
+        form.appendChild(actInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }, {
+        title: 'Hapus Pengajuan Dana',
+        message: 'Apakah Anda yakin ingin menghapus pengajuan <strong>' + (reqNumber || ('REQ-' + reqId)) + '</strong>?<br><small class="text-danger">Seluruh rincian item, data aktual, dan lampiran terkait akan ikut terhapus permanen.</small>',
+        buttonText: 'Ya, Hapus Pengajuan',
+        buttonClass: 'btn-danger'
+    });
+}
+</script>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

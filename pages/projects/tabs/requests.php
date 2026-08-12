@@ -84,8 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// Fetch all field team users
-$allFieldTeamUsers = dbGetAll("SELECT id, username, full_name FROM users WHERE role = 'field_team' AND is_active = 1 ORDER BY username ASC");
+// Fetch all users eligible for project assignment (roles with view_mode = 'assigned')
+$allFieldTeamUsers = getAssignableUsers();
 
 // Fetch assigned users for this project
 $assignedUserIds = [];
@@ -155,7 +155,7 @@ $canManageTeam = ($project['status'] === 'on_progress');
             <div class="card-body">
                 <?php if (empty($allFieldTeamUsers)): ?>
                 <div class="alert alert-info mb-0 py-2">
-                    <small><i class="mdi mdi-information"></i> Belum ada user dengan role "field_team". Tambahkan melalui menu User Management.</small>
+                    <small><i class="mdi mdi-information"></i> Belum ada user yang dapat ditugaskan. Pastikan ada user dengan role yang memiliki akses proyek mode "Hanya yang ditugaskan" di Manajemen Role.</small>
                 </div>
                 <?php else: ?>
                 
@@ -369,16 +369,29 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center">
-                                    <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $req['id'] ?>" 
-                                       class="btn btn-sm btn-outline-info py-0" title="Lihat Detail">
-                                        <i class="mdi mdi-eye"></i>
-                                    </a>
-                                    <?php if ($req['status'] === 'pending' && hasPermission('requests.approve')): ?>
-                                    <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>" 
-                                       class="btn btn-sm btn-outline-success py-0" title="Review & Approve">
-                                        <i class="mdi mdi-check-circle"></i>
-                                    </a>
-                                    <?php endif; ?>
+                                    <div class="d-flex justify-content-center gap-1">
+                                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $req['id'] ?>" 
+                                           class="btn btn-sm btn-outline-info py-0" title="Lihat Detail">
+                                            <i class="mdi mdi-eye"></i>
+                                        </a>
+                                        <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && $canMakeRequest): ?>
+                                        <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>&resubmit_id=<?= $req['id'] ?>" 
+                                           class="btn btn-sm btn-outline-warning py-0" title="Ajukan Ulang Pengajuan">
+                                            <i class="mdi mdi-refresh"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php if ($req['status'] === 'pending' && hasPermission('requests.approve')): ?>
+                                        <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>" 
+                                           class="btn btn-sm btn-outline-success py-0" title="Review & Approve">
+                                            <i class="mdi mdi-check-circle"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php if (hasPermission('requests.delete')): ?>
+                                        <button type="button" class="btn btn-sm btn-outline-danger py-0" title="Hapus Pengajuan" onclick="confirmDeleteRequest(<?= $req['id'] ?>, '<?= addslashes(sanitize($req['request_number'] ?: 'REQ-' . $req['id'])) ?>')">
+                                            <i class="mdi mdi-delete"></i>
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
@@ -496,6 +509,35 @@ function showRemoveConfirmModal(userId, username) {
     
     var modal = new bootstrap.Modal(document.getElementById('removeConfirmModal'));
     modal.show();
+}
+
+// Show delete request confirmation
+function confirmDeleteRequest(reqId, reqNumber) {
+    confirmDelete(function() {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'view.php?id=<?= $projectId ?>&tab=requests';
+        
+        var actInput = document.createElement('input');
+        actInput.type = 'hidden';
+        actInput.name = 'action';
+        actInput.value = 'delete_request';
+        form.appendChild(actInput);
+        
+        var idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'request_id';
+        idInput.value = reqId;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }, {
+        title: 'Hapus Pengajuan Dana',
+        message: 'Apakah Anda yakin ingin menghapus pengajuan <strong>' + (reqNumber || ('REQ-' + reqId)) + '</strong>?<br><small class="text-danger">Seluruh rincian item, data aktual, dan lampiran terkait akan ikut terhapus permanen.</small>',
+        buttonText: 'Ya, Hapus Pengajuan',
+        buttonClass: 'btn-danger'
+    });
 }
 </script>
 

@@ -16,14 +16,30 @@ $stats = [
 ];
 
 try {
-    // Count projects
-    $projectCount = dbGetRow("SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'on_progress' THEN 1 ELSE 0 END) as on_progress
-    FROM projects WHERE status != 'draft' OR created_by = ?", [getCurrentUserId()]);
+    // Count projects based on view_mode
+    $dashboardViewMode = getProjectViewMode();
+    
+    if ($dashboardViewMode === 'all') {
+        // Admin / PM / Super Admin: count all projects
+        $projectCount = dbGetRow("SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'on_progress' THEN 1 ELSE 0 END) as on_progress
+        FROM projects");
+    } elseif ($dashboardViewMode === 'assigned') {
+        // Assigned users: count only assigned projects
+        $projectCount = dbGetRow("SELECT 
+            COUNT(DISTINCT p.id) as total,
+            SUM(CASE WHEN p.status = 'on_progress' THEN 1 ELSE 0 END) as on_progress
+        FROM projects p
+        INNER JOIN project_assignments pa ON pa.project_id = p.id
+        WHERE pa.user_id = ? AND pa.is_active = 1", [getCurrentUserId()]);
+    } else {
+        // No access
+        $projectCount = ['total' => 0, 'on_progress' => 0];
+    }
 
-    $stats['total_projects'] = $projectCount['total'] ?? 0;
-    $stats['on_progress'] = $projectCount['on_progress'] ?? 0;
+    $stats['total_projects'] = (int)($projectCount['total'] ?? 0);
+    $stats['on_progress'] = (int)($projectCount['on_progress'] ?? 0);
 
     if (hasPermission('requests.approve')) {
         $pendingCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE status = 'pending'");
@@ -33,17 +49,19 @@ try {
         $stats['pending_requests'] = $pendingCount['cnt'] ?? 0;
     }
 
-    if (hasPermission('projects.edit') || hasPermission('projects.view')) {
-        // Admin/PM: lihat semua proyek
+    if ($dashboardViewMode === 'all') {
+        // All access: see all projects
         $recentProjects = dbGetAll("SELECT * FROM projects ORDER BY updated_at DESC LIMIT 5");
-    } else {
-        // Field team: hanya lihat proyek yang ditugaskan
+    } elseif ($dashboardViewMode === 'assigned') {
+        // Assigned: see only assigned projects
         $recentProjects = dbGetAll("
             SELECT p.* FROM projects p
             INNER JOIN project_assignments pa ON pa.project_id = p.id
             WHERE pa.user_id = ? AND pa.is_active = 1
             ORDER BY p.updated_at DESC LIMIT 5
         ", [getCurrentUserId()]);
+    } else {
+        $recentProjects = [];
     }
 
     if (hasPermission('requests.approve')) {

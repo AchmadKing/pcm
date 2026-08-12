@@ -12,11 +12,13 @@ require_once __DIR__ . '/../../includes/functions.php';
 require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
+requirePermission('rap.view');
 
 $projectId = $_GET['id'] ?? null;
 $format = $_GET['format'] ?? 'report'; // 'report' or 'import'
 
-if (!$projectId) {
+if (!$projectId || !canAccessProject($projectId)) {
+    setFlash('error', 'Anda tidak memiliki akses ke proyek ini!');
     header('Location: index.php');
     exit;
 }
@@ -31,7 +33,7 @@ if (!$project) {
 }
 
 // Get overhead percentage for calculation
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 
 // Region is now stored directly in project
 $regionName = $project['region_name'] ?? '-';

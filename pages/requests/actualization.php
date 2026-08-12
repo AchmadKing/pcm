@@ -44,8 +44,34 @@ if (!hasPermission('requests.approve') && $request['created_by'] != getCurrentUs
 // Get existing actualization data if any
 $existingActual = dbGetRow("SELECT * FROM request_actuals WHERE request_id = ?", [$requestId]);
 $existingAttachments = [];
+$stagedExistingAttachments = [];
 if ($existingActual) {
     $existingAttachments = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY created_at", [$existingActual['id']]);
+    $uploadDir = __DIR__ . '/../../uploads/actuals/';
+    foreach ($existingAttachments as $att) {
+        $filePath = $uploadDir . $att['filename'];
+        if (file_exists($filePath)) {
+            $ext = strtolower(pathinfo($att['original_name'] ?: $att['filename'], PATHINFO_EXTENSION));
+            $nameWithoutExt = pathinfo($att['original_name'] ?: $att['filename'], PATHINFO_FILENAME);
+            $isImg = in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']) || in_array($ext, ['jpg', 'jpeg', 'png', 'webp']);
+            $isPdf = $att['file_type'] === 'application/pdf' || $ext === 'pdf';
+            
+            $stagedExistingAttachments[] = [
+                'id' => 'existing_' . $att['id'],
+                'attachment_id' => intval($att['id']),
+                'filename' => $att['filename'],
+                'customName' => $nameWithoutExt,
+                'originalName' => $att['original_name'] ?: $att['filename'],
+                'extension' => $ext,
+                'fileType' => $att['file_type'],
+                'fileSize' => intval($att['file_size']),
+                'isImage' => $isImg,
+                'isPdf' => $isPdf,
+                'previewUrl' => $baseUrl . '/uploads/actuals/' . $att['filename'],
+                'isExisting' => true
+            ];
+        }
+    }
 }
 
 // Get request items grouped by type for summary
@@ -117,39 +143,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Mark request as actualized
         dbExecute("UPDATE requests SET is_actualized = 1 WHERE id = ?", [$requestId]);
         
-        // Handle file uploads
-        if (!empty($_FILES['attachments']['name'][0])) {
-            $uploadDir = __DIR__ . '/../../uploads/actuals/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-            
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-            $maxSize = 5 * 1024 * 1024; // 5MB
-            
-            foreach ($_FILES['attachments']['tmp_name'] as $key => $tmpName) {
-                if ($_FILES['attachments']['error'][$key] !== UPLOAD_ERR_OK) continue;
-                
-                $fileType = $_FILES['attachments']['type'][$key];
-                $fileSize = $_FILES['attachments']['size'][$key];
-                $originalName = $_FILES['attachments']['name'][$key];
-                
-                if (!in_array($fileType, $allowedTypes)) continue;
-                if ($fileSize > $maxSize) continue;
-                
-                $ext = pathinfo($originalName, PATHINFO_EXTENSION);
-                $filename = 'actual_' . $requestId . '_' . time() . '_' . $key . '.' . $ext;
-                $filepath = $uploadDir . $filename;
-                
-                if (move_uploaded_file($tmpName, $filepath)) {
-                    dbInsert("
-                        INSERT INTO request_actual_attachments (request_actual_id, filename, original_name, file_type, file_size)
-                        VALUES (?, ?, ?, ?, ?)
-                    ", [$actualId, $filename, $originalName, $fileType, $fileSize]);
-                }
-            }
+        $uploadDir = __DIR__ . '/../../uploads/actuals/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
         }
-        
+
         // Handle attachment deletions
         if (!empty($_POST['delete_attachments'])) {
             $deleteIds = json_decode($_POST['delete_attachments'], true);
@@ -157,10 +155,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 foreach ($deleteIds as $attId) {
                     $att = dbGetRow("SELECT * FROM request_actual_attachments WHERE id = ? AND request_actual_id = ?", [$attId, $actualId]);
                     if ($att) {
-                        $filepath = __DIR__ . '/../../uploads/actuals/' . $att['filename'];
-                        if (file_exists($filepath)) unlink($filepath);
+                        $filepath = $uploadDir . $att['filename'];
+                        if (file_exists($filepath)) @unlink($filepath);
                         dbExecute("DELETE FROM request_actual_attachments WHERE id = ?", [$attId]);
                     }
+                }
+            }
+        }
+
+        // Handle existing attachments rename if any
+        if (!empty($_POST['existing_attachments'])) {
+            $existingAttList = json_decode($_POST['existing_attachments'], true);
+            if (is_array($existingAttList)) {
+                foreach ($existingAttList as $exAtt) {
+                    $attId = intval($exAtt['attachment_id'] ?? 0);
+                    $customName = trim($exAtt['custom_name'] ?? '');
+                    if ($attId > 0 && !empty($customName)) {
+                        $att = dbGetRow("SELECT * FROM request_actual_attachments WHERE id = ? AND request_actual_id = ?", [$attId, $actualId]);
+                        if ($att) {
+                            $origExt = strtolower(pathinfo($att['original_name'] ?: $att['filename'], PATHINFO_EXTENSION));
+                            $customName = preg_replace('/[\\\\\/:\*\?"<>\|]/', '_', $customName);
+                            $customExt = strtolower(pathinfo($customName, PATHINFO_EXTENSION));
+                            if ($customExt !== $origExt && !empty($origExt)) {
+                                $finalName = $customName . '.' . $origExt;
+                            } else {
+                                $finalName = $customName;
+                            }
+                            dbExecute("UPDATE request_actual_attachments SET original_name = ? WHERE id = ?", [$finalName, $attId]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle new file uploads
+        if (!empty($_FILES['attachments']['name'][0])) {
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'application/pdf'];
+            $allowedExts = ['jpeg', 'jpg', 'png', 'webp', 'pdf'];
+            $maxSize = 5 * 1024 * 1024; // 5MB
+            
+            foreach ($_FILES['attachments']['tmp_name'] as $key => $tmpName) {
+                if ($_FILES['attachments']['error'][$key] !== UPLOAD_ERR_OK) continue;
+                
+                $fileType = $_FILES['attachments']['type'][$key];
+                $fileSize = $_FILES['attachments']['size'][$key];
+                $rawOriginalName = $_FILES['attachments']['name'][$key];
+                $origExt = strtolower(pathinfo($rawOriginalName, PATHINFO_EXTENSION));
+                
+                // Validate extension and type
+                if (!in_array($origExt, $allowedExts)) continue;
+                if (!in_array($fileType, $allowedTypes)) {
+                    if (function_exists('mime_content_type')) {
+                        $detectedMime = mime_content_type($tmpName);
+                        if (!in_array($detectedMime, $allowedTypes)) continue;
+                        $fileType = $detectedMime;
+                    }
+                }
+                if ($fileSize > $maxSize) continue;
+                
+                // Custom edited name handling
+                $customName = isset($_POST['attachment_names'][$key]) ? trim($_POST['attachment_names'][$key]) : '';
+                if (!empty($customName)) {
+                    $customName = preg_replace('/[\\\\\/:\*\?"<>\|]/', '_', $customName);
+                    $customExt = strtolower(pathinfo($customName, PATHINFO_EXTENSION));
+                    if ($customExt !== $origExt && !empty($origExt)) {
+                        $finalOriginalName = $customName . '.' . $origExt;
+                    } else {
+                        $finalOriginalName = $customName;
+                    }
+                } else {
+                    $finalOriginalName = $rawOriginalName;
+                }
+                
+                // Generate unique filename
+                $filename = 'actual_' . $requestId . '_' . time() . '_' . $key . '_' . bin2hex(random_bytes(4)) . '.' . $origExt;
+                $filepath = $uploadDir . $filename;
+                
+                if (move_uploaded_file($tmpName, $filepath)) {
+                    dbInsert("
+                        INSERT INTO request_actual_attachments (request_actual_id, filename, original_name, file_type, file_size)
+                        VALUES (?, ?, ?, ?, ?)
+                    ", [$actualId, $filename, $finalOriginalName, $fileType, $fileSize]);
                 }
             }
         }
@@ -404,47 +479,67 @@ require_once __DIR__ . '/../../includes/header.php';
                         </div>
                     </div>
                     
-                    <!-- Upload Nota -->
-                    <div class="card border-secondary mb-3">
-                        <div class="card-header py-2 bg-secondary bg-opacity-10">
-                            <h6 class="mb-0"><i class="mdi mdi-camera"></i> Lampiran Nota / Bukti Transaksi</h6>
+                    <!-- Upload Nota (Multi-file Drag & Drop with Staging) -->
+                    <div class="card mb-3 shadow-sm border-info">
+                        <div class="card-header bg-info text-white py-2 d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 text-white"><i class="mdi mdi-paperclip"></i> Lampiran Nota / Bukti Transaksi</h6>
+                            <span id="stagedFilesCountBadge" class="badge bg-light text-dark">0 file dipilih</span>
                         </div>
-                        <div class="card-body py-2">
-                            <?php if (!empty($existingAttachments)): ?>
-                            <div class="mb-3">
-                                <label class="form-label small mb-1">Lampiran yang sudah diupload:</label>
-                                <div class="row g-2" id="existingAttachments">
-                                    <?php foreach ($existingAttachments as $att): ?>
-                                    <div class="col-auto" id="att-<?= $att['id'] ?>">
-                                        <div class="border rounded p-2 d-flex align-items-center gap-2">
-                                            <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
-                                            <a href="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" target="_blank">
-                                                <img src="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" 
-                                                     style="height: 50px; width: auto;" class="rounded">
-                                            </a>
-                                            <?php else: ?>
-                                            <a href="<?= $baseUrl ?>/uploads/actuals/<?= $att['filename'] ?>" target="_blank">
-                                                <i class="mdi mdi-file-pdf-box text-danger" style="font-size: 2rem;"></i>
-                                            </a>
-                                            <?php endif; ?>
-                                            <div>
-                                                <small class="d-block"><?= sanitize($att['original_name']) ?></small>
-                                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" 
-                                                        onclick="deleteAttachment(<?= $att['id'] ?>)">
-                                                    <i class="mdi mdi-delete"></i>
-                                                </button>
-                                            </div>
-                                        </div>
+                        <div class="card-body">
+                            <!-- Drag & Drop Zone -->
+                            <div class="upload-dropzone p-4 mb-3 text-center border border-2 border-dashed rounded bg-light" id="uploadDropzone" style="cursor: pointer; transition: all 0.2s ease;">
+                                <input type="file" id="attachmentInput" accept=".jpg,.jpeg,.png,.webp,.pdf" multiple style="display: none;">
+                                <div class="dropzone-content">
+                                    <i class="mdi mdi-cloud-upload-outline text-info" style="font-size: 3rem; display: block; line-height: 1;"></i>
+                                    <h6 class="mt-2 mb-1">Tarik & Lepaskan File Nota di Sini atau <span class="text-primary text-decoration-underline">Pilih dari Komputer</span></h6>
+                                    <p class="text-muted small mb-2">Bisa memilih banyak file sekaligus atau upload berkali-kali tanpa menimpa file sebelumnya.</p>
+                                    <div>
+                                        <span class="badge bg-soft-primary text-primary me-1"><i class="mdi mdi-image"></i> JPG, PNG, WEBP</span>
+                                        <span class="badge bg-soft-danger text-danger me-1"><i class="mdi mdi-file-pdf-box"></i> PDF</span>
+                                        <span class="badge bg-soft-secondary text-secondary"><i class="mdi mdi-weight"></i> Maks. 5MB per file</span>
                                     </div>
-                                    <?php endforeach; ?>
                                 </div>
                             </div>
-                            <?php endif; ?>
-                            
-                            <label class="form-label small mb-1">Upload nota baru (JPG, PNG, PDF, maks 5MB per file):</label>
-                            <input type="file" class="form-control" name="attachments[]" multiple 
-                                   accept="image/jpeg,image/png,application/pdf">
-                            <div id="filePreview" class="mt-2 d-flex gap-2 flex-wrap"></div>
+
+                            <!-- Staged Files List Section -->
+                            <div id="stagedFilesContainer" class="d-none">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h6 class="mb-0 text-dark font-weight-bold">
+                                        <i class="mdi mdi-file-document-multiple-outline text-info"></i> Daftar File yang Akan Disimpan:
+                                    </h6>
+                                    <div>
+                                        <button type="button" class="btn btn-outline-primary btn-sm me-1" id="btnAddMoreFiles">
+                                            <i class="mdi mdi-plus"></i> Tambah File Lain
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" id="btnClearAllStaged">
+                                            <i class="mdi mdi-trash-can-outline"></i> Hapus Semua
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive border rounded">
+                                    <table class="table table-hover align-middle mb-0" id="stagedFilesTable">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th width="40" class="text-center">#</th>
+                                                <th width="80" class="text-center">Preview</th>
+                                                <th>Nama File / Keterangan Nota</th>
+                                                <th width="110" class="text-center">Ukuran</th>
+                                                <th width="100" class="text-center">Format</th>
+                                                <th width="130" class="text-center">Aksi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="stagedFilesList">
+                                            <!-- Rendered dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Empty State for Attachment -->
+                            <div id="stagedFilesEmptyState" class="text-center py-2 text-muted small">
+                                <i class="mdi mdi-information-outline"></i> Belum ada file nota yang dipilih. (Opsional / dapat dilampirkan)
+                            </div>
                         </div>
                     </div>
                     
@@ -483,6 +578,65 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 
+<!-- Modal Preview Gambar / Dokumen Nota -->
+<div class="modal fade" id="attachmentPreviewModal" tabindex="-1" aria-labelledby="attachmentPreviewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white py-2">
+                <h5 class="modal-title fs-6 d-flex align-items-center" id="attachmentPreviewModalLabel">
+                    <i class="mdi mdi-eye me-2"></i> <span id="previewModalFileName">Preview Dokumen</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center p-3 bg-light" style="min-height: 250px; display: flex; align-items: center; justify-content: center;">
+                <div id="previewModalContent" class="w-100">
+                    <!-- Image or PDF container -->
+                </div>
+            </div>
+            <div class="modal-footer py-2 d-flex justify-content-between">
+                <span class="text-muted small" id="previewModalFileSize"></span>
+                <div>
+                    <a href="#" id="previewModalOpenNewTab" target="_blank" class="btn btn-outline-primary btn-sm me-1">
+                        <i class="mdi mdi-open-in-new"></i> Buka Tab Baru
+                    </a>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Ubah Nama File Nota -->
+<div class="modal fade" id="editFileNameModal" tabindex="-1" aria-labelledby="editFileNameModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-2">
+                <h5 class="modal-title fs-6" id="editFileNameModalLabel">
+                    <i class="mdi mdi-pencil me-1"></i> Edit Nama File Nota
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editFileId">
+                <div class="mb-3">
+                    <label class="form-label">Nama File / Keterangan Nota <span class="text-danger">*</span></label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="editFileNameInput" placeholder="Contoh: Nota Semen Toko ABC">
+                        <span class="input-group-text bg-light text-muted" id="editFileExtension">.jpg</span>
+                    </div>
+                    <small class="text-muted">Beri nama yang jelas untuk memudahkan identifikasi saat verifikasi admin & PM.</small>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnSaveFileName">
+                    <i class="mdi mdi-check"></i> Simpan Perubahan
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Success Modal -->
 <div class="modal fade" id="successModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-sm modal-dialog-centered">
@@ -505,6 +659,24 @@ require_once __DIR__ . '/../../includes/header.php';
 
 <script>
 var totalPengajuan = <?= $totalPengajuan ?>;
+var existingAttachments = <?= json_encode($stagedExistingAttachments ?? []) ?>;
+
+// Toast notification helper
+function showToast(message, type) {
+    type = type || 'info';
+    var bgMap = {success: '#00b894', error: '#d63031', warning: '#fdcb6e', info: '#0984e3'};
+    var bg = bgMap[type] || bgMap.info;
+    var textColor = type === 'warning' ? '#333' : '#fff';
+    
+    $('.pcm-toast').remove();
+    var toast = $('<div class="pcm-toast position-fixed d-flex align-items-center px-3 py-2 rounded shadow" ' +
+        'style="bottom:20px;right:20px;z-index:9999;min-width:280px;background:' + bg + ';color:' + textColor + ';">' +
+        '<span class="me-2 fw-medium">' + message + '</span>' +
+        '<button type="button" class="btn-close btn-close-white ms-auto" onclick="$(this).parent().fadeOut(200,function(){$(this).remove();})"></button>' +
+        '</div>');
+    $('body').append(toast);
+    setTimeout(function() { toast.fadeOut(500, function(){ $(this).remove(); }); }, 3500);
+}
 
 // Update summary on input change
 document.querySelectorAll('.remaining-input').forEach(function(input) {
@@ -534,69 +706,405 @@ function formatRupiahJS(amount) {
 // Initial update
 updateSummary();
 
-// Form submission
-document.getElementById('actualizationForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    var btn = document.getElementById('btnSubmit');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Menyimpan...';
-    
-    var formData = new FormData(this);
-    
-    fetch('actualization.php?id=<?= $requestId ?>', {
-        method: 'POST',
-        body: formData
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.success) {
-            document.getElementById('successMessage').textContent = data.message;
-            var modal = new bootstrap.Modal(document.getElementById('successModal'));
-            modal.show();
-        } else {
-            alert('Gagal: ' + data.message);
-            btn.disabled = false;
-            btn.innerHTML = '<i class="mdi mdi-check-circle"></i> Simpan Laporan Aktual';
-        }
-    })
-    .catch(function(err) {
-        alert('Error: ' + err.message);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="mdi mdi-check-circle"></i> Simpan Laporan Aktual';
-    });
-});
+// =====================================
+// ATTACHMENT STAGING & MANAGEMENT
+// =====================================
+let stagedFiles = [];
+let deletedAttachmentIds = [];
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
 
-// Delete existing attachment
-function deleteAttachment(attId) {
-    if (!confirm('Hapus lampiran ini?')) return;
-    
-    fetch('actualization.php?id=<?= $requestId ?>', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=delete_attachment&attachment_id=' + attId
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.success) {
-            var el = document.getElementById('att-' + attId);
-            if (el) el.remove();
-        } else {
-            alert('Gagal menghapus: ' + (data.message || 'Unknown error'));
-        }
-    });
+function getFileExtension(filename) {
+    return filename.slice((filename.lastIndexOf(".") - 1 >>> 0) + 2).toLowerCase();
 }
 
-// File preview
-document.querySelector('[name="attachments[]"]').addEventListener('change', function() {
-    var preview = document.getElementById('filePreview');
-    preview.innerHTML = '';
+function getFileNameWithoutExt(filename) {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot !== -1 ? filename.substring(0, lastDot) : filename;
+}
+
+function formatBytes(bytes, decimals = 1) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;")
+               .replace(/</g, "&lt;")
+               .replace(/>/g, "&gt;")
+               .replace(/"/g, "&quot;")
+               .replace(/'/g, "&#039;");
+}
+
+function handleFileSelection(files) {
+    if (!files || files.length === 0) return;
+
+    let addedCount = 0;
+    let errors = [];
+
+    Array.from(files).forEach(function(file) {
+        const ext = getFileExtension(file.name);
+        
+        if (!ALLOWED_EXTS.includes(ext)) {
+            errors.push(`"${file.name}": Format tidak didukung (${ext}). Gunakan JPG, PNG, WEBP, atau PDF.`);
+            return;
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+            errors.push(`"${file.name}": Ukuran melebihi 5MB (${formatBytes(file.size)}).`);
+            return;
+        }
+
+        const isDuplicate = stagedFiles.some(f => (f.file && f.file.name === file.name && f.file.size === file.size) || (f.isExisting && (f.customName + '.' + f.extension) === file.name && f.size === file.size));
+        if (isDuplicate) {
+            errors.push(`"${file.name}": File sudah ada di daftar.`);
+            return;
+        }
+
+        const id = 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+        const isPdf = file.type === 'application/pdf' || ext === 'pdf';
+        const previewUrl = (isImage || isPdf) ? URL.createObjectURL(file) : null;
+
+        stagedFiles.push({
+            id: id,
+            file: file,
+            customName: getFileNameWithoutExt(file.name),
+            extension: ext,
+            isImage: isImage,
+            isPdf: isPdf,
+            previewUrl: previewUrl,
+            size: file.size,
+            isExisting: false
+        });
+
+        addedCount++;
+    });
+
+    if (errors.length > 0) {
+        showToast(errors.join('<br>'), 'warning');
+    }
+
+    if (addedCount > 0) {
+        showToast(`${addedCount} file nota berhasil ditambahkan.`, 'success');
+    }
+
+    $('#attachmentInput').val('');
+    renderStagedFiles();
+}
+
+function renderStagedFiles() {
+    const container = $('#stagedFilesContainer');
+    const emptyState = $('#stagedFilesEmptyState');
+    const listBody = $('#stagedFilesList');
+    const countBadge = $('#stagedFilesCountBadge');
+
+    if (stagedFiles.length === 0) {
+        container.addClass('d-none');
+        emptyState.removeClass('d-none');
+        countBadge.text('0 file dipilih');
+        listBody.empty();
+        return;
+    }
+
+    container.removeClass('d-none');
+    emptyState.addClass('d-none');
+
+    const totalSize = stagedFiles.reduce((acc, cur) => acc + cur.size, 0);
+    countBadge.text(`${stagedFiles.length} file (${formatBytes(totalSize)})`);
+
+    let html = '';
+    stagedFiles.forEach(function(item, index) {
+        let previewThumb = '';
+        if (item.isImage && item.previewUrl) {
+            previewThumb = `
+                <div class="position-relative d-inline-block staged-thumb-wrapper" style="width: 48px; height: 48px; cursor: pointer;" onclick="previewStagedFile('${item.id}')" title="Klik untuk preview gambar">
+                    <img src="${item.previewUrl}" class="rounded border" style="width: 48px; height: 48px; object-fit: cover;" alt="preview">
+                    <div class="thumb-overlay position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center rounded" style="background: rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.2s;">
+                        <i class="mdi mdi-eye text-white fs-6"></i>
+                    </div>
+                </div>
+            `;
+        } else {
+            previewThumb = `
+                <div class="d-inline-flex align-items-center justify-content-center rounded bg-soft-danger text-danger border border-danger" style="width: 48px; height: 48px; cursor: pointer;" onclick="previewStagedFile('${item.id}')" title="Klik untuk preview PDF">
+                    <i class="mdi mdi-file-pdf-box fs-3"></i>
+                </div>
+            `;
+        }
+
+        const formatBadge = item.isPdf 
+            ? '<span class="badge bg-danger">PDF</span>' 
+            : `<span class="badge bg-primary">${item.extension.toUpperCase()}</span>`;
+
+        html += `
+            <tr id="staged-row-${item.id}">
+                <td class="text-center text-muted fw-bold">${index + 1}</td>
+                <td class="text-center">${previewThumb}</td>
+                <td>
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div class="flex-grow-1 me-2 text-truncate" style="max-width: 320px;">
+                            <span class="fw-semibold text-dark file-display-name" id="name-display-${item.id}" title="${escapeHtml(item.customName)}.${item.extension}">${escapeHtml(item.customName)}</span>
+                            <span class="text-muted small">.${item.extension}</span>
+                            <div class="text-muted small text-truncate" style="font-size: 0.75rem;">
+                                ${item.isExisting ? '<span class="badge bg-soft-info text-info me-1"><i class="mdi mdi-check"></i> Sudah Tersimpan</span>' : ''}Nama asli: <em>${escapeHtml(item.file ? item.file.name : item.originalName)}</em>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-edit-name py-1 px-2 text-nowrap" onclick="openEditFileNameModal('${item.id}')" title="Ubah Nama File">
+                            <i class="mdi mdi-pencil"></i> Ubah Nama
+                        </button>
+                    </div>
+                </td>
+                <td class="text-center text-muted small">${formatBytes(item.size)}</td>
+                <td class="text-center">${formatBadge}</td>
+                <td class="text-center">
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-primary" onclick="previewStagedFile('${item.id}')" title="Preview">
+                            <i class="mdi mdi-eye"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" onclick="deleteStagedFile('${item.id}')" title="Hapus">
+                            <i class="mdi mdi-trash-can-outline"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    listBody.html(html);
+
+    $('.staged-thumb-wrapper').hover(
+        function() { $(this).find('.thumb-overlay').css('opacity', '1'); },
+        function() { $(this).find('.thumb-overlay').css('opacity', '0'); }
+    );
+}
+
+window.deleteStagedFile = function(id) {
+    const fileIndex = stagedFiles.findIndex(f => f.id === id);
+    if (fileIndex !== -1) {
+        const item = stagedFiles[fileIndex];
+        if (item.isExisting && item.attachment_id) {
+            deletedAttachmentIds.push(item.attachment_id);
+        }
+        if (item.previewUrl && !item.isExisting) {
+            URL.revokeObjectURL(item.previewUrl);
+        }
+        stagedFiles.splice(fileIndex, 1);
+        renderStagedFiles();
+        showToast('File lampiran dihapus dari daftar.', 'info');
+    }
+};
+
+window.openEditFileNameModal = function(id) {
+    const item = stagedFiles.find(f => f.id === id);
+    if (!item) return;
+
+    $('#editFileId').val(item.id);
+    $('#editFileNameInput').val(item.customName);
+    $('#editFileExtension').text('.' + item.extension);
     
-    Array.from(this.files).forEach(function(file) {
-        var badge = document.createElement('span');
-        badge.className = 'badge bg-secondary';
-        badge.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
-        preview.appendChild(badge);
+    const modal = new bootstrap.Modal(document.getElementById('editFileNameModal'));
+    modal.show();
+    
+    setTimeout(() => {
+        $('#editFileNameInput').focus().select();
+    }, 500);
+};
+
+$('#btnSaveFileName').click(function() {
+    const id = $('#editFileId').val();
+    const newName = $('#editFileNameInput').val().trim();
+    
+    if (!newName) {
+        showToast('Nama file tidak boleh kosong!', 'warning');
+        $('#editFileNameInput').focus();
+        return;
+    }
+
+    const item = stagedFiles.find(f => f.id === id);
+    if (item) {
+        item.customName = newName;
+        renderStagedFiles();
+        bootstrap.Modal.getInstance(document.getElementById('editFileNameModal')).hide();
+        showToast('Nama file nota diperbarui.', 'success');
+    }
+});
+
+$('#editFileNameInput').on('keypress', function(e) {
+    if (e.which === 13) {
+        e.preventDefault();
+        $('#btnSaveFileName').click();
+    }
+});
+
+window.previewStagedFile = function(id) {
+    const item = stagedFiles.find(f => f.id === id);
+    if (!item) return;
+
+    $('#previewModalFileName').text(item.customName + '.' + item.extension);
+    $('#previewModalFileSize').text(`Ukuran: ${formatBytes(item.size)} | Format: ${item.extension.toUpperCase()}`);
+    $('#previewModalOpenNewTab').attr('href', item.previewUrl);
+
+    const container = $('#previewModalContent');
+    if (item.isImage) {
+        container.html(`
+            <div class="text-center">
+                <img src="${item.previewUrl}" class="img-fluid rounded shadow-sm" style="max-height: 70vh; object-fit: contain;" alt="${escapeHtml(item.customName)}">
+            </div>
+        `);
+    } else if (item.isPdf) {
+        container.html(`
+            <div class="py-4 text-center">
+                <i class="mdi mdi-file-pdf-box text-danger" style="font-size: 5rem;"></i>
+                <h5 class="mt-3">${escapeHtml(item.customName)}.${item.extension}</h5>
+                <p class="text-muted">Dokumen PDF (${formatBytes(item.size)})</p>
+                <a href="${item.previewUrl}" target="_blank" class="btn btn-danger btn-sm">
+                    <i class="mdi mdi-open-in-new"></i> Buka Dokumen PDF di Tab Baru
+                </a>
+            </div>
+        `);
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('attachmentPreviewModal'));
+    modal.show();
+};
+
+$('#btnClearAllStaged').click(function() {
+    if (stagedFiles.length === 0) return;
+    if (!confirm('Apakah Anda yakin ingin menghapus semua file nota?')) return;
+
+    stagedFiles.forEach(item => {
+        if (item.isExisting && item.attachment_id) {
+            deletedAttachmentIds.push(item.attachment_id);
+        }
+        if (item.previewUrl && !item.isExisting) URL.revokeObjectURL(item.previewUrl);
+    });
+    stagedFiles = [];
+    renderStagedFiles();
+    showToast('Semua file nota telah dihapus.', 'info');
+});
+
+$('#uploadDropzone, #btnAddMoreFiles').click(function(e) {
+    if (e.target.id !== 'attachmentInput') {
+        $('#attachmentInput').trigger('click');
+    }
+});
+
+$('#attachmentInput').on('change', function() {
+    handleFileSelection(this.files);
+});
+
+const dropzone = document.getElementById('uploadDropzone');
+if (dropzone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            $(this).addClass('border-primary bg-soft-primary').removeClass('bg-light');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            $(this).removeClass('border-primary bg-soft-primary').addClass('bg-light');
+        }, false);
+    });
+
+    dropzone.addEventListener('drop', function(e) {
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length > 0) {
+            handleFileSelection(dt.files);
+        }
+    }, false);
+}
+
+// Load existing attachments on page load
+if (existingAttachments && existingAttachments.length > 0) {
+    existingAttachments.forEach(function(att) {
+        stagedFiles.push({
+            id: att.id,
+            attachment_id: att.attachment_id,
+            file: null,
+            originalName: att.originalName,
+            customName: att.customName,
+            extension: att.extension,
+            isImage: att.isImage,
+            isPdf: att.isPdf,
+            previewUrl: att.previewUrl,
+            size: att.fileSize,
+            isExisting: true
+        });
+    });
+    renderStagedFiles();
+}
+
+// Form submit handler
+$('#actualizationForm').on('submit', function(e) {
+    e.preventDefault();
+    
+    var btn = $('#btnSubmit');
+    btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Menyimpan...');
+    
+    var formData = new FormData();
+    formData.append('action', 'save_actualization');
+    formData.append('remaining_upah', $('[name="remaining_upah"]').val());
+    formData.append('remaining_material', $('[name="remaining_material"]').val());
+    formData.append('remaining_alat', $('[name="remaining_alat"]').val());
+    formData.append('notes_upah', $('[name="notes_upah"]').val());
+    formData.append('notes_material', $('[name="notes_material"]').val());
+    formData.append('notes_alat', $('[name="notes_alat"]').val());
+    
+    if (stagedFiles && stagedFiles.length > 0) {
+        const existingAtts = [];
+        stagedFiles.forEach(function(item) {
+            if (item.isExisting && item.attachment_id) {
+                existingAtts.push({
+                    attachment_id: item.attachment_id,
+                    custom_name: item.customName
+                });
+            } else if (item.file) {
+                formData.append('attachments[]', item.file);
+                formData.append('attachment_names[]', item.customName);
+            }
+        });
+        if (existingAtts.length > 0) {
+            formData.append('existing_attachments', JSON.stringify(existingAtts));
+        }
+    }
+    
+    if (deletedAttachmentIds && deletedAttachmentIds.length > 0) {
+        formData.append('delete_attachments', JSON.stringify(deletedAttachmentIds));
+    }
+    
+    $.ajax({
+        url: 'actualization.php?id=<?= $requestId ?>',
+        method: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        dataType: 'json',
+        success: function(data) {
+            if (data.success) {
+                $('#successMessage').text(data.message);
+                var modal = new bootstrap.Modal(document.getElementById('successModal'));
+                modal.show();
+            } else {
+                showToast(data.message || 'Terjadi kesalahan', 'error');
+                btn.prop('disabled', false).html('<i class="mdi mdi-check-circle"></i> Simpan Laporan Aktual');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Submit error:', status, error, xhr.responseText);
+            showToast('Error server: ' + (error || status), 'error');
+            btn.prop('disabled', false).html('<i class="mdi mdi-check-circle"></i> Simpan Laporan Aktual');
+        }
     });
 });
 </script>

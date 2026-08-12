@@ -15,8 +15,8 @@ requirePermission('reports.export');
 $projectId = $_GET['project_id'] ?? null;
 $exportType = $_GET['type'] ?? 'rab'; // 'rab' or 'rap'
 
-if (!$projectId) {
-    setFlash('error', 'Project ID tidak ditemukan!');
+if (!$projectId || !canAccessProject($projectId)) {
+    setFlash('error', 'Anda tidak memiliki akses ke proyek ini!');
     header('Location: index.php');
     exit;
 }

@@ -9,7 +9,7 @@
  */
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    session_start(['read_and_close' => true]);
 }
 
 require_once __DIR__ . '/../config/database.php';
@@ -81,6 +81,9 @@ function login($username, $password) {
     );
     
     if ($user && password_verify($password, $user['password'])) {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['username'] = $user['username'];
         $_SESSION['full_name'] = $user['full_name'];
@@ -88,6 +91,7 @@ function login($username, $password) {
         
         // Load permissions dari database ke session
         $_SESSION['permissions'] = loadUserPermissions($user['role']);
+        session_write_close();
         
         return true;
     }
@@ -99,6 +103,9 @@ function login($username, $password) {
  * Logout user
  */
 function logout() {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
     session_unset();
     session_destroy();
 }
@@ -109,7 +116,7 @@ function logout() {
 
 /**
  * Load permissions from database for a given role
- * Reads from list_akses JSON column in roles table (real-time)
+ * Reads from role_permissions table (real-time)
  * Super admin gets all permissions automatically
  * 
  * @param string $roleName
@@ -130,7 +137,7 @@ function loadUserPermissions($roleName) {
             'projects.view', 'projects.create', 'projects.edit', 'projects.delete',
             'projects.lock_request',
             'rab.view', 'rab.edit', 'rap.view', 'rap.edit',
-            'requests.view', 'requests.create', 'requests.approve',
+            'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
             'reports.view', 'reports.export',
             'master_data.view', 'master_data.edit',
             'admin.roles', 'admin.users'
@@ -138,26 +145,155 @@ function loadUserPermissions($roleName) {
         foreach ($defaultKeys as $key) {
             $permissions[$key] = true;
         }
+        // Super admin always has full project access
+        $permissions['_view_mode'] = 'all';
         $cache[$roleName] = $permissions;
         return $permissions;
     }
     
     // For other roles, load from role_permissions table
-    $rows = dbGetAll("
-        SELECT rp.permission_key, rp.is_allowed 
-        FROM role_permissions rp
-        JOIN roles r ON r.id = rp.role_id
-        WHERE r.name = ?
-    ", [$roleName]);
+    $hasViewModeCol = true;
+    try {
+        $rows = dbGetAll("
+            SELECT rp.permission_key, rp.is_allowed, rp.view_mode 
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            WHERE r.name = ?
+        ", [$roleName]);
+    } catch (Throwable $e) {
+        $hasViewModeCol = false;
+        // Fallback query without view_mode column if migration hasn't run yet
+        try {
+            $rows = dbGetAll("
+                SELECT rp.permission_key, rp.is_allowed 
+                FROM role_permissions rp
+                JOIN roles r ON r.id = rp.role_id
+                WHERE r.name = ?
+            ", [$roleName]);
+        } catch (Throwable $e2) {
+            $rows = [];
+        }
+    }
     
     foreach ($rows as $row) {
-        if ($row['is_allowed']) {
+        if (!empty($row['is_allowed'])) {
             $permissions[$row['permission_key']] = true;
         }
+        // Store view_mode for projects.view
+        if ($row['permission_key'] === 'projects.view') {
+            if ($hasViewModeCol && isset($row['view_mode']) && $row['view_mode'] !== null) {
+                $permissions['_view_mode'] = !empty($row['is_allowed']) ? $row['view_mode'] : 'none';
+            } else {
+                // Default fallback if view_mode column doesn't exist
+                if (!empty($row['is_allowed'])) {
+                    $permissions['_view_mode'] = in_array($roleName, ['super_admin', 'admin', 'project_manager']) ? 'all' : 'assigned';
+                } else {
+                    $permissions['_view_mode'] = 'none';
+                }
+            }
+        }
+    }
+    
+    // If projects.view is not set at all, default to none
+    if (!isset($permissions['_view_mode'])) {
+        $permissions['_view_mode'] = 'none';
     }
     
     $cache[$roleName] = $permissions;
     return $permissions;
+}
+
+/**
+ * Get the project view mode for the current user
+ * Returns: 'all' (see all projects), 'assigned' (only assigned), 'none' (no access)
+ * 
+ * @return string 'all', 'assigned', or 'none'
+ */
+function getProjectViewMode() {
+    if (isSuperAdmin()) {
+        return 'all';
+    }
+    
+    $role = $_SESSION['user_role'] ?? '';
+    if (empty($role)) {
+        return 'none';
+    }
+    
+    $permissions = loadUserPermissions($role);
+    
+    // Users with projects.edit always get 'all' access
+    if (!empty($permissions['projects.edit'])) {
+        return 'all';
+    }
+    
+    return $permissions['_view_mode'] ?? 'none';
+}
+
+/**
+ * Check if the current user can access a specific project
+ * Based on view_mode: 'all' = any project, 'assigned' = only if assigned, 'none' = blocked
+ * 
+ * @param int $projectId
+ * @return bool
+ */
+function canAccessProject($projectId) {
+    $viewMode = getProjectViewMode();
+    
+    if ($viewMode === 'all') {
+        return true;
+    }
+    
+    if ($viewMode === 'assigned') {
+        try {
+            $assignment = dbGetRow(
+                "SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ? AND is_active = 1",
+                [$projectId, getCurrentUserId()]
+            );
+            return !empty($assignment);
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+    
+    return false; // 'none'
+}
+
+/**
+ * Get users that can be assigned to projects
+ * Returns users whose role has projects.view with view_mode = 'assigned'
+ * These are users that need explicit assignment to access projects
+ * 
+ * @return array
+ */
+function getAssignableUsers() {
+    try {
+        return dbGetAll("
+            SELECT DISTINCT u.id, u.username, u.full_name, u.role,
+                   COALESCE(r.display_name, u.role) as role_display
+            FROM users u
+            JOIN roles r ON r.name = u.role COLLATE utf8mb4_unicode_ci
+            JOIN role_permissions rp ON rp.role_id = r.id
+            WHERE rp.permission_key = 'projects.view'
+              AND rp.is_allowed = 1
+              AND rp.view_mode = 'assigned'
+              AND u.is_active = 1
+            ORDER BY u.full_name ASC
+        ");
+    } catch (Throwable $e) {
+        // Fallback query if view_mode column does not exist yet
+        try {
+            return dbGetAll("
+                SELECT u.id, u.username, u.full_name, u.role,
+                       COALESCE(r.display_name, u.role) as role_display
+                FROM users u
+                LEFT JOIN roles r ON r.name = u.role COLLATE utf8mb4_unicode_ci
+                WHERE u.role = 'field_team' AND u.is_active = 1
+                ORDER BY u.full_name ASC
+            ");
+        } catch (Throwable $e2) {
+            return [];
+        }
+    }
 }
 
 /**
@@ -287,10 +423,14 @@ function getCurrentUserName() {
  * @return string
  */
 function getRoleDisplayName($role) {
-    // Try to get from database first
-    $roleData = dbGetRow("SELECT display_name FROM roles WHERE name = ?", [$role]);
-    if ($roleData && !empty($roleData['display_name'])) {
-        return $roleData['display_name'];
+    try {
+        // Try to get from database first
+        $roleData = dbGetRow("SELECT display_name FROM roles WHERE name = ?", [$role]);
+        if ($roleData && !empty($roleData['display_name'])) {
+            return $roleData['display_name'];
+        }
+    } catch (Throwable $e) {
+        // Fallback to formatted name if database fails or table is missing
     }
     
     // Fallback to formatted role name

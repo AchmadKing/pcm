@@ -51,7 +51,7 @@ if (!$snapshotId) {
 
 // Get snapshot with project info
 $snapshot = dbGetRow("
-    SELECT s.*, p.name as project_name, p.id as project_id, p.overhead_percentage, p.ppn_percentage as project_ppn,
+    SELECT s.*, p.name as project_name, p.id as project_id, p.overhead_percentage, p.profit_percentage, p.ppn_percentage as project_ppn,
            u.full_name as creator_name
     FROM rab_snapshots s
     JOIN projects p ON s.project_id = p.id
@@ -127,7 +127,7 @@ $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
 
-$overheadPct = $snapshot['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($snapshot);
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("SELECT * FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);

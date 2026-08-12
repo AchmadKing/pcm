@@ -176,7 +176,7 @@ foreach ($details as $detail) {
 $grandTotal = array_sum($totals);
 
 // Calculate overhead for header display
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 $overheadAmount = $grandTotal * ($overheadPct / 100);
 $totalWithOverhead = $grandTotal + $overheadAmount;
 

@@ -64,7 +64,7 @@ if (!$subcategoryId) {
 // Get snapshot subcategory with related data
 $subcategory = dbGetRow("
     SELECT ss.*, sc.snapshot_id, sc.name as category_name, sc.code as category_code,
-           s.name as snapshot_name, s.project_id, s.overhead_percentage, s.ppn_percentage,
+           s.name as snapshot_name, s.project_id, s.overhead_percentage, s.profit_percentage, s.ppn_percentage,
            p.name as project_name
     FROM rab_snapshot_subcategories ss
     JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
@@ -192,7 +192,7 @@ foreach ($details as $detail) {
 }
 $grandTotal = array_sum($totals);
 
-$overheadPct = $subcategory['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($subcategory);
 $overheadAmount = $grandTotal * ($overheadPct / 100);
 $totalWithOverhead = $grandTotal + $overheadAmount;
 

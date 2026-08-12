@@ -279,7 +279,7 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
     <div class="card-body p-0">
         <?php 
-        $overheadPct = $project['overhead_percentage'] ?? 10;
+        $overheadPct = getProjectOverheadProfitPct($project);
         $overheadAmount = $grandTotal * ($overheadPct / 100);
         $totalWithOverhead = $grandTotal + $overheadAmount;
         

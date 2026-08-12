@@ -34,7 +34,19 @@
             if ($('.datatable').length) {
                 $('.datatable').DataTable({
                     language: {
-                        url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/id.json'
+                        search: "Cari:",
+                        lengthMenu: "Tampilkan _MENU_ entri",
+                        info: "Menampilkan _START_ sampai _END_ dari _TOTAL_ entri",
+                        infoEmpty: "Menampilkan 0 sampai 0 dari 0 entri",
+                        infoFiltered: "(disaring dari _MAX_ total entri)",
+                        zeroRecords: "Tidak ada data yang cocok ditemukan",
+                        emptyTable: "Tidak ada data di dalam tabel",
+                        paginate: {
+                            first: "Pertama",
+                            last: "Terakhir",
+                            next: "Sebelumnya",
+                            previous: "Selanjutnya"
+                        }
                     },
                     pageLength: 25,
                     responsive: true

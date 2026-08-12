@@ -285,7 +285,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_ahsp_rap_html') {
     if (!$project) { die('Project not found'); }
     
     // Prepare variables for partial
-    $overheadPct = $project['overhead_percentage'] ?? 10;
+    $overheadPct = getProjectOverheadProfitPct($project);
     $isEditable = ($project['status'] === 'draft'); // Only draft is editable
     
     // AHSP sorting (match default logic)
@@ -298,7 +298,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_ahsp_rap_html') {
         case 'name': default: $ahspOrderBy = 'work_name'; break;
     }
     
-    $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY $ahspOrderBy $ahspSortOrder", [$projectId]);
+    $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
     
     // Include the partial
     include __DIR__ . '/tabs/partials/ahsp_rap_list.php';
@@ -473,8 +473,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
     }
     
     // Get project overhead
-    $project = dbGetRow("SELECT overhead_percentage FROM projects WHERE id = ?", [$pId]);
-    $overheadPct = $project['overhead_percentage'] ?? 10;
+    $project = dbGetRow("SELECT overhead_percentage, profit_percentage FROM projects WHERE id = ?", [$pId]);
+    $overheadPct = getProjectOverheadProfitPct($project);
+    $overheadLabel = formatOverheadProfitLabel($project);
     
     // Get AHSP details
     $details = dbGetAll("
@@ -510,7 +511,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
             </div>
             <div class="text-end">
                 <span class="badge bg-primary fs-6"><?= formatRupiah($totalWithOverhead) ?></span>
-                <br><small class="text-muted">Termasuk Overhead <?= $overheadPct ?>%</small>
+                <br><small class="text-muted">Termasuk <?= $overheadLabel ?></small>
             </div>
         </div>
     </div>
@@ -596,8 +597,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
     }
     
     // Get project overhead
-    $project = dbGetRow("SELECT overhead_percentage FROM projects WHERE id = ?", [$pId]);
-    $overheadPct = $project['overhead_percentage'] ?? 10;
+    $project = dbGetRow("SELECT overhead_percentage, profit_percentage FROM projects WHERE id = ?", [$pId]);
+    $overheadPct = getProjectOverheadProfitPct($project);
+    $overheadLabel = formatOverheadProfitLabel($project);
     
     // Find AHSP RAP by code
     $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$pId, $ahspCode]);
@@ -639,7 +641,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
             </div>
             <div class="text-end">
                 <span class="badge bg-info fs-6"><?= formatRupiah($totalWithOverhead) ?></span>
-                <br><small class="text-muted">Termasuk Overhead <?= $overheadPct ?>%</small>
+                <br><small class="text-muted">Termasuk <?= $overheadLabel ?></small>
             </div>
         </div>
     </div>
@@ -854,6 +856,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// Handle Delete Request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_request') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    
+    if (!hasPermission('requests.delete')) {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus pengajuan!');
+        header('Location: view.php?id=' . $projectId . '&tab=requests');
+        exit;
+    }
+    
+    $reqId = intval($_POST['request_id'] ?? 0);
+    $req = dbGetRow("SELECT id, request_number, project_id FROM requests WHERE id = ? AND project_id = ?", [$reqId, $projectId]);
+    if ($req) {
+        deleteRequest($reqId);
+        setFlash('success', 'Pengajuan ' . ($req['request_number'] ?: 'REQ-' . $req['id']) . ' berhasil dihapus.');
+    } else {
+        setFlash('error', 'Pengajuan tidak ditemukan.');
+    }
+    header('Location: view.php?id=' . $projectId . '&tab=requests');
+    exit;
+}
+
 // Include Master Data handlers for POST actions (must be before rab_rap_handlers)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $projectId = $_GET['id'] ?? null;
@@ -889,28 +913,26 @@ if (!$project) {
     exit;
 }
 
-// Check access - 3 level permission
-if (!hasPermission('projects.edit') && !hasPermission('projects.view')) {
-    // Field team: harus di-assign ke proyek ini
-    $assignment = dbGetRow(
-        "SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ? AND is_active = 1",
-        [$projectId, getCurrentUserId()]
-    );
-    if (!$assignment) {
-        setFlash('error', 'Anda tidak memiliki akses ke proyek ini.');
-        header('Location: index.php');
-        exit;
-    }
-    // Field team tidak bisa lihat proyek draft
-    if ($project['status'] === 'draft') {
-        setFlash('error', 'Proyek masih dalam tahap draft.');
-        header('Location: index.php');
-        exit;
-    }
-} elseif (!hasPermission('projects.edit') && $project['status'] === 'draft') {
-    // PM: bisa lihat semua proyek kecuali draft (optional, bisa disesuaikan)
-    // Untuk saat ini PM boleh lihat draft juga karena punya projects.view
-    // Jadi tidak ada block di sini
+// Check access using view_mode based system
+$viewMode = getProjectViewMode();
+
+if ($viewMode === 'none') {
+    setFlash('error', 'Anda tidak memiliki akses ke proyek.');
+    header('Location: index.php');
+    exit;
+}
+
+if (!canAccessProject($projectId)) {
+    setFlash('error', 'Anda tidak memiliki akses ke proyek ini.');
+    header('Location: index.php');
+    exit;
+}
+
+// Users with 'assigned' mode cannot see draft projects
+if ($viewMode === 'assigned' && $project['status'] === 'draft') {
+    setFlash('error', 'Proyek masih dalam tahap draft.');
+    header('Location: index.php');
+    exit;
 }
 
 // Handle actions
@@ -953,8 +975,8 @@ $rabBaseTotal = dbGetRow("
 ", [$projectId])['total'] ?? 0;
 
 // Apply overhead and PPN to get rounded total
-$overheadPct = $project['overhead_percentage'] ?? 10;
-$ppnPct = $project['ppn_percentage'] ?? 11;
+$overheadPct = getProjectOverheadProfitPct($project);
+$ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
 $rabWithOverhead = $rabBaseTotal * (1 + ($overheadPct / 100));
 $rabPpn = $rabWithOverhead * ($ppnPct / 100);
@@ -1162,6 +1184,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (hasPermission('rab.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'rab' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=rab">
                     <i class="mdi mdi-file-document-outline"></i> RAB
@@ -1170,16 +1193,22 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php endif; ?>
                 </a>
             </li>
+            <?php endif; ?>
+            <?php if (hasPermission('rap.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'rap' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=rap">
                     <i class="mdi mdi-file-document-multiple-outline"></i> RAP
                 </a>
             </li>
+            <?php endif; ?>
+            <?php if (hasPermission('reports.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'actual' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=actual">
                     <i class="mdi mdi-cash-check"></i> Realisasi
                 </a>
             </li>
+            <?php endif; ?>
+            <?php if (hasPermission('requests.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'requests' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=requests">
                     <i class="mdi mdi-file-document-edit"></i> Pengajuan
@@ -1188,6 +1217,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php endif; ?>
                 </a>
             </li>
+            <?php endif; ?>
         </ul>
     </div>
     <div class="card-body">
@@ -1197,19 +1227,37 @@ require_once __DIR__ . '/../../includes/header.php';
             case 'master':
                 if (hasPermission('master_data.view')) {
                     include __DIR__ . '/tabs/master_data.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Master Data.</div>';
                 }
                 break;
             case 'rab':
-                include __DIR__ . '/tabs/rab.php';
+                if (hasPermission('rab.view')) {
+                    include __DIR__ . '/tabs/rab.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke RAB.</div>';
+                }
                 break;
             case 'rap':
-                include __DIR__ . '/tabs/rap.php';
+                if (hasPermission('rap.view')) {
+                    include __DIR__ . '/tabs/rap.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke RAP.</div>';
+                }
                 break;
             case 'actual':
-                include __DIR__ . '/tabs/actual.php';
+                if (hasPermission('reports.view')) {
+                    include __DIR__ . '/tabs/actual.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Realisasi.</div>';
+                }
                 break;
             case 'requests':
-                include __DIR__ . '/tabs/requests.php';
+                if (hasPermission('requests.view')) {
+                    include __DIR__ . '/tabs/requests.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Pengajuan.</div>';
+                }
                 break;
             case 'detail':
             default:

@@ -11,13 +11,31 @@ requirePermission('reports.view');
 
 $projectId = $_GET['project_id'] ?? '';
 
-// Get projects for filter
-$projects = dbGetAll("SELECT id, name FROM projects WHERE status != 'draft' ORDER BY name");
+// Get projects for filter based on view mode
+$repViewMode = getProjectViewMode();
+if ($repViewMode === 'all') {
+    $projects = dbGetAll("SELECT id, name FROM projects WHERE status != 'draft' ORDER BY name");
+} elseif ($repViewMode === 'assigned') {
+    $projects = dbGetAll("
+        SELECT p.id, p.name 
+        FROM projects p 
+        JOIN project_assignments pa ON pa.project_id = p.id 
+        WHERE p.status != 'draft' AND pa.user_id = ? AND pa.is_active = 1 
+        ORDER BY p.name
+    ", [getCurrentUserId()]);
+} else {
+    $projects = [];
+}
 
 // If project selected, get detailed stats
 $projectStats = null;
 $categoryStats = [];
 if ($projectId) {
+    if (!canAccessProject($projectId)) {
+        setFlash('error', 'Anda tidak memiliki akses ke laporan proyek ini.');
+        header('Location: dashboard.php');
+        exit;
+    }
     $projectStats = calculateProjectRealtimeStats($projectId);
     if ($projectStats) {
         $categoryStats = $projectStats['category_stats'];

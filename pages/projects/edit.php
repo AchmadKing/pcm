@@ -46,23 +46,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $durationDays = intval($_POST['duration_days'] ?? 0);
     $startDate = $_POST['start_date'] ?: null;
     $overheadPercentage = floatval($_POST['overhead_percentage'] ?? 10);
+    $profitPercentage = floatval($_POST['profit_percentage'] ?? 0);
+    $ppnPercentage = floatval($_POST['ppn_percentage'] ?? 11);
     
     if (empty($name)) {
         $error = 'Nama proyek harus diisi!';
     } else {
         try {
+            ensureProfitPercentageColumnExists();
             dbExecute("
                 UPDATE projects SET
                     name = ?, project_code = ?, region_name = ?, description = ?, activity_name = ?, work_description = ?,
                     funding_source = ?, budget_year = ?, contract_number = ?, contract_date = ?,
                     service_provider = ?, supervisor_consultant = ?, duration_days = ?, start_date = ?,
-                    overhead_percentage = ?, updated_at = NOW()
+                    overhead_percentage = ?, profit_percentage = ?, ppn_percentage = ?, updated_at = NOW()
                 WHERE id = ?
             ", [
                 $name, $projectCode, $regionName, $description, $activityName, $workDescription,
                 $fundingSource, $budgetYear, $contractNumber, $contractDate,
                 $serviceProvider, $supervisorConsultant, $durationDays, $startDate,
-                $overheadPercentage, $projectId
+                $overheadPercentage, $profitPercentage, $ppnPercentage, $projectId
             ]);
             
             setFlash('success', 'Proyek berhasil diperbarui!');
@@ -189,24 +192,54 @@ require_once __DIR__ . '/../../includes/header.php';
                             </div>
                             
                             <div class="row">
-                                <div class="col-md-4 mb-3">
+                                <div class="col-md-6 mb-3">
                                     <label for="duration_days" class="form-label">Durasi (Hari)</label>
                                     <input type="number" class="form-control" id="duration_days" name="duration_days"
                                            value="<?= $project['duration_days'] ?? 120 ?>" min="1">
                                 </div>
-                                <div class="col-md-4 mb-3">
+                                <div class="col-md-6 mb-3">
                                     <label for="start_date" class="form-label">Tanggal Mulai</label>
                                     <input type="date" class="form-control" id="start_date" name="start_date"
                                            value="<?= $project['start_date'] ?? '' ?>">
                                 </div>
+                            </div>
+                            
+                            <h5 class="font-size-14 mb-3 mt-2"><i class="mdi mdi-calculator"></i> Pengaturan Anggaran & Pajak</h5>
+                            <div class="row">
                                 <div class="col-md-4 mb-3">
                                     <label for="overhead_percentage" class="form-label">Overhead (%)</label>
                                     <input type="number" class="form-control" id="overhead_percentage" name="overhead_percentage"
-                                           value="<?= $project['overhead_percentage'] ?? 10 ?>" min="0" max="100" step="0.1">
+                                           value="<?= $project['overhead_percentage'] ?? 10 ?>" min="0" max="100" step="0.1" oninput="calcTotalOverheadProfit()">
                                 </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="profit_percentage" class="form-label">Profit (%)</label>
+                                    <input type="number" class="form-control" id="profit_percentage" name="profit_percentage"
+                                           value="<?= $project['profit_percentage'] ?? 0 ?>" min="0" max="100" step="0.1" oninput="calcTotalOverheadProfit()">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="ppn_percentage" class="form-label">PPN (%)</label>
+                                    <input type="number" class="form-control" id="ppn_percentage" name="ppn_percentage"
+                                           value="<?= $project['ppn_percentage'] ?? 11 ?>" min="0" max="100" step="0.01">
+                                </div>
+                            </div>
+                            <div class="alert alert-info py-2 mb-0">
+                                <small>
+                                    <i class="mdi mdi-information-outline"></i> 
+                                    Total Overhead & Profit pada AHSP: <strong><span id="preview_total_oh_profit"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                                </small>
                             </div>
                         </div>
                     </div>
+                    
+                    <script>
+                    function calcTotalOverheadProfit() {
+                        var oh = parseFloat(document.getElementById('overhead_percentage').value) || 0;
+                        var pf = parseFloat(document.getElementById('profit_percentage').value) || 0;
+                        var total = (oh + pf).toFixed(1).replace(/\.0$/, '');
+                        var elem = document.getElementById('preview_total_oh_profit');
+                        if (elem) elem.textContent = total;
+                    }
+                    </script>
                     
                     <hr>
                     

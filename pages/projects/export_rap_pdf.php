@@ -10,11 +10,12 @@ require_once __DIR__ . '/../../includes/functions.php';
 require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
+requirePermission('rap.view');
 
 $projectId = $_GET['id'] ?? null;
 
-if (!$projectId) {
-    die('Project ID required');
+if (!$projectId || !canAccessProject($projectId)) {
+    die('Anda tidak memiliki akses ke proyek ini');
 }
 
 $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
@@ -22,7 +23,7 @@ if (!$project) {
     die('Proyek tidak ditemukan');
 }
 
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 $regionName = $project['region_name'] ?? '-';
 
 // Function to get RAP AHSP component breakdown from Master Data RAP

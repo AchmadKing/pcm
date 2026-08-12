@@ -55,7 +55,7 @@ $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
 $grandRabTotal = 0;
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
@@ -185,8 +185,8 @@ $rapItemCount = dbGetRow("
 
 $needsSync = ($rabSubcatCount > 0 && $rapItemCount < $rabSubcatCount);
 
-// RAP can be edited when project is in draft status and not locked
-$isEditable = ($project['status'] === 'draft' && !isProjectLocked($project));
+// RAP can be edited when project is in draft status, not locked, and user has rap.edit
+$isEditable = ($project['status'] === 'draft' && !isProjectLocked($project) && hasPermission('rap.edit'));
 
 // Calculate PPN
 $ppnPercentage = $project['ppn_percentage'];
@@ -666,119 +666,6 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
     </table>
 </div>
 
-<script>
-// Confirm sync reference
-var currentSourceId = <?= $rabSourceId ?>;
-
-function confirmSyncReference(sourceId, sourceName) {
-    if (sourceId === currentSourceId) {
-        return;
-    }
-    
-    document.getElementById('syncSourceId').value = sourceId;
-    document.getElementById('syncSourceName').textContent = sourceName;
-    var modal = new bootstrap.Modal(document.getElementById('syncReferenceModal'));
-    modal.show();
-}
-
-var pIdRap = <?= intval($projectId) ?>;
-var hsKeyRap = 'pcm_rap_collapsed_hs_' + pIdRap;
-var catKeyRap = 'pcm_rap_collapsed_cat_' + pIdRap;
-
-function getCollapsedRap(key) {
-    try { return JSON.parse(sessionStorage.getItem(key) || '[]'); } catch(e) { return []; }
-}
-function saveCollapsedRap(key, list) {
-    sessionStorage.setItem(key, JSON.stringify(list));
-}
-
-function toggleHeadSubRap(hsId) {
-    var icon = $('#hs-rap-chevron-' + hsId);
-    var list = getCollapsedRap(hsKeyRap);
-    if (icon.hasClass('mdi-chevron-right')) {
-        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
-        $('.hs-rap-item-' + hsId).show();
-        list = list.filter(function(id) { return id != hsId; });
-    } else {
-        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('.hs-rap-item-' + hsId).hide();
-        if (list.indexOf(hsId) === -1) list.push(hsId);
-    }
-    saveCollapsedRap(hsKeyRap, list);
-}
-
-function toggleCategoryRap(catId) {
-    var icon = $('#cat-rap-chevron-' + catId);
-    var list = getCollapsedRap(catKeyRap);
-    if (icon.hasClass('mdi-chevron-right')) {
-        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
-        $('.cat-rap-item-' + catId).show();
-        list = list.filter(function(id) { return id != catId; });
-    } else {
-        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('.cat-rap-item-' + catId).hide();
-        if (list.indexOf(catId) === -1) list.push(catId);
-    }
-    saveCollapsedRap(catKeyRap, list);
-}
-
-function toggleAllRapRows(expand) {
-    if (expand) {
-        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
-        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
-        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').show();
-        saveCollapsedRap(hsKeyRap, []);
-        saveCollapsedRap(catKeyRap, []);
-    } else {
-        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').hide();
-        
-        var allHs = [];
-        $('.toggle-hs-rap-btn').each(function() {
-            var onclick = $(this).attr('onclick') || '';
-            var match = onclick.match(/\d+/);
-            if (match) allHs.push(parseInt(match[0]));
-        });
-        var allCat = [];
-        $('.toggle-cat-rap-btn').each(function() {
-            var onclick = $(this).attr('onclick') || '';
-            var match = onclick.match(/\d+/);
-            if (match) allCat.push(parseInt(match[0]));
-        });
-        saveCollapsedRap(hsKeyRap, allHs);
-        saveCollapsedRap(catKeyRap, allCat);
-    }
-}
-
-function restoreRapCollapsedState() {
-    var hsList = getCollapsedRap(hsKeyRap);
-    hsList.forEach(function(hsId) {
-        $('#hs-rap-chevron-' + hsId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('.hs-rap-item-' + hsId).hide();
-    });
-
-    var catList = getCollapsedRap(catKeyRap);
-    catList.forEach(function(catId) {
-        $('#cat-rap-chevron-' + catId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
-        $('.cat-rap-item-' + catId).hide();
-    });
-}
-
-$(document).ready(function() {
-    restoreRapCollapsedState();
-});
-
-// Initialize tooltips
-$(document).ready(function() {
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
-});
-</script>
-
-
 <!-- Modal Konfirmasi Sync Reference -->
 <div class="modal fade" id="syncReferenceModal" tabindex="-1">
     <div class="modal-dialog">
@@ -918,7 +805,124 @@ $(document).ready(function() {
     </div>
 </div>
 
+<?php 
+// Scripts to be loaded after jQuery in footer.php
+ob_start(); 
+?>
 <script>
+// Confirm sync reference
+var currentSourceId = <?= $rabSourceId ?>;
+
+function confirmSyncReference(sourceId, sourceName) {
+    if (sourceId === currentSourceId) {
+        return;
+    }
+    
+    document.getElementById('syncSourceId').value = sourceId;
+    document.getElementById('syncSourceName').textContent = sourceName;
+    var modal = new bootstrap.Modal(document.getElementById('syncReferenceModal'));
+    modal.show();
+}
+
+var pIdRap = <?= intval($projectId) ?>;
+var hsKeyRap = 'pcm_rap_collapsed_hs_' + pIdRap;
+var catKeyRap = 'pcm_rap_collapsed_cat_' + pIdRap;
+
+function getCollapsedRap(key) {
+    try { return JSON.parse(sessionStorage.getItem(key) || '[]'); } catch(e) { return []; }
+}
+function saveCollapsedRap(key, list) {
+    sessionStorage.setItem(key, JSON.stringify(list));
+}
+
+function toggleHeadSubRap(hsId) {
+    var icon = $('#hs-rap-chevron-' + hsId);
+    var list = getCollapsedRap(hsKeyRap);
+    if (icon.hasClass('mdi-chevron-right')) {
+        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.hs-rap-item-' + hsId).show();
+        // Keep collapsed categories hidden
+        var catList = getCollapsedRap(catKeyRap);
+        catList.forEach(function(catId) {
+            $('.cat-rap-item-' + catId).hide();
+        });
+        list = list.filter(function(id) { return id != hsId; });
+    } else {
+        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.hs-rap-item-' + hsId).hide();
+        if (list.indexOf(hsId) === -1) list.push(hsId);
+    }
+    saveCollapsedRap(hsKeyRap, list);
+}
+
+function toggleCategoryRap(catId) {
+    var icon = $('#cat-rap-chevron-' + catId);
+    var list = getCollapsedRap(catKeyRap);
+    if (icon.hasClass('mdi-chevron-right')) {
+        icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.cat-rap-item-' + catId).show();
+        list = list.filter(function(id) { return id != catId; });
+    } else {
+        icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.cat-rap-item-' + catId).hide();
+        if (list.indexOf(catId) === -1) list.push(catId);
+    }
+    saveCollapsedRap(catKeyRap, list);
+}
+
+function toggleAllRapRows(expand) {
+    if (expand) {
+        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').show();
+        saveCollapsedRap(hsKeyRap, []);
+        saveCollapsedRap(catKeyRap, []);
+    } else {
+        $('.toggle-hs-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.toggle-cat-rap-btn i').removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('[class*="hs-rap-item-"], [class*="cat-rap-item-"]').hide();
+        
+        var allHs = [];
+        $('.toggle-hs-rap-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allHs.push(parseInt(match[0]));
+        });
+        var allCat = [];
+        $('.toggle-cat-rap-btn').each(function() {
+            var onclick = $(this).attr('onclick') || '';
+            var match = onclick.match(/\d+/);
+            if (match) allCat.push(parseInt(match[0]));
+        });
+        saveCollapsedRap(hsKeyRap, allHs);
+        saveCollapsedRap(catKeyRap, allCat);
+    }
+}
+
+function restoreRapCollapsedState() {
+    var hsList = getCollapsedRap(hsKeyRap);
+    hsList.forEach(function(hsId) {
+        $('#hs-rap-chevron-' + hsId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.hs-rap-item-' + hsId).hide();
+    });
+
+    var catList = getCollapsedRap(catKeyRap);
+    catList.forEach(function(catId) {
+        $('#cat-rap-chevron-' + catId).removeClass('mdi-chevron-down').addClass('mdi-chevron-right');
+        $('.cat-rap-item-' + catId).hide();
+    });
+}
+
+$(document).ready(function() {
+    restoreRapCollapsedState();
+    
+    // Initialize tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+
 // Show AHSP RAP Detail Modal (from Master Data RAP)
 function showAhspRapModal(ahspCode) {
     var modalEl = document.getElementById('ahspRapDetailModal');
@@ -958,3 +962,6 @@ function printPdfPreviewRap() {
     }
 }
 </script>
+<?php 
+$extraScripts = ob_get_clean();
+?>

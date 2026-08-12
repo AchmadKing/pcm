@@ -479,10 +479,10 @@ switch ($ahspSort) {
         $ahspOrderBy = 'work_name';
         break;
 }
-$ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY $ahspOrderBy $ahspSortOrder", [$projectId]);
+$ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
 
 // Get overhead percentage for price display
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 
 // Group items by category
 $itemsByCategory = ['upah' => [], 'material' => [], 'alat' => []];
@@ -514,8 +514,8 @@ foreach ($itemsRap as $item) {
     $itemsRapByCategory[$item['category']][] = $item;
 }
 
-// Get RAP AHSP with same sorting
-$ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY $ahspOrderBy $ahspSortOrder", [$projectId]);
+// Get RAP AHSP with same sorting (0-priced AHSP on top)
+$ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
 ?>
 
 <!-- Sub-tabs for Items and AHSP (RAB & RAP) -->

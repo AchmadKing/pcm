@@ -47,11 +47,19 @@ $projectImages = dbGetAll("
             </tr>
             <tr>
                 <td class="text-muted">Overhead</td>
-                <td><?= $project['overhead_percentage'] ?>%</td>
+                <td><?= $project['overhead_percentage'] ?? 10 ?>%</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Profit</td>
+                <td><?= $project['profit_percentage'] ?? 0 ?>%</td>
+            </tr>
+            <tr>
+                <td class="text-muted">Total Overhead & Profit</td>
+                <td><strong class="text-primary"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?>%</strong></td>
             </tr>
             <tr>
                 <td class="text-muted">PPN</td>
-                <td><?= $project['ppn_percentage'] ?>%</td>
+                <td><?= $project['ppn_percentage'] ?? 11 ?>%</td>
             </tr>
         </table>
     </div>

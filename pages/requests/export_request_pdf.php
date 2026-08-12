@@ -35,8 +35,17 @@ if (!$request) {
     die('Pengajuan tidak ditemukan');
 }
 
-// Check access - admin, PM, or creator can view/export
-if (!hasPermission('requests.view') && $request['created_by'] != getCurrentUserId()) {
+// Check access - creator or users with requests.view and project access
+$canView = false;
+if (isSuperAdmin() || hasPermission('projects.edit')) {
+    $canView = true;
+} elseif ($request['created_by'] == getCurrentUserId()) {
+    $canView = true;
+} elseif (hasPermission('requests.view') && canAccessProject($request['project_id'])) {
+    $canView = true;
+}
+
+if (!$canView) {
     die('Anda tidak memiliki akses ke pengajuan ini');
 }
 
@@ -395,7 +404,7 @@ $baseUrl = getBaseUrl();
         <h4 style="font-size: 11pt; font-weight: bold; margin-bottom: 10px;">Lampiran saat Pengajuan:</h4>
         <?php foreach ($requestAttachments as $att): ?>
             <div class="attachment-item">
-                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
+                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'])): ?>
                     <img src="../../uploads/receipts/<?= $att['filename'] ?>" class="attachment-image" alt="<?= htmlspecialchars($att['original_name']) ?>">
                     <div class="attachment-label"><?= htmlspecialchars($att['original_name']) ?></div>
                 <?php else: ?>
@@ -411,7 +420,7 @@ $baseUrl = getBaseUrl();
         <h4 style="font-size: 11pt; font-weight: bold; margin-top: 25px; margin-bottom: 10px;">Lampiran Realisasi (Nota Aktual):</h4>
         <?php foreach ($actualAttachments as $att): ?>
             <div class="attachment-item">
-                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg'])): ?>
+                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'])): ?>
                     <img src="../../uploads/actuals/<?= $att['filename'] ?>" class="attachment-image" alt="<?= htmlspecialchars($att['original_name']) ?>">
                     <div class="attachment-label"><?= htmlspecialchars($att['original_name']) ?></div>
                 <?php else: ?>

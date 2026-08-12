@@ -16,6 +16,10 @@ $type = $_GET['type'] ?? 'rab'; // rab, comparison
 
 // If project_id provided, export directly
 if ($projectId && isset($_GET['download'])) {
+    if (!canAccessProject($projectId)) {
+        die('Anda tidak memiliki akses ke proyek ini');
+    }
+    
     $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
     
     if (!$project) {
@@ -32,7 +36,7 @@ if ($projectId && isset($_GET['download'])) {
     // BOM for Excel UTF-8
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-    $overheadPct = floatval($project['overhead_percentage'] ?? 10);
+    $overheadPct = getProjectOverheadProfitPct($project);
     $ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
     // Pre-calculate RAB AHSP prices
@@ -266,8 +270,21 @@ if ($projectId && isset($_GET['download'])) {
 $pageTitle = 'Export CSV';
 require_once __DIR__ . '/../../includes/header.php';
 
-// Get projects
-$projects = dbGetAll("SELECT id, name, status FROM projects WHERE status != 'draft' ORDER BY name");
+// Get projects based on view mode
+$expViewMode = getProjectViewMode();
+if ($expViewMode === 'all') {
+    $projects = dbGetAll("SELECT id, name, status FROM projects WHERE status != 'draft' ORDER BY name");
+} elseif ($expViewMode === 'assigned') {
+    $projects = dbGetAll("
+        SELECT p.id, p.name, p.status 
+        FROM projects p 
+        JOIN project_assignments pa ON pa.project_id = p.id 
+        WHERE p.status != 'draft' AND pa.user_id = ? AND pa.is_active = 1 
+        ORDER BY p.name
+    ", [getCurrentUserId()]);
+} else {
+    $projects = [];
+}
 ?>
 
 <!-- Page Title -->

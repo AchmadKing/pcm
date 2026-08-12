@@ -4,17 +4,65 @@
  * PCM - Project Cost Management System
  */
 
+// IMPORTANT: Process all logic that may redirect BEFORE including header.php
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/functions.php';
+require_once __DIR__ . '/../../config/database.php';
+
+requireLogin();
+
+// Handle Delete Request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_request') {
+    if (!hasPermission('requests.delete')) {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus pengajuan!');
+        header('Location: index.php');
+        exit;
+    }
+    
+    $reqId = intval($_POST['request_id'] ?? 0);
+    $req = dbGetRow("SELECT id, request_number, project_id FROM requests WHERE id = ?", [$reqId]);
+    if ($req) {
+        if (!canAccessProject($req['project_id'])) {
+            setFlash('error', 'Anda tidak memiliki akses ke proyek pengajuan ini!');
+            header('Location: index.php');
+            exit;
+        }
+        deleteRequest($reqId);
+        setFlash('success', 'Pengajuan ' . ($req['request_number'] ?: 'REQ-' . $req['id']) . ' berhasil dihapus.');
+    } else {
+        setFlash('error', 'Pengajuan tidak ditemukan.');
+    }
+    header('Location: index.php');
+    exit;
+}
+
 $pageTitle = 'Daftar Pengajuan';
 require_once __DIR__ . '/../../includes/header.php';
 
 $projectFilter = $_GET['project_id'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 
-// Build query based on role
+// Build query based on project access mode and permissions
 $where = [];
 $params = [];
+$reqViewMode = getProjectViewMode();
 
-if (!hasPermission('requests.view')) {
+if ($reqViewMode === 'all') {
+    if (!hasPermission('requests.view')) {
+        $where[] = "req.created_by = ?";
+        $params[] = getCurrentUserId();
+    }
+} elseif ($reqViewMode === 'assigned') {
+    if (hasPermission('requests.view')) {
+        $where[] = "(req.project_id IN (SELECT project_id FROM project_assignments WHERE user_id = ? AND is_active = 1) OR req.created_by = ?)";
+        $params[] = getCurrentUserId();
+        $params[] = getCurrentUserId();
+    } else {
+        $where[] = "req.created_by = ?";
+        $params[] = getCurrentUserId();
+    }
+} else {
+    // No project access: can only see their own requests if any
     $where[] = "req.created_by = ?";
     $params[] = getCurrentUserId();
 }
@@ -46,10 +94,18 @@ $requests = dbGetAll("
 ", $params);
 
 // Get projects for filter
-if (hasPermission('requests.approve')) {
+if ($reqViewMode === 'all') {
     $projects = dbGetAll("SELECT id, name FROM projects WHERE status = 'on_progress' ORDER BY name");
+} elseif ($reqViewMode === 'assigned') {
+    $projects = dbGetAll("
+        SELECT p.id, p.name 
+        FROM projects p 
+        JOIN project_assignments pa ON pa.project_id = p.id 
+        WHERE p.status = 'on_progress' AND pa.user_id = ? AND pa.is_active = 1 
+        ORDER BY p.name
+    ", [getCurrentUserId()]);
 } else {
-    $projects = dbGetAll("SELECT id, name FROM projects WHERE status = 'on_progress' ORDER BY name");
+    $projects = [];
 }
 ?>
 
@@ -137,13 +193,23 @@ if (hasPermission('requests.approve')) {
                                 <td><?= sanitize($req['created_by_name']) ?></td>
                                 <?php endif; ?>
                                 <td>
-                                    <a href="view_request.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-info btn-action">
+                                    <a href="view_request.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat Detail">
                                         <i class="mdi mdi-eye"></i>
                                     </a>
+                                    <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($req['project_id'])): ?>
+                                    <a href="create.php?project_id=<?= $req['project_id'] ?>&resubmit_id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="Ajukan Ulang">
+                                        <i class="mdi mdi-refresh"></i>
+                                    </a>
+                                    <?php endif; ?>
                                     <?php if (hasPermission('requests.approve') && $req['status'] === 'pending'): ?>
-                                    <a href="approval.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action">
+                                    <a href="approval.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="Review">
                                         <i class="mdi mdi-check"></i>
                                     </a>
+                                    <?php endif; ?>
+                                    <?php if (hasPermission('requests.delete')): ?>
+                                    <button type="button" class="btn btn-sm btn-danger btn-action" title="Hapus Pengajuan" onclick="confirmDeleteRequest(<?= $req['id'] ?>, '<?= addslashes(sanitize($req['request_number'] ?: 'REQ-' . $req['id'])) ?>')">
+                                        <i class="mdi mdi-delete"></i>
+                                    </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -166,3 +232,33 @@ if (hasPermission('requests.approve')) {
 </div>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
+
+<script>
+function confirmDeleteRequest(reqId, reqNumber) {
+    confirmDelete(function() {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'index.php';
+        
+        var actInput = document.createElement('input');
+        actInput.type = 'hidden';
+        actInput.name = 'action';
+        actInput.value = 'delete_request';
+        form.appendChild(actInput);
+        
+        var idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'request_id';
+        idInput.value = reqId;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }, {
+        title: 'Hapus Pengajuan Dana',
+        message: 'Apakah Anda yakin ingin menghapus pengajuan <strong>' + (reqNumber || ('REQ-' + reqId)) + '</strong>?<br><small class="text-danger">Seluruh rincian item, data aktual, dan lampiran terkait akan ikut terhapus permanen.</small>',
+        buttonText: 'Ya, Hapus Pengajuan',
+        buttonClass: 'btn-danger'
+    });
+}
+</script>

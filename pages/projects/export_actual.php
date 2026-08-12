@@ -9,10 +9,12 @@ require_once __DIR__ . '/../../includes/functions.php';
 require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
+requirePermission('reports.view');
 
 $projectId = $_GET['id'] ?? null;
 
-if (!$projectId) {
+if (!$projectId || !canAccessProject($projectId)) {
+    setFlash('error', 'Anda tidak memiliki akses ke proyek ini!');
     header('Location: index.php');
     exit;
 }
@@ -26,7 +28,7 @@ if (!$project) {
     exit;
 }
 
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 $regionName = $project['region_name'] ?? '-';
 
 // Weekly progress setup

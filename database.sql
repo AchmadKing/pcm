@@ -100,6 +100,7 @@ CREATE TABLE projects (
     start_date DATE,
     
     overhead_percentage DECIMAL(5,2) DEFAULT 10.00,
+    profit_percentage DECIMAL(5,2) DEFAULT 0.00,
     rab_submitted TINYINT(1) NOT NULL DEFAULT 0,
     rap_submitted TINYINT(1) NOT NULL DEFAULT 0,
     ppn_percentage DECIMAL(5,2) NOT NULL DEFAULT 11.00,

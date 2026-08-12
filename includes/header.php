@@ -125,12 +125,8 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                                 <i class="mdi mdi-view-dashboard"></i>
                                 <span>Dashboard</span>
                             </a>
-                        </li>
-                        
-                        <?php if (hasPermission('projects.create')): ?>
-                        <?php endif; ?>
-                        
-                        <!-- Projects - All logged-in users (access control handled per-page) -->
+                        <!-- Projects - Only visible if user has project access -->
+                        <?php if (getProjectViewMode() !== 'none'): ?>
                         <li class="<?= $currentDir == 'projects' ? 'mm-active' : '' ?>">
                             <a href="javascript:void(0);">
                                 <i class="mdi mdi-briefcase"></i>
@@ -147,6 +143,7 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                                 <?php endif; ?>
                             </ul>
                         </li>
+                        <?php endif; ?>
                         
                         <!-- Requests -->
                         <li class="<?= $currentDir == 'requests' ? 'mm-active' : '' ?>">

@@ -8,8 +8,8 @@
 // Ensure database tables exist
 ensureRabHeadSubsTableExists();
 
-// RAB can be viewed anytime, but only edited when draft AND not yet submitted AND not locked
-$isEditable = ($project['status'] === 'draft' && !$project['rab_submitted'] && !isProjectLocked($project));
+// RAB can be viewed anytime, but only edited when draft AND not yet submitted AND not locked AND user has rab.edit
+$isEditable = ($project['status'] === 'draft' && !$project['rab_submitted'] && !isProjectLocked($project) && hasPermission('rab.edit'));
 
 // Get available AHSP for this project
 $ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY work_name", [$projectId]);
@@ -39,7 +39,7 @@ $grandTotal = 0;
 $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
@@ -413,9 +413,9 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
 
 
             <!-- Render Standalone Categories (without Head-Sub) -->
-            <?php if (!empty($standaloneCats) || !empty($headSubs)): ?>
+            <?php if (!empty($standaloneCats)): ?>
+                <?php if (!empty($headSubs)): ?>
                 <tr class="table-dark dropzone-head-sub" data-hs-id="0" data-drop-text="📂 Drop Di Sini untuk Melepas Kategori dari Head-Sub">
-
                     <td colspan="10" class="py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <strong class="font-size-14 text-uppercase">KATEGORI TANPA HEAD-SUB</strong>
@@ -425,6 +425,7 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                         </div>
                     </td>
                 </tr>
+                <?php endif; ?>
 
                 <?php foreach ($standaloneCats as $catId => $data):
                     $cat = $data['category'];
@@ -823,7 +824,8 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                     <select class="form-select select2-ahsp" name="ahsp_id" id="select_ahsp_id" required>
                         <option value="">-- Ketik untuk mencari AHSP --</option>
                         <?php 
-                        $overheadPct = $project['overhead_percentage'] ?? 10;
+                        $overheadPct = getProjectOverheadProfitPct($project);
+                        $overheadLabel = formatOverheadProfitLabel($project);
                         foreach ($ahspList as $ahsp): 
                             $priceWithOverhead = $ahsp['unit_price'] * (1 + ($overheadPct / 100));
                         ?>
@@ -832,7 +834,7 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                         </option>
                         <?php endforeach; ?>
                     </select>
-                    <small class="text-muted">Harga sudah termasuk overhead <?= formatNumber($overheadPct, 0) ?>%</small>
+                    <small class="text-muted">Harga sudah termasuk <?= $overheadLabel ?></small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label required">Volume</label>
@@ -847,16 +849,34 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
     </div>
 </div>
 
-<!-- Edit PPN Modal -->
+<!-- Edit Pengaturan Anggaran & PPN Modal -->
 <div class="modal fade" id="editPpnModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
+    <div class="modal-dialog">
         <form method="POST" class="modal-content">
             <input type="hidden" name="action" value="update_ppn">
             <div class="modal-header">
-                <h5 class="modal-title">Edit PPN</h5>
+                <h5 class="modal-title"><i class="mdi mdi-calculator"></i> Edit Pengaturan Anggaran & PPN</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Overhead (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="overhead_percentage" id="modal_oh_pct"
+                               value="<?= $project['overhead_percentage'] ?? 10 ?>" min="0" max="100" required oninput="calcModalTotalOh()">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Profit (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="profit_percentage" id="modal_pf_pct"
+                               value="<?= $project['profit_percentage'] ?? 0 ?>" min="0" max="100" required oninput="calcModalTotalOh()">
+                    </div>
+                </div>
+                <div class="alert alert-info py-2 mb-3">
+                    <small>
+                        <i class="mdi mdi-information-outline"></i>
+                        Total Overhead & Profit pada AHSP: <strong><span id="modal_preview_total_oh"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                    </small>
+                </div>
                 <div class="mb-3">
                     <label class="form-label">Persentase PPN (%)</label>
                     <input type="number" step="0.01" class="form-control" name="ppn_percentage" 
@@ -870,6 +890,15 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
         </form>
     </div>
 </div>
+<script>
+function calcModalTotalOh() {
+    var oh = parseFloat(document.getElementById('modal_oh_pct').value) || 0;
+    var pf = parseFloat(document.getElementById('modal_pf_pct').value) || 0;
+    var total = (oh + pf).toFixed(1).replace(/\.0$/, '');
+    var elem = document.getElementById('modal_preview_total_oh');
+    if (elem) elem.textContent = total;
+}
+</script>
 
 <style>
 .drag-handle[draggable="true"] {
@@ -1054,6 +1083,11 @@ function toggleHeadSub(hsId) {
     if (icon.hasClass('mdi-chevron-right')) {
         icon.removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
         $('.hs-item-' + hsId).show();
+        // Keep collapsed categories hidden
+        var catList = getCollapsedRab(catKeyRab);
+        catList.forEach(function(catId) {
+            $('.cat-item-' + catId).hide();
+        });
         list = list.filter(function(id) { return id != hsId; });
     } else {
         icon.removeClass('mdi-chevron-down').addClass('mdi-chevron-right');

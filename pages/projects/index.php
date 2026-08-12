@@ -11,19 +11,13 @@ require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
 
-// Cek akses: harus punya projects.view ATAU projects.edit, 
-// ATAU punya project_assignments (field_team)
-if (!hasPermission('projects.view') && !hasPermission('projects.edit')) {
-    // Field team tanpa projects.view - cek apakah punya assignment aktif
-    $hasAssignment = dbGetRow(
-        "SELECT 1 FROM project_assignments WHERE user_id = ? AND is_active = 1 LIMIT 1",
-        [getCurrentUserId()]
-    );
-    if (!$hasAssignment) {
-        setFlash('error', 'Anda tidak memiliki akses ke halaman proyek.');
-        header('Location: ' . getBaseUrl() . '/index.php');
-        exit;
-    }
+// Check project access level using view_mode
+$viewMode = getProjectViewMode();
+
+if ($viewMode === 'none') {
+    setFlash('error', 'Anda tidak memiliki akses ke halaman proyek.');
+    header('Location: ' . getBaseUrl() . '/index.php');
+    exit;
 }
 
 // Handle delete (admin only) - MUST BE BEFORE header.php include
@@ -101,21 +95,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
     exit;
 }
 
-if (hasPermission('projects.edit')) {
-    // Admin/Super Admin: lihat semua proyek + bisa edit
-    $projects = dbGetAll("
-        SELECT p.*, u.full_name as created_by_name,
-            (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
-            (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
-             FROM rab_subcategories rs 
-             JOIN rab_categories rc ON rs.category_id = rc.id 
-             WHERE rc.project_id = p.id) as base_rab
-        FROM projects p 
-        LEFT JOIN users u ON p.created_by = u.id
-        ORDER BY p.created_at DESC
-    ");
-} elseif (hasPermission('projects.view')) {
-    // PM: lihat semua proyek tapi read-only (tidak perlu project_assignments)
+if ($viewMode === 'all') {
+    // Users with 'all' access: see all projects
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
             (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
@@ -128,14 +109,15 @@ if (hasPermission('projects.edit')) {
         ORDER BY p.created_at DESC
     ");
 } else {
-    // Field team: hanya lihat proyek yang ditugaskan (via project_assignments)
+    // Users with 'assigned' access: only see assigned projects
     $projects = dbGetAll("
-        SELECT p.*,
+        SELECT p.*, u.full_name as created_by_name,
             (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
              FROM rab_subcategories rs 
              JOIN rab_categories rc ON rs.category_id = rc.id 
              WHERE rc.project_id = p.id) as base_rab
         FROM projects p 
+        LEFT JOIN users u ON p.created_by = u.id
         INNER JOIN project_assignments pa ON pa.project_id = p.id
         WHERE pa.user_id = ? AND pa.is_active = 1
         ORDER BY p.name ASC
@@ -145,7 +127,7 @@ if (hasPermission('projects.edit')) {
 // Calculate total_rab with overhead, PPN, and rounding for each project
 foreach ($projects as &$proj) {
     $baseRab = $proj['base_rab'];
-    $overheadPct = $proj['overhead_percentage'] ?? 10;
+    $overheadPct = getProjectOverheadProfitPct($proj);
     $ppnPct = $proj['ppn_percentage'] ?? 11;
     $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
     $rabPpn = $rabWithOverhead * ($ppnPct / 100);

@@ -124,7 +124,7 @@ function formatDateTime($datetime, $withDay = false) {
  * @return string
  */
 function sanitize($input) {
-    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars(trim((string)($input ?? '')), ENT_QUOTES, 'UTF-8');
 }
 
 /**
@@ -189,10 +189,14 @@ function renderPagination($pagination) {
  * @param string $message
  */
 function setFlash($type, $message) {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        @session_start();
+    }
     $_SESSION['flash'] = [
         'type' => $type,
         'message' => $message
     ];
+    session_write_close();
 }
 
 /**
@@ -202,7 +206,11 @@ function setFlash($type, $message) {
 function getFlash() {
     if (isset($_SESSION['flash'])) {
         $flash = $_SESSION['flash'];
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            @session_start();
+        }
         unset($_SESSION['flash']);
+        session_write_close();
         return $flash;
     }
     return null;
@@ -1318,6 +1326,8 @@ function ensureRabHeadSubsTableExists() {
     if ($checked) return;
     $checked = true;
 
+    ensureProfitPercentageColumnExists();
+
     try {
         dbExecute("
             CREATE TABLE IF NOT EXISTS `rab_head_subs` (
@@ -1353,6 +1363,86 @@ function ensureRabHeadSubsTableExists() {
 }
 
 /**
+ * Auto Migration: Ensure profit_percentage column exists in projects and rab_snapshots
+ */
+function ensureProfitPercentageColumnExists() {
+    static $profitChecked = false;
+    if ($profitChecked) return;
+    $profitChecked = true;
+
+    try {
+        $colCheck = dbGetRow("
+            SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'projects'
+              AND COLUMN_NAME = 'profit_percentage'
+        ");
+
+        if (empty($colCheck['cnt'])) {
+            dbExecute("
+                ALTER TABLE `projects` 
+                ADD COLUMN `profit_percentage` DECIMAL(5,2) DEFAULT 0.00 AFTER `overhead_percentage`
+            ");
+        }
+
+        // Also ensure rab_snapshots has profit_percentage
+        $snapCheck = dbGetRow("
+            SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'rab_snapshots'
+        ");
+        if (!empty($snapCheck['cnt'])) {
+            $snapColCheck = dbGetRow("
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'rab_snapshots'
+                  AND COLUMN_NAME = 'profit_percentage'
+            ");
+            if (empty($snapColCheck['cnt'])) {
+                dbExecute("
+                    ALTER TABLE `rab_snapshots` 
+                    ADD COLUMN `profit_percentage` DECIMAL(5,2) DEFAULT 0.00 AFTER `overhead_percentage`
+                ");
+            }
+        }
+    } catch (Exception $e) {
+        // Ignore if already exists or schema error
+    }
+}
+
+/**
+ * Get combined Overhead + Profit percentage for a project
+ * e.g. Overhead 5% + Profit 10% = 15%
+ *
+ * @param array|null $project
+ * @return float
+ */
+function getProjectOverheadProfitPct($project) {
+    if (!$project) return 10.0;
+    $overhead = isset($project['overhead_percentage']) ? floatval($project['overhead_percentage']) : 10.0;
+    $profit = isset($project['profit_percentage']) ? floatval($project['profit_percentage']) : 0.0;
+    return $overhead + $profit;
+}
+
+/**
+ * Get formatted label for Overhead & Profit
+ * e.g. "Overhead & Profit 15% (Overhead 5% + Profit 10%)" or "Overhead & Profit 10%"
+ *
+ * @param array|null $project
+ * @return string
+ */
+function formatOverheadProfitLabel($project) {
+    if (!$project) return "Overhead & Profit 10%";
+    $overhead = isset($project['overhead_percentage']) ? floatval($project['overhead_percentage']) : 10.0;
+    $profit = isset($project['profit_percentage']) ? floatval($project['profit_percentage']) : 0.0;
+    $total = $overhead + $profit;
+    if ($profit > 0 && $overhead > 0) {
+        return "Overhead & Profit " . formatNumber($total, 0) . "% (" . formatNumber($overhead, 0) . "% + " . formatNumber($profit, 0) . "%)";
+    }
+    return "Overhead & Profit " . formatNumber($total, 0) . "%";
+}
+
+/**
  * Calculate real-time RAB, RAP, and Actual statistics for a single project.
  * Uses exact dynamic AHSP component prices, overhead percentage, PPN, and actualization adjustments.
  * 
@@ -1363,7 +1453,7 @@ function calculateProjectRealtimeStats($projectId) {
     $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
     if (!$project) return null;
 
-    $overheadPct = floatval($project['overhead_percentage'] ?? 10);
+    $overheadPct = getProjectOverheadProfitPct($project);
     $ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
     // Pre-calculate RAB AHSP component totals
@@ -1750,6 +1840,54 @@ function getOverallProjectsRealtimeStats() {
         'total_rap' => $totalRap,
         'total_actual' => $totalActual
     ];
+}
+
+/**
+ * Delete a request and all its associated items, actuals, attachments, and files
+ * 
+ * @param int $requestId
+ * @return bool
+ */
+function deleteRequest($requestId) {
+    $requestId = intval($requestId);
+    if ($requestId <= 0) return false;
+    
+    // 1. Delete request attachments (and physical files)
+    $attachments = dbGetAll("SELECT filename FROM request_attachments WHERE request_id = ?", [$requestId]);
+    $reqUploadDir = __DIR__ . '/../uploads/requests/';
+    foreach ($attachments as $att) {
+        if (!empty($att['filename'])) {
+            $filepath = $reqUploadDir . $att['filename'];
+            if (file_exists($filepath)) {
+                @unlink($filepath);
+            }
+        }
+    }
+    dbExecute("DELETE FROM request_attachments WHERE request_id = ?", [$requestId]);
+    
+    // 2. Delete request actuals and their attachments (and physical files)
+    $actuals = dbGetAll("SELECT id FROM request_actuals WHERE request_id = ?", [$requestId]);
+    $actUploadDir = __DIR__ . '/../uploads/actuals/';
+    foreach ($actuals as $act) {
+        $actAttachments = dbGetAll("SELECT filename FROM request_actual_attachments WHERE request_actual_id = ?", [$act['id']]);
+        foreach ($actAttachments as $att) {
+            if (!empty($att['filename'])) {
+                $filepath = $actUploadDir . $att['filename'];
+                if (file_exists($filepath)) {
+                    @unlink($filepath);
+                }
+            }
+        }
+        dbExecute("DELETE FROM request_actual_attachments WHERE request_actual_id = ?", [$act['id']]);
+    }
+    dbExecute("DELETE FROM request_actuals WHERE request_id = ?", [$requestId]);
+    
+    // 3. Delete request items
+    dbExecute("DELETE FROM request_items WHERE request_id = ?", [$requestId]);
+    
+    // 4. Delete the request record
+    $res = dbExecute("DELETE FROM requests WHERE id = ?", [$requestId]);
+    return $res > 0;
 }
 
 

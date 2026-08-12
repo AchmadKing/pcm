@@ -16,7 +16,7 @@ if (!in_array($categoryFilter, $validFilters)) {
 
 // Get project settings
 $ppnPercentage = $project['ppn_percentage'] ?? 11;
-$overheadPct = $project['overhead_percentage'] ?? 10;
+$overheadPct = getProjectOverheadProfitPct($project);
 
 // Generate weekly ranges if project is started (not draft) OR has weekly history
 $weeklyRanges = [];
@@ -300,6 +300,11 @@ $lastStickyRight = 1220; // Total width of sticky area
 ?>
 
 <style>
+/* Ensure main-content allows sticky to viewport */
+.main-content {
+    overflow: visible !important;
+}
+
 /* Wrapper with horizontal scroll */
 .actual-scroll-wrapper {
     width: 100%;
@@ -312,6 +317,8 @@ $lastStickyRight = 1220; // Total width of sticky area
     border-collapse: separate;
     border-spacing: 0;
     min-width: <?= $showWeeklyColumns ? (1220 + (count($weeklyRanges) * 300)) : 1220 ?>px;
+    --actual-topbar-offset: 70px;
+    --actual-r1-height: 48px;
 }
 
 /* Prevent text wrapping in all data cells */
@@ -325,16 +332,29 @@ $lastStickyRight = 1220; // Total width of sticky area
     max-width: 220px;
 }
 
-/* Sticky column styles */
+/* All thead th default styling */
+.actual-table thead th {
+    background-color: #212529;
+    color: #fff;
+    border-top: 1px solid #373b3e !important;
+    border-bottom: 1px solid #373b3e !important;
+    border-left: 1px solid #373b3e !important;
+    border-right: 1px solid #373b3e !important;
+}
+
+/* Sticky column styles for horizontal scroll */
 .sticky-col {
     position: sticky;
-    z-index: 2;
+    z-index: 5;
     background-color: #fff;
 }
+
+/* When sticky column is in header, it sticks on left -> highest z-index */
 .sticky-col-header {
     position: sticky;
-    z-index: 3;
-    background-color: #212529;
+    z-index: 30 !important;
+    background-color: #212529 !important;
+    color: #fff !important;
 }
 
 /* Column position classes */
@@ -369,17 +389,39 @@ $lastStickyRight = 1220; // Total width of sticky area
     border-color: #212529 !important;
     min-width: 120px;
 }
-.weekly-header {
+
+/* Headers with rowspan="2" in Row 1 */
+.actual-table thead tr.actual-header-row-1 th[rowspan="2"],
+.actual-floating-header-wrapper th[rowspan="2"] {
+    height: 88px !important;
+    vertical-align: middle !important;
+    background-color: #212529 !important;
+    color: #fff !important;
+}
+
+/* Weekly Main Header (Row 1) */
+.actual-table thead tr.actual-header-row-1 th.weekly-header,
+.actual-floating-header-wrapper th.weekly-header {
     background-color: #0dcaf0 !important;
     color: #000 !important;
     border-color: #212529 !important;
-    white-space: normal; /* Allow week date range to wrap */
+    white-space: normal;
+    height: 52px !important;
+    line-height: 1.2 !important;
+    padding: 4px 6px !important;
+    font-size: 13px;
 }
-.weekly-subheader {
+
+/* Weekly Sub Headers (Row 2) */
+.actual-table thead tr.actual-header-row-2 th.weekly-subheader,
+.actual-floating-header-wrapper th.weekly-subheader {
     background-color: #e0f7ff !important;
     color: #000 !important;
     border-color: #212529 !important;
+    height: 36px !important;
+    padding: 4px 6px !important;
     min-width: 100px;
+    font-size: 12px;
 }
 
 /* Box shadow for sticky edge */
@@ -391,6 +433,32 @@ $lastStickyRight = 1220; // Total width of sticky area
     bottom: 0;
     width: 4px;
     background: linear-gradient(to right, rgba(0,0,0,0.1), transparent);
+    pointer-events: none;
+}
+
+/* Floating Synced Sticky Header */
+.actual-floating-header-wrapper {
+    position: fixed;
+    top: 70px;
+    z-index: 999;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    display: none;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+    background-color: #212529;
+    border-bottom: 2px solid #212529;
+}
+.actual-floating-header-wrapper .actual-table {
+    margin-bottom: 0 !important;
+}
+.actual-floating-header-wrapper .sticky-col-header {
+    position: sticky;
+    z-index: 30 !important;
+    background-color: #212529 !important;
+    color: #fff !important;
+}
+.actual-floating-header-wrapper th {
+    border-top: none !important;
 }
 
 /* Scrollbar styling */
@@ -410,7 +478,7 @@ $lastStickyRight = 1220; // Total width of sticky area
     <table class="table table-bordered actual-table mb-0">
         <thead class="table-dark">
             <!-- Row 1: Main Headers -->
-            <tr>
+            <tr class="actual-header-row-1">
                 <?php if ($categoryFilter === 'all'): ?>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
@@ -439,7 +507,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php endif; ?>
             </tr>
             <!-- Row 2: Sub Headers for weekly columns -->
-            <tr>
+            <tr class="actual-header-row-2">
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): ?>
                 <th class="text-end weekly-subheader">Realisasi (Rp)</th>
@@ -813,7 +881,7 @@ $lastStickyRight = 1220; // Total width of sticky area
         <span class="badge bg-primary me-2">Upah</span> Biaya tenaga kerja |
         <span class="badge bg-success me-2 ms-2">Material</span> Biaya bahan/material |
         <span class="badge bg-warning me-2 ms-2">Alat</span> Biaya peralatan |
-        <em class="ms-2">RAP sudah termasuk overhead <?= number_format($overheadPct, 0) ?>%</em>
+        <em class="ms-2">RAP sudah termasuk <?= formatOverheadProfitLabel($project) ?></em>
     </small>
 </div>
 
@@ -1234,6 +1302,140 @@ function printPdfPreviewActual() {
         iframe.contentWindow.print();
     }
 }
+
+// Floating Synced Sticky Header Implementation
+(function initActualStickyHeader() {
+    function setupStickyHeader() {
+        var origWrapper = document.querySelector('.actual-scroll-wrapper');
+        var origTable = document.querySelector('.actual-table');
+        if (!origWrapper || !origTable) return;
+        
+        var origThead = origTable.querySelector('thead');
+        if (!origThead) return;
+
+        // Remove any existing floating header wrapper
+        var existing = document.getElementById('actualFloatingHeader');
+        if (existing) existing.remove();
+
+        // Create floating container
+        var floatWrapper = document.createElement('div');
+        floatWrapper.id = 'actualFloatingHeader';
+        floatWrapper.className = 'actual-floating-header-wrapper';
+        
+        // Create cloned table and thead
+        var floatTable = document.createElement('table');
+        floatTable.className = origTable.className + ' actual-floating-table';
+        
+        var clonedThead = origThead.cloneNode(true);
+        floatTable.appendChild(clonedThead);
+        floatWrapper.appendChild(floatTable);
+        document.body.appendChild(floatWrapper);
+
+        // Sync column widths between original thead and cloned thead
+        function syncWidths() {
+            var origTableWidth = origTable.offsetWidth;
+            floatTable.style.width = origTableWidth + 'px';
+            floatTable.style.minWidth = origTableWidth + 'px';
+            
+            // Row 1 headers
+            var origR1 = origThead.querySelectorAll('tr.actual-header-row-1 > th');
+            var cloneR1 = clonedThead.querySelectorAll('tr.actual-header-row-1 > th');
+            for (var i = 0; i < origR1.length; i++) {
+                if (cloneR1[i]) {
+                    var rect = origR1[i].getBoundingClientRect();
+                    var w = rect.width;
+                    cloneR1[i].style.width = w + 'px';
+                    cloneR1[i].style.minWidth = w + 'px';
+                    cloneR1[i].style.maxWidth = w + 'px';
+                    cloneR1[i].style.boxSizing = 'border-box';
+                }
+            }
+            
+            // Row 2 headers (weekly subheaders)
+            var origR2 = origThead.querySelectorAll('tr.actual-header-row-2 > th');
+            var cloneR2 = clonedThead.querySelectorAll('tr.actual-header-row-2 > th');
+            for (var j = 0; j < origR2.length; j++) {
+                if (cloneR2[j]) {
+                    var r2Rect = origR2[j].getBoundingClientRect();
+                    var w2 = r2Rect.width;
+                    cloneR2[j].style.width = w2 + 'px';
+                    cloneR2[j].style.minWidth = w2 + 'px';
+                    cloneR2[j].style.maxWidth = w2 + 'px';
+                    cloneR2[j].style.boxSizing = 'border-box';
+                }
+            }
+        }
+
+        // Update position and visibility on scroll
+        function updatePosition() {
+            var topbar = document.getElementById('page-topbar');
+            var topOffset = topbar ? topbar.offsetHeight : 70;
+            
+            var rect = origWrapper.getBoundingClientRect();
+            var theadRect = origThead.getBoundingClientRect();
+            var theadHeight = origThead.offsetHeight;
+            var tableBottom = rect.bottom;
+            
+            // Show floating header when original header has scrolled past the topbar,
+            // and hide before the table completely leaves the view
+            if (theadRect.top <= topOffset && tableBottom > (topOffset + theadHeight + 30)) {
+                floatWrapper.style.display = 'block';
+                floatWrapper.style.top = topOffset + 'px';
+                floatWrapper.style.left = rect.left + 'px';
+                floatWrapper.style.width = rect.width + 'px';
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+            } else {
+                floatWrapper.style.display = 'none';
+            }
+        }
+
+        // Bidirectional horizontal scroll sync
+        var isSyncing = false;
+        origWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        floatWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                origWrapper.scrollLeft = floatWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        // Window scroll and resize listeners with requestAnimationFrame
+        var ticking = false;
+        function onScrollOrResize() {
+            if (!ticking) {
+                window.requestAnimationFrame(function() {
+                    syncWidths();
+                    updatePosition();
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        }
+
+        window.addEventListener('scroll', onScrollOrResize, { passive: true });
+        window.addEventListener('resize', onScrollOrResize, { passive: true });
+
+        // Initial measurement
+        setTimeout(function() {
+            syncWidths();
+            updatePosition();
+        }, 50);
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setupStickyHeader();
+    } else {
+        document.addEventListener('DOMContentLoaded', setupStickyHeader);
+    }
+})();
 </script>
 
 <!-- PDF Preview Modal Actual -->

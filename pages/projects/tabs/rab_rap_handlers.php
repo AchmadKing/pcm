@@ -191,10 +191,27 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 break;
                 
             case 'update_ppn':
-                $ppnRaw = $_POST['ppn_percentage'];
+                ensureProfitPercentageColumnExists();
+                $ppnRaw = $_POST['ppn_percentage'] ?? 11;
                 $ppn = floatval(str_replace(',', '.', $ppnRaw));
-                dbExecute("UPDATE projects SET ppn_percentage = ? WHERE id = ?", [$ppn, $projectId]);
-                setFlash('success', 'PPN berhasil diperbarui!');
+                
+                $updates = ["ppn_percentage = ?"];
+                $params = [$ppn];
+                
+                if (isset($_POST['overhead_percentage'])) {
+                    $oh = floatval(str_replace(',', '.', $_POST['overhead_percentage']));
+                    $updates[] = "overhead_percentage = ?";
+                    $params[] = $oh;
+                }
+                if (isset($_POST['profit_percentage'])) {
+                    $pf = floatval(str_replace(',', '.', $_POST['profit_percentage']));
+                    $updates[] = "profit_percentage = ?";
+                    $params[] = $pf;
+                }
+                
+                $params[] = $projectId;
+                dbExecute("UPDATE projects SET " . implode(', ', $updates) . " WHERE id = ?", $params);
+                setFlash('success', 'Pengaturan anggaran berhasil diperbarui!');
                 break;
             
             case 'update_volume':
