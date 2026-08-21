@@ -13,7 +13,16 @@ requireLogin();
 requireAdminOrPM();
 
 $requestId = $_GET['id'] ?? null;
-$projectFilter = $_GET['project_id'] ?? '';
+
+// Project filter: persist across requests, refreshes, and page navigation via $_SESSION
+if (isset($_GET['project_id'])) {
+    $projectFilter = $_GET['project_id'];
+    $_SESSION['approval_project_filter'] = $projectFilter;
+} elseif (isset($_SESSION['approval_project_filter'])) {
+    $projectFilter = $_SESSION['approval_project_filter'];
+} else {
+    $projectFilter = '';
+}
 
 // Handle approval/rejection
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -283,8 +292,14 @@ $pendingRequests = dbGetAll("
     ORDER BY req.created_at ASC
 ", $params);
 
-// Get projects for filter
-$projects = dbGetAll("SELECT id, name FROM projects WHERE status = 'on_progress' ORDER BY name");
+// Get projects for filter (active or having pending requests)
+$projects = dbGetAll("
+    SELECT DISTINCT p.id, p.name 
+    FROM projects p
+    WHERE p.status = 'on_progress' 
+       OR p.id IN (SELECT project_id FROM requests WHERE status IN ('pending', 'pm_approved'))
+    ORDER BY p.name
+");
 
 // If specific request selected, get details
 $selectedRequest = null;
@@ -445,8 +460,8 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="card-body p-0">
                 <div class="p-2">
-                    <select class="form-select form-select-sm" onchange="window.location='?project_id='+this.value">
-                        <option value="">Filter Proyek</option>
+                    <select class="form-select form-select-sm" onchange="window.location='?project_id='+encodeURIComponent(this.value)">
+                        <option value="" <?= empty($projectFilter) ? 'selected' : '' ?>>Filter Proyek (Semua)</option>
                         <?php foreach ($projects as $p): ?>
                         <option value="<?= $p['id'] ?>" <?= $projectFilter == $p['id'] ? 'selected' : '' ?>>
                             <?= sanitize($p['name']) ?>
@@ -522,11 +537,11 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php if (!empty($selectedPekerjaan)): ?>
                 <div class="alert alert-info mb-3">
                     <h6 class="alert-heading mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan yang Diajukan</h6>
-                    <ul class="mb-0 ps-3">
+                    <ol class="mb-0 ps-3">
                         <?php foreach ($selectedPekerjaan as $pek): ?>
-                        <li><strong><?= sanitize($pek['code']) ?></strong> - <?= sanitize($pek['name']) ?> <small class="text-muted">(<?= sanitize($pek['category_code']) ?>. <?= sanitize($pek['category_name']) ?>)</small></li>
+                        <li class="mb-1"><strong><?= sanitize($pek['code']) ?></strong> - <?= sanitize($pek['name']) ?> <small class="text-muted">(<?= sanitize($pek['category_code']) ?>. <?= sanitize($pek['category_name']) ?>)</small></li>
                         <?php endforeach; ?>
-                    </ul>
+                    </ol>
                 </div>
                 <?php endif; ?>
                 

@@ -83,11 +83,11 @@ if ($action === 'update_item_rap_ajax') {
     $actualPriceRaw = $_POST['item_actual_price'] ?? '';
     $actualPrice = !empty($actualPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', $actualPriceRaw))) : null;
     
-    // Check for duplicate item_code (exclude current item)
+    // Check for duplicate item_code across RAP and RAB
     if (!empty($itemCode)) {
-        $existing = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ? AND id != ?", 
-            [$projectId, $itemCode, $itemId]);
-        if ($existing) {
+        $rapItem = dbGetRow("SELECT rab_item_id FROM project_items_rap WHERE id = ?", [$itemId]);
+        $matchingRabId = $rapItem ? $rapItem['rab_item_id'] : null;
+        if (isItemCodeDuplicate($projectId, $itemCode, $matchingRabId, $itemId)) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'message' => 'Kode item "' . $itemCode . '" sudah digunakan!']);
             exit;
@@ -97,6 +97,9 @@ if ($action === 'update_item_rap_ajax') {
     dbExecute("UPDATE project_items_rap SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ? AND project_id = ?",
         [$itemCode, $name, $brand ?: null, $category, $unit, $price, $actualPrice, $itemId, $projectId]);
     
+    // Sync item attributes to RAB (price stays separate)
+    syncEditItemRapToRab($itemId, $itemCode, $name, $brand, $category, $unit, $projectId);
+    
     // Sync price changes to all RAP AHSP that use this item
     syncRapItemToAhsp($itemId, $projectId);
     
@@ -104,7 +107,7 @@ if ($action === 'update_item_rap_ajax') {
     header('Content-Type: application/json');
     echo json_encode([
         'success' => true, 
-        'message' => 'Item RAP berhasil disimpan!',
+        'message' => 'Item RAP berhasil disimpan dan disinkronkan ke RAB!',
         'item' => [
             'id' => $itemId,
             'item_code' => $itemCode,

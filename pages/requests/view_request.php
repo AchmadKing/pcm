@@ -40,7 +40,7 @@ if (!$request) {
 
 // Check access - creator or users with requests.view and project access
 $canView = false;
-if (isSuperAdmin() || hasPermission('projects.edit')) {
+if (hasPermission('projects.edit')) {
     $canView = true;
 } elseif ($request['created_by'] == getCurrentUserId()) {
     $canView = true;

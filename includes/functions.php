@@ -723,6 +723,224 @@ function syncItemCodeRapToRab($projectId, $itemCode) {
 }
 
 /**
+ * Check if item code is duplicate in RAB or RAP within the project
+ * @param int $projectId
+ * @param string $itemCode
+ * @param int|null $excludeRabId
+ * @param int|null $excludeRapId
+ * @return bool
+ */
+function isItemCodeDuplicate($projectId, $itemCode, $excludeRabId = null, $excludeRapId = null) {
+    $itemCode = trim($itemCode);
+    if (empty($itemCode)) return false;
+    
+    $sqlRab = "SELECT id FROM project_items WHERE project_id = ? AND LOWER(item_code) = LOWER(?)";
+    $paramsRab = [$projectId, $itemCode];
+    if ($excludeRabId) {
+        $sqlRab .= " AND id != ?";
+        $paramsRab[] = $excludeRabId;
+    }
+    if (dbGetRow($sqlRab, $paramsRab)) return true;
+    
+    $sqlRap = "SELECT id FROM project_items_rap WHERE project_id = ? AND LOWER(item_code) = LOWER(?)";
+    $paramsRap = [$projectId, $itemCode];
+    if ($excludeRapId) {
+        $sqlRap .= " AND id != ?";
+        $paramsRap[] = $excludeRapId;
+    }
+    if (dbGetRow($sqlRap, $paramsRap)) return true;
+    
+    return false;
+}
+
+/**
+ * Check if AHSP code is duplicate in RAB or RAP within the project
+ * @param int $projectId
+ * @param string $ahspCode
+ * @param int|null $excludeRabId
+ * @param int|null $excludeRapId
+ * @return bool
+ */
+function isAhspCodeDuplicate($projectId, $ahspCode, $excludeRabId = null, $excludeRapId = null) {
+    $ahspCode = trim($ahspCode);
+    if (empty($ahspCode)) return false;
+    
+    $sqlRab = "SELECT id FROM project_ahsp WHERE project_id = ? AND LOWER(ahsp_code) = LOWER(?)";
+    $paramsRab = [$projectId, $ahspCode];
+    if ($excludeRabId) {
+        $sqlRab .= " AND id != ?";
+        $paramsRab[] = $excludeRabId;
+    }
+    if (dbGetRow($sqlRab, $paramsRab)) return true;
+    
+    $sqlRap = "SELECT id FROM project_ahsp_rap WHERE project_id = ? AND LOWER(ahsp_code) = LOWER(?)";
+    $paramsRap = [$projectId, $ahspCode];
+    if ($excludeRapId) {
+        $sqlRap .= " AND id != ?";
+        $paramsRap[] = $excludeRapId;
+    }
+    if (dbGetRow($sqlRap, $paramsRap)) return true;
+    
+    return false;
+}
+
+/**
+ * Sync: When editing RAB item (code, name, brand, category, unit), mirror to RAP
+ * NOTE: Price and actual_price remain separate/independent!
+ * @param int $itemId RAB Item ID
+ * @param string $itemCode
+ * @param string $name
+ * @param string|null $brand
+ * @param string $category
+ * @param string $unit
+ * @param int $projectId
+ */
+function syncEditItemRabToRap($itemId, $itemCode, $name, $brand, $category, $unit, $projectId) {
+    $oldRab = dbGetRow("SELECT item_code FROM project_items WHERE id = ?", [$itemId]);
+    $oldCode = $oldRab ? $oldRab['item_code'] : $itemCode;
+    
+    $rapItem = dbGetRow("
+        SELECT id FROM project_items_rap 
+        WHERE project_id = ? AND (rab_item_id = ? OR LOWER(item_code) = LOWER(?) OR LOWER(item_code) = LOWER(?))
+    ", [$projectId, $itemId, $itemCode, $oldCode]);
+    
+    if ($rapItem) {
+        dbExecute("
+            UPDATE project_items_rap 
+            SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, rab_item_id = ?
+            WHERE id = ? AND project_id = ?
+        ", [$itemCode, $name, $brand ?: null, $category, $unit, $itemId, $rapItem['id'], $projectId]);
+    } else {
+        $rabItem = dbGetRow("SELECT price, actual_price FROM project_items WHERE id = ?", [$itemId]);
+        $defaultPrice = $rabItem ? $rabItem['price'] : 0;
+        $defaultActual = $rabItem ? $rabItem['actual_price'] : null;
+        
+        dbInsert("
+            INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ", [$projectId, $itemCode, $name, $brand ?: null, $category, $unit, $defaultPrice, $defaultActual, $itemId]);
+    }
+}
+
+/**
+ * Sync: When editing RAP item (code, name, brand, category, unit), mirror to RAB
+ * NOTE: Price and actual_price remain separate/independent!
+ * @param int $rapItemId RAP Item ID
+ * @param string $itemCode
+ * @param string $name
+ * @param string|null $brand
+ * @param string $category
+ * @param string $unit
+ * @param int $projectId
+ */
+function syncEditItemRapToRab($rapItemId, $itemCode, $name, $brand, $category, $unit, $projectId) {
+    $rapItem = dbGetRow("SELECT rab_item_id, item_code, price, actual_price FROM project_items_rap WHERE id = ?", [$rapItemId]);
+    $rabItemId = $rapItem ? $rapItem['rab_item_id'] : null;
+    $oldCode = $rapItem ? $rapItem['item_code'] : $itemCode;
+    
+    $rabItem = null;
+    if ($rabItemId) {
+        $rabItem = dbGetRow("SELECT id FROM project_items WHERE id = ? AND project_id = ?", [$rabItemId, $projectId]);
+    }
+    if (!$rabItem) {
+        $rabItem = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND (LOWER(item_code) = LOWER(?) OR LOWER(item_code) = LOWER(?))", [$projectId, $itemCode, $oldCode]);
+    }
+    
+    if ($rabItem) {
+        dbExecute("
+            UPDATE project_items 
+            SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?
+            WHERE id = ? AND project_id = ?
+        ", [$itemCode, $name, $brand ?: null, $category, $unit, $rabItem['id'], $projectId]);
+        
+        dbExecute("UPDATE project_items_rap SET rab_item_id = ? WHERE id = ?", [$rabItem['id'], $rapItemId]);
+    } else {
+        $defaultPrice = $rapItem ? $rapItem['price'] : 0;
+        $defaultActual = $rapItem ? $rapItem['actual_price'] : null;
+        
+        $newRabId = dbInsert("
+            INSERT INTO project_items (project_id, item_code, name, brand, category, unit, price, actual_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ", [$projectId, $itemCode, $name, $brand ?: null, $category, $unit, $defaultPrice, $defaultActual]);
+        
+        dbExecute("UPDATE project_items_rap SET rab_item_id = ? WHERE id = ?", [$newRabId, $rapItemId]);
+    }
+}
+
+/**
+ * Sync: When deleting RAB item, also delete matching RAP item and related AHSP details
+ * @param int $itemId RAB Item ID
+ * @param int $projectId
+ */
+function syncDeleteItemRabToRap($itemId, $projectId) {
+    $rabItem = dbGetRow("SELECT * FROM project_items WHERE id = ? AND project_id = ?", [$itemId, $projectId]);
+    if (!$rabItem) return;
+    
+    $affectedRabAhsp = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details WHERE item_id = ?", [$itemId]);
+    dbExecute("DELETE FROM project_ahsp_details WHERE item_id = ?", [$itemId]);
+    
+    $rapItem = dbGetRow("
+        SELECT id FROM project_items_rap 
+        WHERE project_id = ? AND (rab_item_id = ? OR LOWER(item_code) = LOWER(?))
+    ", [$projectId, $itemId, $rabItem['item_code']]);
+    
+    $affectedRapAhsp = [];
+    if ($rapItem) {
+        $affectedRapAhsp = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details_rap WHERE item_id = ?", [$rapItem['id']]);
+        dbExecute("DELETE FROM project_ahsp_details_rap WHERE item_id = ?", [$rapItem['id']]);
+        dbExecute("DELETE FROM project_items_rap WHERE id = ?", [$rapItem['id']]);
+    }
+    
+    dbExecute("DELETE FROM project_items WHERE id = ? AND project_id = ?", [$itemId, $projectId]);
+    
+    foreach ($affectedRabAhsp as $row) {
+        recalculateAhspPrice($row['ahsp_id']);
+    }
+    foreach ($affectedRapAhsp as $row) {
+        recalculateRapAhspPrice($row['ahsp_id']);
+        syncMasterAhspRapToRapTable($row['ahsp_id'], $projectId);
+    }
+}
+
+/**
+ * Sync: When deleting RAP item, also delete matching RAB item and related AHSP details
+ * @param int $rapItemId RAP Item ID
+ * @param int $projectId
+ */
+function syncDeleteItemRapToRab($rapItemId, $projectId) {
+    $rapItem = dbGetRow("SELECT * FROM project_items_rap WHERE id = ? AND project_id = ?", [$rapItemId, $projectId]);
+    if (!$rapItem) return;
+    
+    $affectedRapAhsp = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details_rap WHERE item_id = ?", [$rapItemId]);
+    dbExecute("DELETE FROM project_ahsp_details_rap WHERE item_id = ?", [$rapItemId]);
+    
+    $rabItem = null;
+    if ($rapItem['rab_item_id']) {
+        $rabItem = dbGetRow("SELECT id FROM project_items WHERE id = ? AND project_id = ?", [$rapItem['rab_item_id'], $projectId]);
+    }
+    if (!$rabItem) {
+        $rabItem = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND LOWER(item_code) = LOWER(?)", [$projectId, $rapItem['item_code']]);
+    }
+    
+    $affectedRabAhsp = [];
+    if ($rabItem) {
+        $affectedRabAhsp = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details WHERE item_id = ?", [$rabItem['id']]);
+        dbExecute("DELETE FROM project_ahsp_details WHERE item_id = ?", [$rabItem['id']]);
+        dbExecute("DELETE FROM project_items WHERE id = ?", [$rabItem['id']]);
+    }
+    
+    dbExecute("DELETE FROM project_items_rap WHERE id = ? AND project_id = ?", [$rapItemId, $projectId]);
+    
+    foreach ($affectedRapAhsp as $row) {
+        recalculateRapAhspPrice($row['ahsp_id']);
+        syncMasterAhspRapToRapTable($row['ahsp_id'], $projectId);
+    }
+    foreach ($affectedRabAhsp as $row) {
+        recalculateAhspPrice($row['ahsp_id']);
+    }
+}
+
+/**
  * Sync AHSP code from RAB to RAP (when adding new AHSP in RAB)
  * @param int $projectId
  * @param string $ahspCode
@@ -807,9 +1025,19 @@ function syncRapItemToAhsp($itemId, $projectId) {
     $item = dbGetRow("SELECT price FROM project_items_rap WHERE id = ?", [$itemId]);
     if (!$item) return;
     
-    $ahspIds = dbGetAll("SELECT DISTINCT ahsp_id FROM project_ahsp_details_rap WHERE item_id = ?", [$itemId]);
+    // Clear any stale override unit_price in details so it dynamically uses new master price
+    dbExecute("UPDATE project_ahsp_details_rap SET unit_price = NULL WHERE item_id = ?", [$itemId]);
+    
+    $ahspIds = dbGetAll("
+        SELECT DISTINCT d.ahsp_id 
+        FROM project_ahsp_details_rap d
+        JOIN project_ahsp_rap pa ON d.ahsp_id = pa.id
+        WHERE d.item_id = ? AND pa.project_id = ?
+    ", [$itemId, $projectId]);
+    
     foreach ($ahspIds as $row) {
         recalculateRapAhspPrice($row['ahsp_id']);
+        syncMasterAhspRapToRapTable($row['ahsp_id'], $projectId);
     }
 }
 
@@ -1026,6 +1254,9 @@ function syncAhspToRab($ahspId) {
  * @param int $projectId
  */
 function syncItemToAhsp($itemId, $projectId) {
+    // Clear any stale override unit_price in details so it dynamically uses new master price
+    dbExecute("UPDATE project_ahsp_details SET unit_price = NULL WHERE item_id = ?", [$itemId]);
+    
     $affectedAhsp = dbGetAll("
         SELECT DISTINCT d.ahsp_id 
         FROM project_ahsp_details d

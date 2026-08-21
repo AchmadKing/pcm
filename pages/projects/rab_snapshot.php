@@ -16,11 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
-    if (!isset($_SESSION['user_id'])) {
-        die(json_encode(['success' => false, 'message' => 'Unauthorized']));
-    }
-    $userPerms = loadUserPermissions($_SESSION['user_role'] ?? '');
-    if (empty($userPerms['rab.edit']) && ($_SESSION['user_role'] ?? '') !== 'super_admin') {
+    if (!hasPermission('rab.edit')) {
         die(json_encode(['success' => false, 'message' => 'Unauthorized']));
     }
     

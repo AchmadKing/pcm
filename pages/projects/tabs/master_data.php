@@ -73,11 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
             $actualPriceRaw = $_POST['item_actual_price'] ?? '';
             $actualPrice = !empty($actualPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', $actualPriceRaw))) : null;
             
-            // Check for duplicate item_code (exclude current item)
+            // Check for duplicate item_code across RAB and RAP
             if (!empty($itemCode)) {
-                $existing = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND item_code = ? AND id != ?", 
-                    [$projectId, $itemCode, $itemId]);
-                if ($existing) {
+                $matchingRap = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND rab_item_id = ?", [$projectId, $itemId]);
+                $matchingRapId = $matchingRap ? $matchingRap['id'] : null;
+                if (isItemCodeDuplicate($projectId, $itemCode, $itemId, $matchingRapId)) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => 'Kode item "' . $itemCode . '" sudah digunakan!']);
                     exit;
@@ -87,6 +87,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
             dbExecute("UPDATE project_items SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ? AND project_id = ?",
                 [$itemCode, $name, $brand ?: null, $category, $unit, $price, $actualPrice, $itemId, $projectId]);
             
+            // Sync item attributes to RAP (price stays separate)
+            syncEditItemRabToRap($itemId, $itemCode, $name, $brand, $category, $unit, $projectId);
+            
             // Sync price changes to all AHSP that use this item
             syncItemToAhsp($itemId, $projectId);
             
@@ -94,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
             header('Content-Type: application/json');
             echo json_encode([
                 'success' => true, 
-                'message' => 'Item berhasil disimpan!',
+                'message' => 'Item berhasil disimpan dan disinkronkan ke RAP!',
                 'item' => [
                     'id' => $itemId,
                     'item_code' => $itemCode,
@@ -903,7 +906,7 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
-                                            <td class="text-end"><?= formatRupiah($detail['item_up_price']) ?></td>
+                                            <td class="text-end"><?= formatRupiah($detail['effective_price']) ?></td>
                                             <td class="text-end"><?= formatRupiah($detail['total_price']) ?></td>
                                             <?php if ($isEditable): ?>
                                             <td class="text-center">
@@ -937,7 +940,7 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
-                                            <td class="text-end"><?= formatRupiah($detail['item_up_price']) ?></td>
+                                            <td class="text-end"><?= formatRupiah($detail['effective_price']) ?></td>
                                             <td class="text-end"><?= formatRupiah($detail['total_price']) ?></td>
                                             <?php if ($isEditable): ?>
                                             <td class="text-center">
@@ -971,7 +974,7 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
-                                            <td class="text-end"><?= formatRupiah($detail['item_up_price']) ?></td>
+                                            <td class="text-end"><?= formatRupiah($detail['effective_price']) ?></td>
                                             <td class="text-end"><?= formatRupiah($detail['total_price']) ?></td>
                                             <?php if ($isEditable): ?>
                                             <td class="text-center">

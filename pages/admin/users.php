@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 );
                 
                 echo json_encode(['success' => true, 'message' => 'User berhasil ditambahkan', 'id' => $userId]);
-                break;
+                break; 
 
             case 'get_user':
                 $id = intval($_POST['id'] ?? 0);

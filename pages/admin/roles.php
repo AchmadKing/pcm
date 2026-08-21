@@ -1046,11 +1046,38 @@ function onPermCheckboxChange(el) {
     const key = $(el).data('key');
     const isChecked = $(el).is(':checked');
     
-    // Sync all duplicate checkboxes with the same data-key
+    // Sync ALL duplicate checkboxes with the same data-key (across sections)
     $(`.perm-checkbox[data-key="${key}"]`).prop('checked', isChecked);
     
     // Update sub-permission dependencies
     updateSubPermissionDependencies();
+}
+
+/**
+ * Sync all duplicate checkboxes so sidebar and project-tab versions stay consistent.
+ * Called after bulk operations like onViewModeChange that bypass onPermCheckboxChange.
+ */
+function syncAllDuplicateKeys() {
+    // Build a map of unique keys to their resolved checked state
+    const keyStates = {};
+    
+    // For each unique key, if ANY enabled checkbox is checked, mark as checked
+    // If ALL checkboxes for that key are unchecked (or disabled+unchecked), mark as unchecked
+    $('.perm-checkbox').each(function() {
+        const key = $(this).data('key');
+        if (keyStates[key] === undefined) {
+            keyStates[key] = false;
+        }
+        // A checked, non-disabled checkbox wins
+        if ($(this).is(':checked') && !$(this).is(':disabled')) {
+            keyStates[key] = true;
+        }
+    });
+    
+    // Apply the resolved state to ALL checkboxes with each key
+    Object.keys(keyStates).forEach(function(key) {
+        $(`.perm-checkbox[data-key="${key}"]`).prop('checked', keyStates[key]);
+    });
 }
 
 function updateSubPermissionDependencies() {
@@ -1068,6 +1095,9 @@ function updateSubPermissionDependencies() {
             if (!parentChecked) {
                 $(this).prop('checked', false).prop('disabled', true);
                 $(this).closest('.perm-box').addClass('opacity-50');
+                // Also sync the duplicate sidebar checkbox for this key
+                const childKey = $(this).data('key');
+                $(`.perm-checkbox[data-key="${childKey}"]`).prop('checked', false);
             } else {
                 $(this).prop('disabled', false);
                 $(this).closest('.perm-box').removeClass('opacity-50');
@@ -1105,6 +1135,10 @@ function onViewModeChange() {
         $('.project-dependent').closest('.perm-box').addClass('opacity-50');
         $('#projectScopeContainer').css('opacity', '0.5').css('pointer-events', 'none');
         $('#projectGlobalOps').css('opacity', '0.5').css('pointer-events', 'none');
+        
+        // CRITICAL: Sync sidebar duplicate checkboxes for project-dependent keys
+        // When project-dependent checkboxes are unchecked, their sidebar counterparts must also be unchecked
+        syncAllDuplicateKeys();
     } else {
         $('#viewModeWarning').addClass('d-none');
         if (mode === 'assigned') {
@@ -1128,13 +1162,17 @@ function savePermissions() {
     const viewMode = $('#projectViewMode').val();
     const permissions = {};
     
-    // Collect all checkbox permissions
+    // Collect unique permission keys from ALL checkboxes
+    // For duplicate keys (same key in project-tab and sidebar sections),
+    // a key is ON if ANY of its checkboxes is checked
+    const seenKeys = {};
     $('.perm-checkbox').each(function() {
         const key = $(this).data('key');
-        if ($(this).is(':checked')) {
-            permissions[key] = 1;
-        } else if (permissions[key] === undefined) {
-            permissions[key] = 0;
+        if (!seenKeys[key]) {
+            seenKeys[key] = true;
+            // Check if ANY checkbox with this key is checked
+            const anyChecked = $(`.perm-checkbox[data-key="${key}"]`).filter(':checked').length > 0;
+            permissions[key] = anyChecked ? 1 : 0;
         }
     });
     

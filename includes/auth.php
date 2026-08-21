@@ -9,7 +9,7 @@
  */
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start(['read_and_close' => true]);
+    session_start();
 }
 
 require_once __DIR__ . '/../config/database.php';
@@ -91,7 +91,6 @@ function login($username, $password) {
         
         // Load permissions dari database ke session
         $_SESSION['permissions'] = loadUserPermissions($user['role']);
-        session_write_close();
         
         return true;
     }
@@ -117,42 +116,24 @@ function logout() {
 /**
  * Load permissions from database for a given role
  * Reads from role_permissions table (real-time)
- * Super admin gets all permissions automatically
  * 
  * @param string $roleName
+ * @param bool $clearCache Optional: force reload from database
  * @return array Associative array of permission_key => bool
  */
-function loadUserPermissions($roleName) {
+function loadUserPermissions($roleName, $clearCache = false) {
     // Static cache to avoid repeated DB queries within same request
     static $cache = [];
-    if (isset($cache[$roleName])) {
+    if ($clearCache) {
+        unset($cache[$roleName]);
+    }
+    if (!$clearCache && isset($cache[$roleName])) {
         return $cache[$roleName];
     }
     
     $permissions = [];
-    
-    // Super admin always has all permissions
-    if ($roleName === 'super_admin') {
-        $defaultKeys = [
-            'projects.view', 'projects.create', 'projects.edit', 'projects.delete',
-            'projects.lock_request',
-            'rab.view', 'rab.edit', 'rap.view', 'rap.edit',
-            'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
-            'reports.view', 'reports.export',
-            'master_data.view', 'master_data.edit',
-            'admin.roles', 'admin.users'
-        ];
-        foreach ($defaultKeys as $key) {
-            $permissions[$key] = true;
-        }
-        // Super admin always has full project access
-        $permissions['_view_mode'] = 'all';
-        $cache[$roleName] = $permissions;
-        return $permissions;
-    }
-    
-    // For other roles, load from role_permissions table
     $hasViewModeCol = true;
+    
     try {
         $rows = dbGetAll("
             SELECT rp.permission_key, rp.is_allowed, rp.view_mode 
@@ -162,7 +143,6 @@ function loadUserPermissions($roleName) {
         ", [$roleName]);
     } catch (Throwable $e) {
         $hasViewModeCol = false;
-        // Fallback query without view_mode column if migration hasn't run yet
         try {
             $rows = dbGetAll("
                 SELECT rp.permission_key, rp.is_allowed 
@@ -175,28 +155,42 @@ function loadUserPermissions($roleName) {
         }
     }
     
-    foreach ($rows as $row) {
-        if (!empty($row['is_allowed'])) {
-            $permissions[$row['permission_key']] = true;
-        }
-        // Store view_mode for projects.view
-        if ($row['permission_key'] === 'projects.view') {
-            if ($hasViewModeCol && isset($row['view_mode']) && $row['view_mode'] !== null) {
-                $permissions['_view_mode'] = !empty($row['is_allowed']) ? $row['view_mode'] : 'none';
-            } else {
-                // Default fallback if view_mode column doesn't exist
-                if (!empty($row['is_allowed'])) {
-                    $permissions['_view_mode'] = in_array($roleName, ['super_admin', 'admin', 'project_manager']) ? 'all' : 'assigned';
+    if (!empty($rows)) {
+        foreach ($rows as $row) {
+            if (!empty($row['is_allowed'])) {
+                $permissions[$row['permission_key']] = true;
+            }
+            // Store view_mode for projects.view
+            if ($row['permission_key'] === 'projects.view') {
+                if ($hasViewModeCol && isset($row['view_mode']) && $row['view_mode'] !== null) {
+                    $permissions['_view_mode'] = !empty($row['is_allowed']) ? $row['view_mode'] : 'none';
                 } else {
-                    $permissions['_view_mode'] = 'none';
+                    $permissions['_view_mode'] = !empty($row['is_allowed']) ? ($roleName === 'field_team' ? 'assigned' : 'all') : 'none';
                 }
             }
+        }
+    } else {
+        // Fallback only if no permissions are configured in the DB yet for super_admin
+        if ($roleName === 'super_admin') {
+            $defaultKeys = [
+                'projects.view', 'projects.create', 'projects.edit', 'projects.delete',
+                'projects.lock_request',
+                'rab.view', 'rab.edit', 'rap.view', 'rap.edit',
+                'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
+                'reports.view', 'reports.export',
+                'master_data.view', 'master_data.edit',
+                'admin.roles', 'admin.users'
+            ];
+            foreach ($defaultKeys as $key) {
+                $permissions[$key] = true;
+            }
+            $permissions['_view_mode'] = 'all';
         }
     }
     
     // If projects.view is not set at all, default to none
     if (!isset($permissions['_view_mode'])) {
-        $permissions['_view_mode'] = 'none';
+        $permissions['_view_mode'] = ($roleName === 'super_admin' && empty($rows)) ? 'all' : 'none';
     }
     
     $cache[$roleName] = $permissions;
@@ -210,10 +204,6 @@ function loadUserPermissions($roleName) {
  * @return string 'all', 'assigned', or 'none'
  */
 function getProjectViewMode() {
-    if (isSuperAdmin()) {
-        return 'all';
-    }
-    
     $role = $_SESSION['user_role'] ?? '';
     if (empty($role)) {
         return 'none';
@@ -298,26 +288,19 @@ function getAssignableUsers() {
 
 /**
  * Check if current user has a specific permission
- * Super admin always returns true
- * Always reads fresh from DB (cached per-request via static variable)
+ * Always reads fresh from DB (cached per-request via static variable in loadUserPermissions)
  * 
  * @param string $permissionKey e.g. 'projects.create', 'requests.approve'
  * @return bool
  */
 function hasPermission($permissionKey) {
-    // Super admin bypass - always has all permissions
-    if (isSuperAdmin()) {
-        return true;
-    }
-    
-    // Always load fresh from DB (static-cached per request in loadUserPermissions)
     $role = $_SESSION['user_role'] ?? '';
     if (empty($role)) {
         return false;
     }
     
     $permissions = loadUserPermissions($role);
-    return isset($permissions[$permissionKey]) && $permissions[$permissionKey];
+    return isset($permissions[$permissionKey]) && !empty($permissions[$permissionKey]);
 }
 
 

@@ -20,9 +20,9 @@ if (!$requestId) {
 // Fetch request details
 $request = dbGetRow("
     SELECT req.*, p.name as project_name, p.id as project_id,
-           u.full_name as created_by_name,
-           ua.full_name as approved_by_name,
-           upm.full_name as pm_approved_by_name
+           u.full_name as created_by_name, u.role as created_by_role,
+           ua.full_name as approved_by_name, ua.role as approved_by_role,
+           upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -37,7 +37,7 @@ if (!$request) {
 
 // Check access - creator or users with requests.view and project access
 $canView = false;
-if (isSuperAdmin() || hasPermission('projects.edit')) {
+if (hasPermission('projects.edit')) {
     $canView = true;
 } elseif ($request['created_by'] == getCurrentUserId()) {
     $canView = true;
@@ -237,6 +237,45 @@ $baseUrl = getBaseUrl();
             font-style: italic;
         }
 
+        .signature-container {
+            margin-top: 35px;
+            page-break-inside: avoid;
+        }
+        .signature-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: none;
+        }
+        .signature-table td {
+            border: none;
+            width: 33.33%;
+            text-align: center;
+            vertical-align: top;
+            padding: 0 10px;
+        }
+        .signature-title {
+            font-size: 10pt;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+        .signature-role {
+            font-size: 9pt;
+            color: #444;
+            margin-bottom: 60px;
+        }
+        .signature-name {
+            font-size: 10pt;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .signature-name u {
+            text-decoration: underline;
+        }
+        .signature-date {
+            font-size: 8.5pt;
+            color: #555;
+        }
+
         @media print {
             body {
                 background: #fff;
@@ -395,6 +434,78 @@ $baseUrl = getBaseUrl();
         <?php endif; ?>
     </div>
     <?php endif; ?>
+
+    <!-- Section Tanda Tangan -->
+    <div class="signature-container">
+        <table class="signature-table">
+            <tr>
+                <!-- 1. Diajukan Oleh (Pengaju) -->
+                <td>
+                    <div class="signature-title">Diajukan Oleh,</div>
+                    <div class="signature-role">Pemohon / Tim Proyek</div>
+                    <div class="signature-name">
+                        <?php if (!empty($request['created_by_name'])): ?>
+                            <u><?= htmlspecialchars($request['created_by_name']) ?></u>
+                        <?php else: ?>
+                            ( ........................................ )
+                        <?php endif; ?>
+                    </div>
+                    <div class="signature-date">
+                        Tgl: <?= !empty($request['created_at']) ? formatDate($request['created_at']) : '........................' ?>
+                    </div>
+                </td>
+
+                <!-- 2. Finance / Keuangan -->
+                <td>
+                    <div class="signature-title">Diperiksa Oleh,</div>
+                    <div class="signature-role">Finance / Keuangan</div>
+                    <div class="signature-name">
+                        ( ........................................ )
+                    </div>
+                    <div class="signature-date">
+                        Tgl: ................................
+                    </div>
+                </td>
+
+                <!-- 3. Disetujui Oleh (Approver) -->
+                <td>
+                    <div class="signature-title">Disetujui Oleh,</div>
+                    <div class="signature-role">
+                        <?php 
+                        if (!empty($request['approved_by_name'])) {
+                            echo !empty($request['approved_by_role']) ? htmlspecialchars(getRoleDisplayName($request['approved_by_role'])) : 'Admin / Manajemen';
+                        } elseif (!empty($request['pm_approved_by_name'])) {
+                            echo 'Project Manager';
+                        } else {
+                            echo 'Project Manager / Admin';
+                        }
+                        ?>
+                    </div>
+                    <div class="signature-name">
+                        <?php if (!empty($request['approved_by_name'])): ?>
+                            <u><?= htmlspecialchars($request['approved_by_name']) ?></u>
+                            <?php if (!empty($request['pm_approved_by_name']) && $request['approved_by_name'] !== $request['pm_approved_by_name']): ?>
+                                <div style="font-size: 8pt; font-weight: normal; color: #555; text-decoration: none; margin-top: 2px;">(Review: <?= htmlspecialchars($request['pm_approved_by_name']) ?>)</div>
+                            <?php endif; ?>
+                        <?php elseif (!empty($request['pm_approved_by_name'])): ?>
+                            <u><?= htmlspecialchars($request['pm_approved_by_name']) ?></u>
+                        <?php else: ?>
+                            ( ........................................ )
+                        <?php endif; ?>
+                    </div>
+                    <div class="signature-date">
+                        <?php if (!empty($request['approved_at'])): ?>
+                            Tgl: <?= formatDate($request['approved_at']) ?>
+                        <?php elseif (!empty($request['pm_approved_at'])): ?>
+                            Tgl: <?= formatDate($request['pm_approved_at']) ?>
+                        <?php else: ?>
+                            Tgl: ................................
+                        <?php endif; ?>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
 
     <?php if ($includeReceipts && (!empty($requestAttachments) || !empty($actualAttachments))): ?>
     <div class="attachments-section no-print-section">

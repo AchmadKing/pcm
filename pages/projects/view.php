@@ -106,12 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
-    if (!isset($_SESSION['user_id'])) {
-        header('Content-Type: application/json');
-        die(json_encode(['success' => false, 'message' => 'Unauthorized']));
-    }
-    $userPerms = loadUserPermissions($_SESSION['user_role'] ?? '');
-    if (empty($userPerms['master_data.edit']) && ($_SESSION['user_role'] ?? '') !== 'super_admin') {
+    if (!isset($_SESSION['user_id']) || !hasPermission('master_data.edit')) {
         header('Content-Type: application/json');
         die(json_encode(['success' => false, 'message' => 'Unauthorized']));
     }
@@ -129,11 +124,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $actualPrice = !empty($actualPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', $actualPriceRaw))) : null;
     
     try {
-        // Check for duplicate item_code (exclude current item)
+        // Check for duplicate item_code across RAB and RAP (excluding current item and its counterpart)
         if (!empty($itemCode)) {
-            $existing = dbGetRow("SELECT id FROM project_items WHERE project_id = ? AND item_code = ? AND id != ?", 
-                [$projectId, $itemCode, $itemId]);
-            if ($existing) {
+            $matchingRap = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND rab_item_id = ?", [$projectId, $itemId]);
+            $matchingRapId = $matchingRap ? $matchingRap['id'] : null;
+            if (isItemCodeDuplicate($projectId, $itemCode, $itemId, $matchingRapId)) {
                 header('Content-Type: application/json');
                 die(json_encode(['success' => false, 'message' => 'Kode item "' . $itemCode . '" sudah digunakan!']));
             }
@@ -142,10 +137,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         dbExecute("UPDATE project_items SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ? AND project_id = ?",
             [$itemCode, $name, $brand ?: null, $category, $unit, $price, $actualPrice, $itemId, $projectId]);
         
-        // Note: AHSP sync happens when page is loaded normally (syncItemToAhsp is in master_data.php)
+        // Sync item attributes (code, name, brand, category, unit) to RAP (price stays separate)
+        syncEditItemRabToRap($itemId, $itemCode, $name, $brand, $category, $unit, $projectId);
+        
+        // Sync item price changes to AHSP and RAB subcategories
+        syncItemToAhsp($itemId, $projectId);
         
         header('Content-Type: application/json');
-        die(json_encode(['success' => true, 'message' => 'Item berhasil disimpan!']));
+        die(json_encode(['success' => true, 'message' => 'Item berhasil disimpan dan disinkronkan ke RAP!']));
     } catch (Exception $e) {
         header('Content-Type: application/json');
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
@@ -162,12 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     
     // Auth Check
     if (session_status() === PHP_SESSION_NONE) { session_start(); }
-    if (!isset($_SESSION['user_id'])) {
-        header('Content-Type: application/json');
-        die(json_encode(['success' => false, 'message' => 'Unauthorized']));
-    }
-    $userPerms = loadUserPermissions($_SESSION['user_role'] ?? '');
-    if (empty($userPerms['rap.edit']) && ($_SESSION['user_role'] ?? '') !== 'super_admin') {
+    if (!isset($_SESSION['user_id']) || !hasPermission('rap.edit')) {
         header('Content-Type: application/json');
         die(json_encode(['success' => false, 'message' => 'Unauthorized']));
     }
@@ -190,6 +184,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
 
     if (!function_exists('syncRapItemToAhsp')) {
         function syncRapItemToAhsp($itemId, $projectId) {
+            // Clear override unit_price in details so it dynamically uses new master price
+            dbExecute("UPDATE project_ahsp_details_rap SET unit_price = NULL WHERE item_id = ?", [$itemId]);
+            
             // Find all affected AHSPs that use this item
             $affectedAhsp = dbGetAll("
                 SELECT DISTINCT d.ahsp_id 
@@ -198,10 +195,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
                 WHERE d.item_id = ? AND pa.project_id = ?
             ", [$itemId, $projectId]);
             
-            // Recalculate each affected AHSP
-            // Note: d.unit_price stays NULL so COALESCE(d.unit_price, i.price) uses current item price
             foreach ($affectedAhsp as $row) {
                 recalculateRapAhspPrice($row['ahsp_id']);
+                if (function_exists('syncMasterAhspRapToRapTable')) {
+                    syncMasterAhspRapToRapTable($row['ahsp_id'], $projectId);
+                }
             }
         }
     }
@@ -219,11 +217,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
             $actualPriceRaw = $_POST['item_actual_price'] ?? '';
             $actualPrice = !empty($actualPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', $actualPriceRaw))) : null;
             
-            // Duplicate Check
+            // Duplicate Check across RAP and RAB
             if (!empty($itemCode)) {
-                $existing = dbGetRow("SELECT id FROM project_items_rap WHERE project_id = ? AND item_code = ? AND id != ?", 
-                    [$projectId, $itemCode, $itemId]);
-                if ($existing) {
+                $rapItem = dbGetRow("SELECT rab_item_id FROM project_items_rap WHERE id = ?", [$itemId]);
+                $matchingRabId = $rapItem ? $rapItem['rab_item_id'] : null;
+                if (isItemCodeDuplicate($projectId, $itemCode, $matchingRabId, $itemId)) {
                     header('Content-Type: application/json');
                     die(json_encode(['success' => false, 'message' => 'Kode item "' . $itemCode . '" sudah digunakan!']));
                 }
@@ -232,10 +230,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
             dbExecute("UPDATE project_items_rap SET item_code = ?, name = ?, brand = ?, category = ?, unit = ?, price = ?, actual_price = ? WHERE id = ? AND project_id = ?",
                 [$itemCode, $name, $brand ?: null, $category, $unit, $price, $actualPrice, $itemId, $projectId]);
             
+            // Sync item attributes (code, name, brand, category, unit) to RAB (price stays separate)
+            syncEditItemRapToRab($itemId, $itemCode, $name, $brand, $category, $unit, $projectId);
+            
             syncRapItemToAhsp($itemId, $projectId);
             
             header('Content-Type: application/json');
-            die(json_encode(['success' => true, 'message' => 'Item RAP berhasil disimpan!']));
+            die(json_encode(['success' => true, 'message' => 'Item RAP berhasil disimpan dan disinkronkan ke RAB!']));
         }
         
         if ($_POST['action'] === 'update_ahsp_detail_rap_ajax') {
@@ -366,11 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
-    if (!isset($_SESSION['user_id'])) {
-        die(json_encode(['success' => false, 'message' => 'Unauthorized']));
-    }
-    $userPerms = loadUserPermissions($_SESSION['user_role'] ?? '');
-    if (empty($userPerms['rab.edit']) && ($_SESSION['user_role'] ?? '') !== 'super_admin') {
+    if (!hasPermission('rab.edit')) {
         die(json_encode(['success' => false, 'message' => 'Unauthorized']));
     }
     
