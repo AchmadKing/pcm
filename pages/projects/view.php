@@ -476,7 +476,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
     
     // Get AHSP details
     $details = dbGetAll("
-        SELECT d.*, i.name as item_name, i.category, i.unit, 
+        SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, 
                i.price as item_up_price, i.actual_price as item_actual_price,
                COALESCE(d.unit_price, i.price) as effective_price,
                (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
@@ -516,7 +516,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
         <table class="table table-sm table-bordered mb-0">
             <thead>
                 <tr class="table-primary">
-                    <th width="40">No</th>
+                    <th width="100">Kode Item</th>
                     <th>Uraian</th>
                     <th width="80">Satuan</th>
                     <th width="100" class="text-end">Koefisien</th>
@@ -538,9 +538,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
                 <?php if (empty($detailsByCategory[$catKey])): ?>
                 <tr><td colspan="6" class="text-center text-muted">Belum ada komponen</td></tr>
                 <?php else: ?>
-                <?php $no = 1; foreach ($detailsByCategory[$catKey] as $detail): ?>
+                <?php foreach ($detailsByCategory[$catKey] as $detail): ?>
                 <tr>
-                    <td class="text-center"><?= $no++ ?></td>
+                    <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                     <td><?= sanitize($detail['item_name']) ?></td>
                     <td><?= sanitize($detail['unit']) ?></td>
                     <td class="text-end"><?= formatNumber($detail['coefficient'], 4) ?></td>
@@ -607,7 +607,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
     
     // Get AHSP details (composition)
     $details = dbGetAll("
-        SELECT d.*, i.name as item_name, i.category, i.unit, i.price as item_price,
+        SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, i.price as item_price,
                COALESCE(d.unit_price, i.price) as effective_price,
                (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
         FROM project_ahsp_details_rap d
@@ -646,7 +646,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
         <table class="table table-sm table-bordered mb-0">
             <thead>
                 <tr class="table-info">
-                    <th width="40">No</th>
+                    <th width="100">Kode Item</th>
                     <th>Uraian</th>
                     <th width="80">Satuan</th>
                     <th width="100" class="text-end">Koefisien</th>
@@ -668,9 +668,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
                 <?php if (empty($detailsByCategory[$catKey])): ?>
                 <tr><td colspan="6" class="text-center text-muted">Belum ada komponen</td></tr>
                 <?php else: ?>
-                <?php $no = 1; foreach ($detailsByCategory[$catKey] as $detail): ?>
+                <?php foreach ($detailsByCategory[$catKey] as $detail): ?>
                 <tr>
-                    <td class="text-center"><?= $no++ ?></td>
+                    <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                     <td><?= sanitize($detail['item_name']) ?></td>
                     <td><?= sanitize($detail['unit']) ?></td>
                     <td class="text-end"><?= formatNumber($detail['coefficient'], 4) ?></td>

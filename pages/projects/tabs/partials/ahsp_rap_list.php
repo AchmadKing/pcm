@@ -15,7 +15,7 @@ foreach ($ahspListRap as $idx => $ahsp):
     }
 
     $details = dbGetAll("
-        SELECT d.*, i.name as item_name, i.category, i.unit, 
+        SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, 
                i.price as item_up_price, i.actual_price as item_actual_price,
                COALESCE(d.unit_price, i.price) as effective_price,
                (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
@@ -91,7 +91,7 @@ foreach ($ahspListRap as $idx => $ahsp):
                 <table class="table table-sm table-bordered mb-0">
                     <thead>
                         <tr class="table-primary">
-                            <th width="40">No</th>
+                            <th width="100">Kode Item</th>
                             <th>Uraian</th>
                             <th width="80">Satuan</th>
                             <th width="100" class="text-end">Koefisien</th>
@@ -108,9 +108,9 @@ foreach ($ahspListRap as $idx => $ahsp):
                         <?php if (empty($detailsByCategory['upah'])): ?>
                         <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen tenaga</td></tr>
                         <?php else: ?>
-                        <?php $no = 1; foreach ($detailsByCategory['upah'] as $detail): ?>
+                        <?php foreach ($detailsByCategory['upah'] as $detail): ?>
                         <tr class="ahsp-detail-row-rap" data-detail-id="<?= $detail['id'] ?>" data-ahsp-id="<?= $ahsp['id'] ?>">
-                            <td class="text-center"><?= $no++ ?></td>
+                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                             <td><?= sanitize($detail['item_name']) ?></td>
                             <td><?= sanitize($detail['unit']) ?></td>
                             <td><input type="text" class="form-control form-control-sm border-0 text-end ahsp-detail-coeff-rap" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
@@ -137,9 +137,9 @@ foreach ($ahspListRap as $idx => $ahsp):
                         <?php if (empty($detailsByCategory['material'])): ?>
                         <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen bahan</td></tr>
                         <?php else: ?>
-                        <?php $no = 1; foreach ($detailsByCategory['material'] as $detail): ?>
+                        <?php foreach ($detailsByCategory['material'] as $detail): ?>
                         <tr class="ahsp-detail-row-rap" data-detail-id="<?= $detail['id'] ?>" data-ahsp-id="<?= $ahsp['id'] ?>">
-                            <td class="text-center"><?= $no++ ?></td>
+                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                             <td><?= sanitize($detail['item_name']) ?></td>
                             <td><?= sanitize($detail['unit']) ?></td>
                             <td><input type="text" class="form-control form-control-sm border-0 text-end ahsp-detail-coeff-rap" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
@@ -166,9 +166,9 @@ foreach ($ahspListRap as $idx => $ahsp):
                         <?php if (empty($detailsByCategory['alat'])): ?>
                         <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen alat</td></tr>
                         <?php else: ?>
-                        <?php $no = 1; foreach ($detailsByCategory['alat'] as $detail): ?>
+                        <?php foreach ($detailsByCategory['alat'] as $detail): ?>
                         <tr class="ahsp-detail-row-rap" data-detail-id="<?= $detail['id'] ?>" data-ahsp-id="<?= $ahsp['id'] ?>">
-                            <td class="text-center"><?= $no++ ?></td>
+                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                             <td><?= sanitize($detail['item_name']) ?></td>
                             <td><?= sanitize($detail['unit']) ?></td>
                             <td><input type="text" class="form-control form-control-sm border-0 text-end ahsp-detail-coeff-rap" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>

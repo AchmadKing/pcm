@@ -414,52 +414,121 @@ foreach ($itemsRap as $item) {
 
 <!-- Add Detail RAP Modal (untuk tambah komponen AHSP) -->
 <div class="modal fade" id="addDetailRapModal" tabindex="-1">
-    <div class="modal-dialog">
-        <form method="POST" class="modal-content">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form method="POST" class="modal-content" id="formAddAhspDetailRap">
             <input type="hidden" name="action" value="add_ahsp_detail_rap">
             <input type="hidden" name="ahsp_id" id="addDetailRapAhspId">
-            <div class="modal-header">
-                <h5 class="modal-title">Tambah Komponen</h5>
+            <div class="modal-header bg-light">
+                <h5 class="modal-title"><i class="mdi mdi-playlist-plus text-primary me-1"></i> Tambah Komponen AHSP RAP</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label required">Pilih Item</label>
-                    <input type="text" class="form-control mb-2" id="searchItemRapInput" placeholder="🔍 Ketik untuk mencari item...">
-                    <select class="form-select" name="detail_item_id" id="detailItemRapSelect" required size="8" style="height: auto;">
-                        <option value="">-- Pilih Item --</option>
-                        <?php if (!empty($itemsRapByCategory['upah'])): ?>
-                        <optgroup label="Upah">
-                            <?php foreach ($itemsRapByCategory['upah'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                        <?php if (!empty($itemsRapByCategory['material'])): ?>
-                        <optgroup label="Material">
-                            <?php foreach ($itemsRapByCategory['material'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                        <?php if (!empty($itemsRapByCategory['alat'])): ?>
-                        <optgroup label="Alat">
-                            <?php foreach ($itemsRapByCategory['alat'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                    </select>
+            <div class="modal-body p-3">
+                <!-- Search & Filters -->
+                <div class="row g-2 mb-3">
+                    <div class="col-md-7">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white"><i class="mdi mdi-magnify"></i></span>
+                            <input type="text" class="form-control" id="searchItemRapInput" placeholder="Cari kode atau nama item..." autocomplete="off">
+                            <button type="button" class="btn btn-outline-secondary" id="clearSearchItemRapBtn" style="display:none;">&times;</button>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="btn-group w-100" role="group" id="filterCategoryItemRap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary active" data-cat="all">Semua</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-cat="upah">Upah</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" data-cat="material">Material</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" data-cat="alat">Alat</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label required">Koefisien</label>
-                    <input type="text" class="form-control text-end" name="coefficient" required placeholder="0,0000">
-                    <small class="text-muted">Gunakan koma untuk desimal. Contoh: 0,0025</small>
+
+                <!-- Global Default Coefficient & Selection bar -->
+                <div class="d-flex justify-content-between align-items-center bg-light p-2 rounded mb-2 border">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="checkAllItemsRap" style="cursor: pointer;">
+                            <label class="form-check-label fw-bold small" for="checkAllItemsRap" style="cursor: pointer;">Pilih Semua</label>
+                        </div>
+                        <span class="badge bg-primary" id="selectedItemsRapCountBadge">0 dipilih</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="small text-muted mb-0 text-nowrap">Koefisien Default:</label>
+                        <input type="text" class="form-control form-control-sm text-end" id="defaultCoeffRapInput" value="1,0000" style="width: 85px;">
+                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" id="applyDefaultCoeffRapBtn" title="Terapkan koefisien ke semua item yang diceklis">
+                            <i class="mdi mdi-check-all"></i> Terapkan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Items Checklist Table Container -->
+                <div class="table-responsive border rounded" style="max-height: 380px; overflow-y: auto;">
+                    <table class="table table-hover table-sm align-middle mb-0" id="tableAddDetailRapItems">
+                        <thead class="table-light sticky-top" style="z-index: 1;">
+                            <tr>
+                                <th width="35" class="text-center">#</th>
+                                <th width="110">Kode Item</th>
+                                <th>Nama Item</th>
+                                <th width="90">Kategori</th>
+                                <th width="70">Satuan</th>
+                                <th width="120" class="text-end">Harga (Rp)</th>
+                                <th width="110" class="text-end">Koefisien</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($itemsRap)): ?>
+                            <tr><td colspan="7" class="text-center text-muted py-3">Belum ada item di Master Data RAP</td></tr>
+                            <?php else: ?>
+                            <?php foreach ($itemsRap as $item): 
+                                $catBadge = match($item['category']) {
+                                    'upah' => 'badge bg-primary',
+                                    'material' => 'badge bg-success',
+                                    'alat' => 'badge bg-warning text-dark',
+                                    default => 'badge bg-secondary'
+                                };
+                            ?>
+                            <tr class="modal-item-rap-row" data-id="<?= $item['id'] ?>" data-code="<?= strtolower(htmlspecialchars($item['item_code'] ?? '')) ?>" data-name="<?= strtolower(htmlspecialchars($item['name'])) ?>" data-category="<?= $item['category'] ?>">
+                                <td class="text-center">
+                                    <input type="checkbox" name="selected_items[]" value="<?= $item['id'] ?>" class="form-check-input item-select-rap-checkbox" id="chk_item_rap_<?= $item['id'] ?>" style="cursor: pointer;">
+                                </td>
+                                <td>
+                                    <label class="form-check-label d-block text-truncate font-monospace small fw-semibold mb-0" for="chk_item_rap_<?= $item['id'] ?>" title="<?= sanitize($item['item_code'] ?? '') ?>" style="cursor: pointer;">
+                                        <?= sanitize($item['item_code'] ?? '-') ?>
+                                    </label>
+                                </td>
+                                <td>
+                                    <label class="form-check-label d-block text-truncate mb-0" for="chk_item_rap_<?= $item['id'] ?>" style="max-width: 240px; cursor: pointer;" title="<?= sanitize($item['name']) ?>">
+                                        <strong><?= sanitize($item['name']) ?></strong>
+                                        <?php if (!empty($item['brand'])): ?>
+                                        <small class="text-muted d-block"><?= sanitize($item['brand']) ?></small>
+                                        <?php endif; ?>
+                                    </label>
+                                </td>
+                                <td><span class="<?= $catBadge ?> small"><?= ucfirst($item['category']) ?></span></td>
+                                <td><span class="text-muted small"><?= sanitize($item['unit']) ?></span></td>
+                                <td class="text-end small"><?= formatNumber($item['price']) ?></td>
+                                <td>
+                                    <input type="text" name="coefficients[<?= $item['id'] ?>]" class="form-control form-control-sm text-end modal-coeff-rap-input" value="1,0000" placeholder="0,0000" disabled>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
+                            <tr id="noMatchingItemsRapRow" style="display: none;">
+                                <td colspan="7" class="text-center text-muted py-3">Tidak ada item yang sesuai dengan pencarian</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                <button type="submit" class="btn btn-primary">Simpan</button>
+            <div class="modal-footer bg-light d-flex justify-content-between">
+                <div>
+                    <span class="text-muted small" id="visibleItemsRapInfo">Total <?= count($itemsRap) ?> item</span>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary" id="btnSubmitAddDetailRap" disabled>
+                        <i class="mdi mdi-plus-box me-1"></i> Tambahkan Komponen (<span class="submit-count">0</span>)
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -504,70 +573,204 @@ document.getElementById('editAhspRapModal')?.addEventListener('show.bs.modal', f
     document.getElementById('editAhspRapUnit').value = button.dataset.unit;
 });
 
-// Add Detail RAP Modal - set AHSP ID
-document.getElementById('addDetailRapModal')?.addEventListener('show.bs.modal', function(event) {
-    var button = event.relatedTarget;
-    document.getElementById('addDetailRapAhspId').value = button.dataset.ahspId;
-});
-
-// Search/Filter for Item Select in RAP Add Komponen modal
+// Search/Filter and Multi-Checklist for Add Komponen RAP Modal
 document.addEventListener('DOMContentLoaded', function() {
-    var searchInput = document.getElementById('searchItemRapInput');
-    var selectEl = document.getElementById('detailItemRapSelect');
+    var modalEl = document.getElementById('addDetailRapModal');
+    if (!modalEl) return;
     
-    if (searchInput && selectEl) {
-        var allOptions = [];
-        var optgroups = selectEl.querySelectorAll('optgroup');
+    var searchInput = document.getElementById('searchItemRapInput');
+    var clearSearchBtn = document.getElementById('clearSearchItemRapBtn');
+    var categoryPills = document.querySelectorAll('#filterCategoryItemRap button');
+    var checkAllCheckbox = document.getElementById('checkAllItemsRap');
+    var defaultCoeffInput = document.getElementById('defaultCoeffRapInput');
+    var applyDefaultCoeffBtn = document.getElementById('applyDefaultCoeffRapBtn');
+    var selectedCountBadge = document.getElementById('selectedItemsRapCountBadge');
+    var submitCountSpan = document.querySelector('#btnSubmitAddDetailRap .submit-count');
+    var submitBtn = document.getElementById('btnSubmitAddDetailRap');
+    var visibleItemsInfo = document.getElementById('visibleItemsRapInfo');
+    var noMatchingRow = document.getElementById('noMatchingItemsRapRow');
+    var itemRows = modalEl.querySelectorAll('.modal-item-rap-row');
+    
+    var activeCategory = 'all';
+    
+    function updateSelectionStats() {
+        var checkedRows = modalEl.querySelectorAll('.modal-item-rap-row .item-select-rap-checkbox:checked');
+        var count = checkedRows.length;
+        if (selectedCountBadge) selectedCountBadge.textContent = count + ' dipilih';
+        if (submitCountSpan) submitCountSpan.textContent = count;
+        if (submitBtn) submitBtn.disabled = (count === 0);
+    }
+    
+    function filterRows() {
+        var query = (searchInput.value || '').toLowerCase().trim();
+        if (clearSearchBtn) clearSearchBtn.style.display = query.length > 0 ? 'block' : 'none';
         
-        optgroups.forEach(function(og) {
-            var groupData = { label: og.label, options: [] };
-            og.querySelectorAll('option').forEach(function(opt) {
-                groupData.options.push({
-                    value: opt.value,
-                    text: opt.textContent,
-                    element: opt.cloneNode(true)
-                });
-            });
-            allOptions.push(groupData);
+        var visibleCount = 0;
+        itemRows.forEach(function(row) {
+            var code = row.dataset.code || '';
+            var name = row.dataset.name || '';
+            var cat = row.dataset.category || '';
+            
+            var matchSearch = !query || code.indexOf(query) > -1 || name.indexOf(query) > -1;
+            var matchCategory = (activeCategory === 'all') || (cat === activeCategory);
+            
+            if (matchSearch && matchCategory) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
         });
         
-        var standaloneOptions = [];
-        selectEl.querySelectorAll(':scope > option').forEach(function(opt) {
-            standaloneOptions.push(opt.cloneNode(true));
-        });
+        if (noMatchingRow) {
+            noMatchingRow.style.display = visibleCount === 0 ? '' : 'none';
+        }
+        if (visibleItemsInfo) {
+            visibleItemsInfo.textContent = 'Menampilkan ' + visibleCount + ' dari ' + itemRows.length + ' item';
+        }
         
-        searchInput.addEventListener('input', function() {
-            var searchText = this.value.toLowerCase().trim();
-            selectEl.innerHTML = '';
-            
-            standaloneOptions.forEach(function(opt) {
-                selectEl.appendChild(opt.cloneNode(true));
+        updateCheckAllState();
+    }
+    
+    function updateCheckAllState() {
+        if (!checkAllCheckbox) return;
+        var visibleCheckboxes = modalEl.querySelectorAll('.modal-item-rap-row:not([style*="display: none"]) .item-select-rap-checkbox');
+        if (visibleCheckboxes.length === 0) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+            return;
+        }
+        var checkedVisible = modalEl.querySelectorAll('.modal-item-rap-row:not([style*="display: none"]) .item-select-rap-checkbox:checked');
+        if (checkedVisible.length === visibleCheckboxes.length) {
+            checkAllCheckbox.checked = true;
+            checkAllCheckbox.indeterminate = false;
+        } else if (checkedVisible.length > 0) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = true;
+        } else {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+        }
+    }
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', filterRows);
+    }
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            filterRows();
+            searchInput.focus();
+        });
+    }
+    
+    categoryPills.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            categoryPills.forEach(function(b) { b.classList.remove('active'); });
+            this.classList.add('active');
+            activeCategory = this.dataset.cat || 'all';
+            filterRows();
+        });
+    });
+    
+    itemRows.forEach(function(row) {
+        var chk = row.querySelector('.item-select-rap-checkbox');
+        var coeffInput = row.querySelector('.modal-coeff-rap-input');
+        
+        if (chk && coeffInput) {
+            chk.addEventListener('change', function() {
+                if (this.checked) {
+                    row.classList.add('table-active');
+                    coeffInput.disabled = false;
+                    if (!coeffInput.value || parseFloat(coeffInput.value.replace(',', '.')) <= 0) {
+                        coeffInput.value = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
+                    }
+                } else {
+                    row.classList.remove('table-active');
+                    coeffInput.disabled = true;
+                }
+                updateSelectionStats();
+                updateCheckAllState();
             });
+        }
+    });
+    
+    if (checkAllCheckbox) {
+        checkAllCheckbox.addEventListener('change', function() {
+            var isChecked = this.checked;
+            var defaultCoeff = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
             
-            allOptions.forEach(function(group) {
-                var matchingOptions = group.options.filter(function(opt) {
-                    return opt.text.toLowerCase().indexOf(searchText) > -1;
-                });
-                if (matchingOptions.length > 0) {
-                    var og = document.createElement('optgroup');
-                    og.label = group.label;
-                    matchingOptions.forEach(function(opt) {
-                        og.appendChild(opt.element.cloneNode(true));
-                    });
-                    selectEl.appendChild(og);
+            var visibleRows = modalEl.querySelectorAll('.modal-item-rap-row:not([style*="display: none"])');
+            visibleRows.forEach(function(row) {
+                var chk = row.querySelector('.item-select-rap-checkbox');
+                var coeffInput = row.querySelector('.modal-coeff-rap-input');
+                if (chk && coeffInput) {
+                    chk.checked = isChecked;
+                    if (isChecked) {
+                        row.classList.add('table-active');
+                        coeffInput.disabled = false;
+                        if (!coeffInput.value || parseFloat(coeffInput.value.replace(',', '.')) <= 0) {
+                            coeffInput.value = defaultCoeff;
+                        }
+                    } else {
+                        row.classList.remove('table-active');
+                        coeffInput.disabled = true;
+                    }
+                }
+            });
+            updateSelectionStats();
+        });
+    }
+    
+    if (applyDefaultCoeffBtn && defaultCoeffInput) {
+        applyDefaultCoeffBtn.addEventListener('click', function() {
+            var val = defaultCoeffInput.value.trim() || '1,0000';
+            modalEl.querySelectorAll('.modal-item-rap-row .item-select-rap-checkbox:checked').forEach(function(chk) {
+                var row = chk.closest('.modal-item-rap-row');
+                var coeffInput = row ? row.querySelector('.modal-coeff-rap-input') : null;
+                if (coeffInput) {
+                    coeffInput.value = val;
                 }
             });
         });
-        
-        var modal = document.getElementById('addDetailRapModal');
-        if (modal) {
-            modal.addEventListener('shown.bs.modal', function() {
-                searchInput.value = '';
-                searchInput.dispatchEvent(new Event('input'));
-                searchInput.focus();
-            });
-        }
     }
+    
+    modalEl.addEventListener('show.bs.modal', function(event) {
+        var button = event.relatedTarget;
+        if (button && button.dataset.ahspId) {
+            document.getElementById('addDetailRapAhspId').value = button.dataset.ahspId;
+        }
+        
+        if (searchInput) searchInput.value = '';
+        activeCategory = 'all';
+        categoryPills.forEach(function(b) {
+            if (b.dataset.cat === 'all') b.classList.add('active');
+            else b.classList.remove('active');
+        });
+        
+        itemRows.forEach(function(row) {
+            var chk = row.querySelector('.item-select-rap-checkbox');
+            var coeffInput = row.querySelector('.modal-coeff-rap-input');
+            if (chk) chk.checked = false;
+            if (coeffInput) {
+                coeffInput.disabled = true;
+                coeffInput.value = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
+            }
+            row.classList.remove('table-active');
+            row.style.display = '';
+        });
+        
+        if (checkAllCheckbox) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+        }
+        updateSelectionStats();
+        filterRows();
+    });
+    
+    modalEl.addEventListener('shown.bs.modal', function() {
+        if (searchInput) searchInput.focus();
+    });
 });
 
 // Category Filter for RAP Items

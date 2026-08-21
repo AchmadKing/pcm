@@ -172,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get RAP AHSP details - use project_items_rap for RAP prices
 $rapDetails = dbGetAll("
-    SELECT rad.*, pi.name as item_name, pi.unit,
+    SELECT rad.*, pi.item_code, pi.name as item_name, pi.unit,
            pir.price as item_up_price, pir.actual_price as item_actual_price
     FROM rap_ahsp_details rad
     JOIN project_items pi ON rad.item_id = pi.id
@@ -197,7 +197,7 @@ if (empty($rapDetails) && $rapItem['ahsp_id']) {
     
     // Reload - use project_items_rap for RAP prices
     $rapDetails = dbGetAll("
-        SELECT rad.*, pi.name as item_name, pi.unit,
+        SELECT rad.*, pi.item_code, pi.name as item_name, pi.unit,
                pir.price as item_up_price, pir.actual_price as item_actual_price
         FROM rap_ahsp_details rad
         JOIN project_items pi ON rad.item_id = pi.id
@@ -292,7 +292,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <table class="table table-bordered mb-0">
                 <thead>
                     <tr class="table-primary">
-                        <th width="40">No</th>
+                        <th width="100">Kode Item</th>
                         <th>Uraian</th>
                         <th width="70">Satuan</th>
                         <th width="90" class="text-end">Koefisien</th>
@@ -309,13 +309,13 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['upah'])): ?>
                     <tr><td colspan="7" class="text-center text-muted">Belum ada komponen tenaga</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['upah'] as $detail): 
+                    <?php foreach ($detailsByCategory['upah'] as $detail): 
                         $selisihClass = $detail['selisih'] > 0 ? 'text-success' : ($detail['selisih'] < 0 ? 'text-danger' : 'text-warning');
                         $rabTotal = $detail['rab_total_price'] ?? 0;
                         $selisihPct = $rabTotal > 0 ? ($detail['selisih'] / $rabTotal) * 100 : 0;
                     ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>
@@ -389,13 +389,13 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['material'])): ?>
                     <tr><td colspan="7" class="text-center text-muted">Belum ada komponen bahan</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['material'] as $detail): 
+                    <?php foreach ($detailsByCategory['material'] as $detail): 
                         $selisihClass = $detail['selisih'] > 0 ? 'text-success' : ($detail['selisih'] < 0 ? 'text-danger' : 'text-warning');
                         $rabTotal = $detail['rab_total_price'] ?? 0;
                         $selisihPct = $rabTotal > 0 ? ($detail['selisih'] / $rabTotal) * 100 : 0;
                     ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>
@@ -469,13 +469,13 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['alat'])): ?>
                     <tr><td colspan="7" class="text-center text-muted">Belum ada komponen alat</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['alat'] as $detail): 
+                    <?php foreach ($detailsByCategory['alat'] as $detail): 
                         $selisihClass = $detail['selisih'] > 0 ? 'text-success' : ($detail['selisih'] < 0 ? 'text-danger' : 'text-warning');
                         $rabTotal = $detail['rab_total_price'] ?? 0;
                         $selisihPct = $rabTotal > 0 ? ($detail['selisih'] / $rabTotal) * 100 : 0;
                     ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>

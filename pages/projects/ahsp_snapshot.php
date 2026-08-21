@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get AHSP details from snapshot table
 $details = dbGetAll("
-    SELECT d.*, i.name as item_name, i.category, i.unit, 
+    SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, 
            i.price as item_up_price, i.actual_price as item_actual_price,
            (d.coefficient * d.unit_price) as total_price
     FROM rab_snapshot_ahsp_details d
@@ -169,7 +169,7 @@ if (empty($details) && $subcategory['ahsp_id']) {
     
     // Re-fetch the details
     $details = dbGetAll("
-        SELECT d.*, i.name as item_name, i.category, i.unit, 
+        SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, 
                i.price as item_up_price, i.actual_price as item_actual_price,
                (d.coefficient * d.unit_price) as total_price
         FROM rab_snapshot_ahsp_details d
@@ -250,7 +250,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <table class="table table-bordered mb-0">
                 <thead>
                     <tr class="table-primary">
-                        <th width="50">No</th>
+                        <th width="100">Kode Item</th>
                         <th>Uraian</th>
                         <th width="80">Satuan</th>
                         <th width="100" class="text-end">Koefisien</th>
@@ -266,9 +266,9 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['upah'])): ?>
                     <tr><td colspan="6" class="text-center text-muted">Belum ada komponen tenaga</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['upah'] as $detail): ?>
+                    <?php foreach ($detailsByCategory['upah'] as $detail): ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>
@@ -321,9 +321,9 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['material'])): ?>
                     <tr><td colspan="6" class="text-center text-muted">Belum ada komponen bahan</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['material'] as $detail): ?>
+                    <?php foreach ($detailsByCategory['material'] as $detail): ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>
@@ -376,9 +376,9 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php if (empty($detailsByCategory['alat'])): ?>
                     <tr><td colspan="6" class="text-center text-muted">Belum ada komponen peralatan</td></tr>
                     <?php else: ?>
-                    <?php $no = 1; foreach ($detailsByCategory['alat'] as $detail): ?>
+                    <?php foreach ($detailsByCategory['alat'] as $detail): ?>
                     <tr>
-                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                         <td><?= sanitize($detail['item_name']) ?></td>
                         <td><?= sanitize($detail['unit']) ?></td>
                         <td>

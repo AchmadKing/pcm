@@ -427,17 +427,40 @@ try {
         // AHSP DETAILS (RAB & RAP)
         // ============================================================
         case 'add_ahsp_detail':
-            $ahspId = $_POST['ahsp_id'];
-            $itemId = $_POST['detail_item_id'];
-            $coeffRaw = $_POST['coefficient'] ?? '0';
-            $coefficient = floatval(str_replace(',', '.', str_replace('.', '', $coeffRaw)));
+            $ahspId = intval($_POST['ahsp_id'] ?? 0);
+            $selectedItems = $_POST['selected_items'] ?? [];
+            if (!is_array($selectedItems) && !empty($_POST['detail_item_id'])) {
+                $selectedItems = [$_POST['detail_item_id']];
+            }
             
-            if (!empty($itemId) && $coefficient > 0) {
-                dbInsert("INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient) VALUES (?, ?, ?)",
-                    [$ahspId, $itemId, $coefficient]);
+            $globalCoeffRaw = $_POST['coefficient'] ?? '1';
+            $globalCoeff = floatval(str_replace(',', '.', str_replace('.', '', $globalCoeffRaw)));
+            if ($globalCoeff <= 0) $globalCoeff = 1.0;
+            
+            $coefficients = $_POST['coefficients'] ?? [];
+            $addedCount = 0;
+            
+            if ($ahspId > 0 && !empty($selectedItems)) {
+                foreach ($selectedItems as $itemId) {
+                    $itemId = intval($itemId);
+                    if ($itemId <= 0) continue;
+                    
+                    $coeffRaw = $coefficients[$itemId] ?? $globalCoeffRaw;
+                    $coefficient = floatval(str_replace(',', '.', str_replace('.', '', (string)$coeffRaw)));
+                    if ($coefficient <= 0) $coefficient = $globalCoeff;
+                    
+                    dbInsert("INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient) VALUES (?, ?, ?)",
+                        [$ahspId, $itemId, $coefficient]);
+                    syncAddComponentRabToRap($ahspId, $itemId, $coefficient, $projectId);
+                    $addedCount++;
+                }
+            }
+            
+            if ($addedCount > 0) {
                 recalculateAhspPrice($ahspId);
-                syncAddComponentRabToRap($ahspId, $itemId, $coefficient, $projectId);
-                setFlash('success', 'Komponen berhasil ditambahkan dan disinkronkan ke RAP!');
+                setFlash('success', "$addedCount komponen berhasil ditambahkan dan disinkronkan ke RAP!");
+            } else {
+                setFlash('error', 'Pilih minimal satu komponen dengan koefisien yang valid!');
             }
             break;
             
@@ -485,17 +508,44 @@ try {
             break;
             
         case 'add_ahsp_detail_rap':
-            $ahspId = $_POST['ahsp_id'];
-            $itemId = $_POST['detail_item_id'];
-            $coeffRaw = $_POST['coefficient'] ?? '0';
-            $coefficient = floatval(str_replace(',', '.', str_replace('.', '', $coeffRaw)));
+            $ahspId = intval($_POST['ahsp_id'] ?? 0);
+            $selectedItems = $_POST['selected_items'] ?? [];
+            if (!is_array($selectedItems) && !empty($_POST['detail_item_id'])) {
+                $selectedItems = [$_POST['detail_item_id']];
+            }
             
-            if (!empty($itemId) && $coefficient > 0) {
-                dbInsert("INSERT INTO project_ahsp_details_rap (ahsp_id, item_id, coefficient) VALUES (?, ?, ?)",
-                    [$ahspId, $itemId, $coefficient]);
+            $globalCoeffRaw = $_POST['coefficient'] ?? '1';
+            $globalCoeff = floatval(str_replace(',', '.', str_replace('.', '', $globalCoeffRaw)));
+            if ($globalCoeff <= 0) $globalCoeff = 1.0;
+            
+            $coefficients = $_POST['coefficients'] ?? [];
+            $unitPrices = $_POST['unit_prices'] ?? [];
+            $addedCount = 0;
+            
+            if ($ahspId > 0 && !empty($selectedItems)) {
+                foreach ($selectedItems as $itemId) {
+                    $itemId = intval($itemId);
+                    if ($itemId <= 0) continue;
+                    
+                    $coeffRaw = $coefficients[$itemId] ?? $globalCoeffRaw;
+                    $coefficient = floatval(str_replace(',', '.', str_replace('.', '', (string)$coeffRaw)));
+                    if ($coefficient <= 0) $coefficient = $globalCoeff;
+                    
+                    $unitPriceRaw = $unitPrices[$itemId] ?? ($_POST['detail_unit_price'] ?? '');
+                    $unitPrice = !empty($unitPriceRaw) ? floatval(str_replace(',', '.', str_replace('.', '', (string)$unitPriceRaw))) : null;
+                    
+                    dbInsert("INSERT INTO project_ahsp_details_rap (ahsp_id, item_id, coefficient, unit_price) VALUES (?, ?, ?, ?)",
+                        [$ahspId, $itemId, $coefficient, $unitPrice]);
+                    syncAddComponentRapToRab($ahspId, $itemId, $coefficient, $projectId);
+                    $addedCount++;
+                }
+            }
+            
+            if ($addedCount > 0) {
                 recalculateRapAhspPrice($ahspId);
-                syncAddComponentRapToRab($ahspId, $itemId, $coefficient, $projectId);
-                setFlash('success', 'Komponen berhasil ditambahkan dan disinkronkan ke RAB!');
+                setFlash('success', "$addedCount komponen berhasil ditambahkan dan disinkronkan ke RAB!");
+            } else {
+                setFlash('error', 'Pilih minimal satu komponen dengan koefisien yang valid!');
             }
             break;
             

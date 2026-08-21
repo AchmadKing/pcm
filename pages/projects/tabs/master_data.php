@@ -289,28 +289,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
         
         // ========== AHSP DETAILS ==========
         if ($action === 'add_ahsp_detail') {
-            $ahspId = $_POST['ahsp_id'];
-            $itemId = $_POST['detail_item_id'];
-            $coeffRaw = $_POST['coefficient'];
-            $coefficient = floatval(str_replace(',', '.', str_replace('.', '', $coeffRaw)));
-            
-            // Debug: Check if AHSP exists
-            $ahspExists = dbGetRow("SELECT id FROM project_ahsp WHERE id = ?", [$ahspId]);
-            if (!$ahspExists) {
-                throw new Exception("AHSP ID $ahspId tidak ditemukan di database!");
+            $ahspId = intval($_POST['ahsp_id'] ?? 0);
+            $selectedItems = $_POST['selected_items'] ?? [];
+            if (!is_array($selectedItems) && !empty($_POST['detail_item_id'])) {
+                $selectedItems = [$_POST['detail_item_id']];
             }
             
-            if (!empty($itemId) && $coefficient > 0) {
-                dbInsert("INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient) VALUES (?, ?, ?)",
-                    [$ahspId, $itemId, $coefficient]);
+            $globalCoeffRaw = $_POST['coefficient'] ?? '1';
+            $globalCoeff = floatval(str_replace(',', '.', str_replace('.', '', $globalCoeffRaw)));
+            if ($globalCoeff <= 0) $globalCoeff = 1.0;
+            
+            $coefficients = $_POST['coefficients'] ?? [];
+            $addedCount = 0;
+            
+            if ($ahspId > 0 && !empty($selectedItems)) {
+                foreach ($selectedItems as $itemId) {
+                    $itemId = intval($itemId);
+                    if ($itemId <= 0) continue;
                     
-                // Recalculate AHSP unit_price
+                    $coeffRaw = $coefficients[$itemId] ?? $globalCoeffRaw;
+                    $coefficient = floatval(str_replace(',', '.', str_replace('.', '', (string)$coeffRaw)));
+                    if ($coefficient <= 0) $coefficient = $globalCoeff;
+                    
+                    dbInsert("INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient) VALUES (?, ?, ?)",
+                        [$ahspId, $itemId, $coefficient]);
+                    syncAddComponentRabToRap($ahspId, $itemId, $coefficient, $projectId);
+                    $addedCount++;
+                }
+            }
+            
+            if ($addedCount > 0) {
                 recalculateAhspPrice($ahspId);
-                
-                // Sync: mirror component to RAP AHSP
-                syncAddComponentRabToRap($ahspId, $itemId, $coefficient, $projectId);
-                
-                setFlash('success', 'Komponen berhasil ditambahkan dan disinkronkan ke RAP!');
+                setFlash('success', "$addedCount komponen berhasil ditambahkan dan disinkronkan ke RAP!");
+            } else {
+                setFlash('error', 'Pilih minimal satu komponen dengan koefisien yang valid!');
             }
         }
         
@@ -814,7 +826,7 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
             <?php foreach ($ahspList as $idx => $ahsp): 
                 // Get details for this AHSP
                 $details = dbGetAll("
-                    SELECT d.*, i.name as item_name, i.category, i.unit, 
+                    SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, 
                            i.price as item_up_price, i.actual_price as item_actual_price,
                            COALESCE(d.unit_price, i.price) as effective_price,
                            (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
@@ -879,7 +891,7 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                             <table class="table table-sm table-bordered mb-0">
                                 <thead>
                                     <tr class="table-primary">
-                                        <th width="40">No</th>
+                                        <th width="100">Kode Item</th>
                                         <th>Uraian</th>
                                         <th width="80">Satuan</th>
                                         <th width="100" class="text-end">Koefisien</th>
@@ -896,20 +908,20 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                     <?php if (empty($detailsByCategory['upah'])): ?>
                                     <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen tenaga</td></tr>
                                     <?php else: ?>
-                                    <?php $no = 1; foreach ($detailsByCategory['upah'] as $detail): ?>
+                                    <?php foreach ($detailsByCategory['upah'] as $detail): ?>
                                     <form method="POST" class="inline-edit-form">
                                         <input type="hidden" name="action" value="update_ahsp_detail">
                                         <input type="hidden" name="detail_id" value="<?= $detail['id'] ?>">
                                         <input type="hidden" name="ahsp_id" value="<?= $ahsp['id'] ?>">
                                         <tr>
-                                            <td class="text-center"><?= $no++ ?></td>
+                                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
                                             <td class="text-end"><?= formatRupiah($detail['effective_price']) ?></td>
                                             <td class="text-end"><?= formatRupiah($detail['total_price']) ?></td>
                                             <?php if ($isEditable): ?>
-                                            <td class="text-center">
+                                             <td class="text-center">
                                                 <button type="button" class="btn btn-sm btn-danger detail-delete-btn edit-mode-only d-none" onclick="deleteAhspDetail(<?= $detail['id'] ?>, <?= $ahsp['id'] ?>)"><i class="mdi mdi-delete"></i></button>
                                             </td>
                                             <?php endif; ?>
@@ -930,13 +942,13 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                     <?php if (empty($detailsByCategory['material'])): ?>
                                     <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen bahan</td></tr>
                                     <?php else: ?>
-                                    <?php $no = 1; foreach ($detailsByCategory['material'] as $detail): ?>
+                                    <?php foreach ($detailsByCategory['material'] as $detail): ?>
                                     <form method="POST" class="inline-edit-form">
                                         <input type="hidden" name="action" value="update_ahsp_detail">
                                         <input type="hidden" name="detail_id" value="<?= $detail['id'] ?>">
                                         <input type="hidden" name="ahsp_id" value="<?= $ahsp['id'] ?>">
                                         <tr>
-                                            <td class="text-center"><?= $no++ ?></td>
+                                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
@@ -964,13 +976,13 @@ $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORD
                                     <?php if (empty($detailsByCategory['alat'])): ?>
                                     <tr><td colspan="<?= $isEditable ? 7 : 6 ?>" class="text-center text-muted">Belum ada komponen alat</td></tr>
                                     <?php else: ?>
-                                    <?php $no = 1; foreach ($detailsByCategory['alat'] as $detail): ?>
+                                    <?php foreach ($detailsByCategory['alat'] as $detail): ?>
                                     <form method="POST" class="inline-edit-form">
                                         <input type="hidden" name="action" value="update_ahsp_detail">
                                         <input type="hidden" name="detail_id" value="<?= $detail['id'] ?>">
                                         <input type="hidden" name="ahsp_id" value="<?= $ahsp['id'] ?>">
                                         <tr>
-                                            <td class="text-center"><?= $no++ ?></td>
+                                            <td class="text-center font-monospace small"><?= sanitize($detail['item_code'] ?? '-') ?></td>
                                             <td><?= sanitize($detail['item_name']) ?></td>
                                             <td><?= sanitize($detail['unit']) ?></td>
                                             <td><input type="text" class="form-control form-control-sm border-0 text-end" name="coefficient" value="<?= formatNumber($detail['coefficient'], 4) ?>" style="width:80px;" <?= !$isEditable ? 'disabled' : '' ?>></td>
@@ -1212,52 +1224,121 @@ include 'master_data_rap_ui.php';
 
 <!-- Add AHSP Detail Modal -->
 <div class="modal fade" id="addDetailModal" tabindex="-1">
-    <div class="modal-dialog">
-        <form method="POST" class="modal-content">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form method="POST" class="modal-content" id="formAddAhspDetail">
             <input type="hidden" name="action" value="add_ahsp_detail">
             <input type="hidden" name="ahsp_id" id="add_detail_ahsp_id">
-            <div class="modal-header">
-                <h5 class="modal-title">Tambah Komponen</h5>
+            <div class="modal-header bg-light">
+                <h5 class="modal-title"><i class="mdi mdi-playlist-plus text-primary me-1"></i> Tambah Komponen AHSP</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label required">Pilih Item</label>
-                    <input type="text" class="form-control mb-2" id="searchItemInput" placeholder="🔍 Ketik untuk mencari item...">
-                    <select class="form-select" name="detail_item_id" id="detailItemSelect" required size="8" style="height: auto;">
-                        <option value="">-- Pilih Item --</option>
-                        <?php if (!empty($itemsByCategory['upah'])): ?>
-                        <optgroup label="Upah">
-                            <?php foreach ($itemsByCategory['upah'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                        <?php if (!empty($itemsByCategory['material'])): ?>
-                        <optgroup label="Material">
-                            <?php foreach ($itemsByCategory['material'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                        <?php if (!empty($itemsByCategory['alat'])): ?>
-                        <optgroup label="Alat">
-                            <?php foreach ($itemsByCategory['alat'] as $item): ?>
-                            <option value="<?= $item['id'] ?>"><?= sanitize($item['name']) ?> (<?= formatRupiah($item['price']) ?>)</option>
-                            <?php endforeach; ?>
-                        </optgroup>
-                        <?php endif; ?>
-                    </select>
+            <div class="modal-body p-3">
+                <!-- Search & Filters -->
+                <div class="row g-2 mb-3">
+                    <div class="col-md-7">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white"><i class="mdi mdi-magnify"></i></span>
+                            <input type="text" class="form-control" id="searchItemInput" placeholder="Cari kode atau nama item..." autocomplete="off">
+                            <button type="button" class="btn btn-outline-secondary" id="clearSearchItemBtn" style="display:none;">&times;</button>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="btn-group w-100" role="group" id="filterCategoryItem">
+                            <button type="button" class="btn btn-sm btn-outline-secondary active" data-cat="all">Semua</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-cat="upah">Upah</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" data-cat="material">Material</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" data-cat="alat">Alat</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label required">Koefisien</label>
-                    <input type="text" class="form-control text-end" name="coefficient" required placeholder="0,0000">
-                    <small class="text-muted">Gunakan koma untuk desimal. Contoh: 0,0025</small>
+
+                <!-- Global Default Coefficient & Selection bar -->
+                <div class="d-flex justify-content-between align-items-center bg-light p-2 rounded mb-2 border">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="checkAllItems" style="cursor: pointer;">
+                            <label class="form-check-label fw-bold small" for="checkAllItems" style="cursor: pointer;">Pilih Semua</label>
+                        </div>
+                        <span class="badge bg-primary" id="selectedItemsCountBadge">0 dipilih</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="small text-muted mb-0 text-nowrap">Koefisien Default:</label>
+                        <input type="text" class="form-control form-control-sm text-end" id="defaultCoeffInput" value="1,0000" style="width: 85px;">
+                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" id="applyDefaultCoeffBtn" title="Terapkan koefisien ke semua item yang diceklis">
+                            <i class="mdi mdi-check-all"></i> Terapkan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Items Checklist Table Container -->
+                <div class="table-responsive border rounded" style="max-height: 380px; overflow-y: auto;">
+                    <table class="table table-hover table-sm align-middle mb-0" id="tableAddDetailItems">
+                        <thead class="table-light sticky-top" style="z-index: 1;">
+                            <tr>
+                                <th width="35" class="text-center">#</th>
+                                <th width="110">Kode Item</th>
+                                <th>Nama Item</th>
+                                <th width="90">Kategori</th>
+                                <th width="70">Satuan</th>
+                                <th width="120" class="text-end">Harga (Rp)</th>
+                                <th width="110" class="text-end">Koefisien</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($items)): ?>
+                            <tr><td colspan="7" class="text-center text-muted py-3">Belum ada item di Master Data</td></tr>
+                            <?php else: ?>
+                            <?php foreach ($items as $item): 
+                                $catBadge = match($item['category']) {
+                                    'upah' => 'badge bg-primary',
+                                    'material' => 'badge bg-success',
+                                    'alat' => 'badge bg-warning text-dark',
+                                    default => 'badge bg-secondary'
+                                };
+                            ?>
+                            <tr class="modal-item-row" data-id="<?= $item['id'] ?>" data-code="<?= strtolower(htmlspecialchars($item['item_code'] ?? '')) ?>" data-name="<?= strtolower(htmlspecialchars($item['name'])) ?>" data-category="<?= $item['category'] ?>">
+                                <td class="text-center">
+                                    <input type="checkbox" name="selected_items[]" value="<?= $item['id'] ?>" class="form-check-input item-select-checkbox" id="chk_item_<?= $item['id'] ?>" style="cursor: pointer;">
+                                </td>
+                                <td>
+                                    <label class="form-check-label d-block text-truncate font-monospace small fw-semibold mb-0" for="chk_item_<?= $item['id'] ?>" title="<?= sanitize($item['item_code'] ?? '') ?>" style="cursor: pointer;">
+                                        <?= sanitize($item['item_code'] ?? '-') ?>
+                                    </label>
+                                </td>
+                                <td>
+                                    <label class="form-check-label d-block text-truncate mb-0" for="chk_item_<?= $item['id'] ?>" style="max-width: 240px; cursor: pointer;" title="<?= sanitize($item['name']) ?>">
+                                        <strong><?= sanitize($item['name']) ?></strong>
+                                        <?php if (!empty($item['brand'])): ?>
+                                        <small class="text-muted d-block"><?= sanitize($item['brand']) ?></small>
+                                        <?php endif; ?>
+                                    </label>
+                                </td>
+                                <td><span class="<?= $catBadge ?> small"><?= ucfirst($item['category']) ?></span></td>
+                                <td><span class="text-muted small"><?= sanitize($item['unit']) ?></span></td>
+                                <td class="text-end small"><?= formatNumber($item['price']) ?></td>
+                                <td>
+                                    <input type="text" name="coefficients[<?= $item['id'] ?>]" class="form-control form-control-sm text-end modal-coeff-input" value="1,0000" placeholder="0,0000" disabled>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
+                            <tr id="noMatchingItemsRow" style="display: none;">
+                                <td colspan="7" class="text-center text-muted py-3">Tidak ada item yang sesuai dengan pencarian</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                <button type="submit" class="btn btn-primary">Simpan</button>
+            <div class="modal-footer bg-light d-flex justify-content-between">
+                <div>
+                    <span class="text-muted small" id="visibleItemsInfo">Total <?= count($items) ?> item</span>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary" id="btnSubmitAddDetail" disabled>
+                        <i class="mdi mdi-plus-box me-1"></i> Tambahkan Komponen (<span class="submit-count">0</span>)
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -1717,75 +1798,199 @@ function confirmClearAhsp() {
     });
 }
 
-// Search/Filter for Item Select in Add Komponen modal
+// Search/Filter and Multi-Checklist for Add Komponen Modal (RAB)
 document.addEventListener('DOMContentLoaded', function() {
-    var searchInput = document.getElementById('searchItemInput');
-    var selectEl = document.getElementById('detailItemSelect');
+    var modalEl = document.getElementById('addDetailModal');
+    if (!modalEl) return;
     
-    if (searchInput && selectEl) {
-        // Store original options on load
-        var allOptions = [];
-        var optgroups = selectEl.querySelectorAll('optgroup');
+    var searchInput = document.getElementById('searchItemInput');
+    var clearSearchBtn = document.getElementById('clearSearchItemBtn');
+    var categoryPills = document.querySelectorAll('#filterCategoryItem button');
+    var checkAllCheckbox = document.getElementById('checkAllItems');
+    var defaultCoeffInput = document.getElementById('defaultCoeffInput');
+    var applyDefaultCoeffBtn = document.getElementById('applyDefaultCoeffBtn');
+    var selectedCountBadge = document.getElementById('selectedItemsCountBadge');
+    var submitCountSpan = document.querySelector('#btnSubmitAddDetail .submit-count');
+    var submitBtn = document.getElementById('btnSubmitAddDetail');
+    var visibleItemsInfo = document.getElementById('visibleItemsInfo');
+    var noMatchingRow = document.getElementById('noMatchingItemsRow');
+    var itemRows = modalEl.querySelectorAll('.modal-item-row');
+    
+    var activeCategory = 'all';
+    
+    function updateSelectionStats() {
+        var checkedRows = modalEl.querySelectorAll('.modal-item-row .item-select-checkbox:checked');
+        var count = checkedRows.length;
+        if (selectedCountBadge) selectedCountBadge.textContent = count + ' dipilih';
+        if (submitCountSpan) submitCountSpan.textContent = count;
+        if (submitBtn) submitBtn.disabled = (count === 0);
+    }
+    
+    function filterRows() {
+        var query = (searchInput.value || '').toLowerCase().trim();
+        if (clearSearchBtn) clearSearchBtn.style.display = query.length > 0 ? 'block' : 'none';
         
-        optgroups.forEach(function(og) {
-            var groupData = {
-                label: og.label,
-                options: []
-            };
-            og.querySelectorAll('option').forEach(function(opt) {
-                groupData.options.push({
-                    value: opt.value,
-                    text: opt.textContent,
-                    element: opt.cloneNode(true)
-                });
-            });
-            allOptions.push(groupData);
+        var visibleCount = 0;
+        itemRows.forEach(function(row) {
+            var code = row.dataset.code || '';
+            var name = row.dataset.name || '';
+            var cat = row.dataset.category || '';
+            
+            var matchSearch = !query || code.indexOf(query) > -1 || name.indexOf(query) > -1;
+            var matchCategory = (activeCategory === 'all') || (cat === activeCategory);
+            
+            if (matchSearch && matchCategory) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
         });
         
-        // Also store standalone options (like "-- Pilih Item --")
-        var standaloneOptions = [];
-        selectEl.querySelectorAll(':scope > option').forEach(function(opt) {
-            standaloneOptions.push(opt.cloneNode(true));
-        });
+        if (noMatchingRow) {
+            noMatchingRow.style.display = visibleCount === 0 ? '' : 'none';
+        }
+        if (visibleItemsInfo) {
+            visibleItemsInfo.textContent = 'Menampilkan ' + visibleCount + ' dari ' + itemRows.length + ' item';
+        }
         
-        searchInput.addEventListener('input', function() {
-            var searchText = this.value.toLowerCase().trim();
-            
-            // Clear current options
-            selectEl.innerHTML = '';
-            
-            // Re-add standalone options
-            standaloneOptions.forEach(function(opt) {
-                selectEl.appendChild(opt.cloneNode(true));
+        updateCheckAllState();
+    }
+    
+    function updateCheckAllState() {
+        if (!checkAllCheckbox) return;
+        var visibleCheckboxes = modalEl.querySelectorAll('.modal-item-row:not([style*="display: none"]) .item-select-checkbox');
+        if (visibleCheckboxes.length === 0) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+            return;
+        }
+        var checkedVisible = modalEl.querySelectorAll('.modal-item-row:not([style*="display: none"]) .item-select-checkbox:checked');
+        if (checkedVisible.length === visibleCheckboxes.length) {
+            checkAllCheckbox.checked = true;
+            checkAllCheckbox.indeterminate = false;
+        } else if (checkedVisible.length > 0) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = true;
+        } else {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+        }
+    }
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', filterRows);
+    }
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            filterRows();
+            searchInput.focus();
+        });
+    }
+    
+    categoryPills.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            categoryPills.forEach(function(b) { b.classList.remove('active'); });
+            this.classList.add('active');
+            activeCategory = this.dataset.cat || 'all';
+            filterRows();
+        });
+    });
+    
+    itemRows.forEach(function(row) {
+        var chk = row.querySelector('.item-select-checkbox');
+        var coeffInput = row.querySelector('.modal-coeff-input');
+        
+        if (chk && coeffInput) {
+            chk.addEventListener('change', function() {
+                if (this.checked) {
+                    row.classList.add('table-active');
+                    coeffInput.disabled = false;
+                    if (!coeffInput.value || parseFloat(coeffInput.value.replace(',', '.')) <= 0) {
+                        coeffInput.value = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
+                    }
+                } else {
+                    row.classList.remove('table-active');
+                    coeffInput.disabled = true;
+                }
+                updateSelectionStats();
+                updateCheckAllState();
             });
+        }
+    });
+    
+    if (checkAllCheckbox) {
+        checkAllCheckbox.addEventListener('change', function() {
+            var isChecked = this.checked;
+            var defaultCoeff = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
             
-            // Filter and rebuild optgroups
-            allOptions.forEach(function(group) {
-                var matchingOptions = group.options.filter(function(opt) {
-                    return opt.text.toLowerCase().indexOf(searchText) > -1;
-                });
-                
-                if (matchingOptions.length > 0) {
-                    var og = document.createElement('optgroup');
-                    og.label = group.label;
-                    matchingOptions.forEach(function(opt) {
-                        og.appendChild(opt.element.cloneNode(true));
-                    });
-                    selectEl.appendChild(og);
+            var visibleRows = modalEl.querySelectorAll('.modal-item-row:not([style*="display: none"])');
+            visibleRows.forEach(function(row) {
+                var chk = row.querySelector('.item-select-checkbox');
+                var coeffInput = row.querySelector('.modal-coeff-input');
+                if (chk && coeffInput) {
+                    chk.checked = isChecked;
+                    if (isChecked) {
+                        row.classList.add('table-active');
+                        coeffInput.disabled = false;
+                        if (!coeffInput.value || parseFloat(coeffInput.value.replace(',', '.')) <= 0) {
+                            coeffInput.value = defaultCoeff;
+                        }
+                    } else {
+                        row.classList.remove('table-active');
+                        coeffInput.disabled = true;
+                    }
+                }
+            });
+            updateSelectionStats();
+        });
+    }
+    
+    if (applyDefaultCoeffBtn && defaultCoeffInput) {
+        applyDefaultCoeffBtn.addEventListener('click', function() {
+            var val = defaultCoeffInput.value.trim() || '1,0000';
+            modalEl.querySelectorAll('.modal-item-row .item-select-checkbox:checked').forEach(function(chk) {
+                var row = chk.closest('.modal-item-row');
+                var coeffInput = row ? row.querySelector('.modal-coeff-input') : null;
+                if (coeffInput) {
+                    coeffInput.value = val;
                 }
             });
         });
-        
-        // Clear search when modal is opened
-        var modal = document.getElementById('addDetailModal');
-        if (modal) {
-            modal.addEventListener('shown.bs.modal', function() {
-                searchInput.value = '';
-                searchInput.dispatchEvent(new Event('input'));
-                searchInput.focus();
-            });
-        }
     }
+    
+    modalEl.addEventListener('show.bs.modal', function() {
+        if (searchInput) searchInput.value = '';
+        activeCategory = 'all';
+        categoryPills.forEach(function(b) {
+            if (b.dataset.cat === 'all') b.classList.add('active');
+            else b.classList.remove('active');
+        });
+        
+        itemRows.forEach(function(row) {
+            var chk = row.querySelector('.item-select-checkbox');
+            var coeffInput = row.querySelector('.modal-coeff-input');
+            if (chk) chk.checked = false;
+            if (coeffInput) {
+                coeffInput.disabled = true;
+                coeffInput.value = defaultCoeffInput ? defaultCoeffInput.value : '1,0000';
+            }
+            row.classList.remove('table-active');
+            row.style.display = '';
+        });
+        
+        if (checkAllCheckbox) {
+            checkAllCheckbox.checked = false;
+            checkAllCheckbox.indeterminate = false;
+        }
+        updateSelectionStats();
+        filterRows();
+    });
+    
+    modalEl.addEventListener('shown.bs.modal', function() {
+        if (searchInput) searchInput.focus();
+    });
 });
 
 // Edit Mode Toggle
