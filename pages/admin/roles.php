@@ -79,6 +79,15 @@ $permissionDefinitions = [
                     'requests.delete' => ['label' => 'Hapus Pengajuan di Tab Proyek', 'desc' => 'Dapat menghapus pengajuan dana langsung dari tab proyek', 'parent' => 'requests.view'],
                 ]
             ],
+            'documentation' => [
+                'name' => 'Tab Dokumentasi Proyek',
+                'icon' => 'mdi-folder-multiple-image',
+                'parent_key' => 'documentation.view',
+                'items' => [
+                    'documentation.view' => ['label' => 'Lihat Tab Dokumentasi', 'desc' => 'Dapat membuka tab Dokumentasi Proyek dan melihat serta mendownload file dokumen', 'is_parent' => true, 'parent' => null],
+                    'documentation.upload' => ['label' => 'Upload & Kelola Dokumen', 'desc' => 'Dapat mengunggah file baru, mengubah keterangan, dan menghapus dokumen proyek', 'parent' => 'documentation.view'],
+                ]
+            ],
         ]
     ],
     'sidebar_menus' => [
@@ -127,6 +136,7 @@ $projectDependentPerms = [
     'rab.view', 'rab.edit',
     'rap.view', 'rap.edit',
     'master_data.view', 'master_data.edit',
+    'documentation.view', 'documentation.upload',
     'reports.view', 'reports.export',
     'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
 ];
@@ -285,6 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
                     'reports.view', 'reports.export',
                     'master_data.view', 'master_data.edit',
+                    'documentation.view', 'documentation.upload',
                     'projects.create', 'projects.edit', 'projects.delete', 'projects.lock_request',
                 ];
                 
@@ -322,6 +333,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     // 5. Reports: reports.export requires reports.view
                     if (empty($permissions['reports.view'])) {
                         $permissions['reports.export'] = 0;
+                    }
+                    
+                    // 6. Documentation: documentation.upload requires documentation.view
+                    if (empty($permissions['documentation.view'])) {
+                        $permissions['documentation.upload'] = 0;
                     }
                 }
                 
@@ -470,201 +486,6 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="modal-body p-3">
                 <input type="hidden" id="permRoleId">
-                <div id="permissionsContent">
-                    
-                    <!-- ======================================================== -->
-                    <!-- SECTION 1: MANAJEMEN PROYEK (GLOBAL)                    -->
-                    <!-- ======================================================== -->
-                    <div class="card mb-3 border-primary shadow-sm">
-                        <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
-                            <h6 class="mb-0 text-white">
-                                <i class="mdi mdi-briefcase-outline me-1"></i> 1. Manajemen Proyek (Global)
-                            </h6>
-                            <span class="badge bg-white text-primary">Akses Proyek</span>
-                        </div>
-                        <div class="card-body py-3">
-                            <div class="mb-3">
-                                <label class="form-label fw-bold">Level Akses Proyek <span class="text-danger">*</span></label>
-                                <select class="form-select border-primary" id="projectViewMode" onchange="onViewModeChange()">
-                                    <option value="none">❌ Tidak Ada Akses Proyek (Semua fitur & tab proyek terkunci)</option>
-                                    <option value="assigned">🔒 Hanya Proyek Yang Ditugaskan (User harus dikerahkan ke proyek)</option>
-                                    <option value="all">🌐 Semua Proyek (Bisa akses seluruh proyek tanpa penugasan)</option>
-                                </select>
-                                <div class="mt-2">
-                                    <small class="text-muted" id="viewModeDesc">Pilih cakupan proyek yang boleh diakses oleh role ini.</small>
-                                </div>
-                                <div class="alert alert-warning mt-2 mb-0 py-2 d-none" id="viewModeWarning">
-                                    <i class="mdi mdi-alert"></i>
-                                    <small><strong>Perhatian:</strong> Memilih "Tidak Ada Akses Proyek" akan otomatis menonaktifkan seluruh fitur proyek & tab internal di bawah karena fitur tersebut berada di dalam proyek.</small>
-                                </div>
-                            </div>
-                            
-                            <hr class="my-2 text-muted opacity-25">
-                            <label class="form-label fw-bold small text-muted text-uppercase mb-2">Operasi Umum Proyek</label>
-                            <div class="row g-2" id="projectGlobalOps">
-                                <?php foreach ($permissionDefinitions['project_global']['items'] as $key => $item): ?>
-                                <div class="col-md-6">
-                                    <div class="p-2 border rounded bg-light h-100 perm-box">
-                                        <div class="form-check form-switch mb-1">
-                                            <input class="form-check-input perm-checkbox project-dependent" type="checkbox" 
-                                                   id="perm_<?= str_replace('.', '_', $key) ?>" 
-                                                   data-key="<?= $key ?>"
-                                                   onchange="onPermCheckboxChange(this)">
-                                            <label class="form-check-label fw-semibold" for="perm_<?= str_replace('.', '_', $key) ?>">
-                                                <?= $item['label'] ?>
-                                            </label>
-                                        </div>
-                                        <small class="text-muted d-block ps-4" style="font-size: 0.78rem;"><?= $item['desc'] ?></small>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- ======================================================== -->
-                    <!-- SECTION 2: TAB DI DALAM PROYEK (PROJECT DASHBOARD TABS)  -->
-                    <!-- ======================================================== -->
-                    <div id="projectScopeContainer">
-                        <div class="card mb-3 border-info shadow-sm">
-                            <div class="card-header bg-info text-white py-2 d-flex justify-content-between align-items-center">
-                                <div>
-                                    <h6 class="mb-0 text-white">
-                                        <i class="mdi mdi-tab me-1"></i> 2. Akses Tab di Dalam Proyek
-                                    </h6>
-                                    <small class="text-white opacity-75" style="font-size: 0.78rem;">Mengatur tab yang dapat dibuka pada halaman detail proyek (Dashboard Proyek)</small>
-                                </div>
-                                <span class="badge bg-white text-info">Tab Detail Proyek</span>
-                            </div>
-                            <div class="card-body p-3">
-                                
-                                <div class="row g-3">
-                                    <?php foreach ($permissionDefinitions['project_tabs']['groups'] as $groupKey => $group): ?>
-                                    <div class="col-12">
-                                        <div class="border rounded p-2 bg-light">
-                                            <div class="d-flex align-items-center mb-2 pb-1 border-bottom">
-                                                <i class="mdi <?= $group['icon'] ?> text-info fs-5 me-2"></i>
-                                                <strong class="text-dark small text-uppercase"><?= $group['name'] ?></strong>
-                                            </div>
-                                            <div class="row g-2">
-                                                <?php foreach ($group['items'] as $key => $item): ?>
-                                                <div class="col-md-6">
-                                                    <div class="p-2 border rounded bg-white h-100 perm-box <?= !empty($item['parent']) ? 'ps-3 border-start border-start-3 border-start-primary' : '' ?>">
-                                                        <div class="form-check form-switch mb-1">
-                                                            <input class="form-check-input perm-checkbox project-dependent <?= !empty($item['is_parent']) ? 'parent-perm' : '' ?> <?= !empty($item['parent']) ? 'child-perm' : '' ?>" 
-                                                                   type="checkbox" 
-                                                                   id="perm_<?= str_replace('.', '_', $key) ?>" 
-                                                                   data-key="<?= $key ?>"
-                                                                   <?= !empty($item['parent']) ? 'data-parent="' . $item['parent'] . '"' : '' ?>
-                                                                   onchange="onPermCheckboxChange(this)">
-                                                            <label class="form-check-label fw-semibold" for="perm_<?= str_replace('.', '_', $key) ?>">
-                                                                <?= $item['label'] ?>
-                                                                <?php if (!empty($item['is_parent'])): ?>
-                                                                    <span class="badge bg-soft-primary text-primary ms-1" style="font-size: 0.65rem;">Akses Utama</span>
-                                                                <?php elseif (!empty($item['parent'])): ?>
-                                                                    <span class="badge bg-soft-warning text-warning ms-1" style="font-size: 0.65rem;">Wajib Lihat Aktif</span>
-                                                                <?php endif; ?>
-                                                            </label>
-                                                        </div>
-                                                        <small class="text-muted d-block ps-4" style="font-size: 0.78rem;"><?= $item['desc'] ?></small>
-                                                    </div>
-                                                </div>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                
-                            </div>
-                        </div>
-                    </div><!-- end projectScopeContainer -->
-                    
-                    <!-- ======================================================== -->
-                    <!-- SECTION 3: MENU SIDEBAR & FITUR GLOBAL                   -->
-                    <!-- ======================================================== -->
-                    <div class="card mb-3 border-secondary shadow-sm">
-                        <div class="card-header bg-secondary text-white py-2 d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="mb-0 text-white">
-                                    <i class="mdi mdi-menu me-1"></i> 3. Menu Sidebar & Fitur Global
-                                </h6>
-                                <small class="text-white opacity-75" style="font-size: 0.78rem;">Mengatur menu navigasi utama pada sidebar sistem (independen dari proyek)</small>
-                            </div>
-                            <span class="badge bg-white text-secondary">Menu Sidebar</span>
-                        </div>
-                        <div class="card-body p-3">
-                            <div class="row g-3">
-                                <?php foreach ($permissionDefinitions['sidebar_menus']['groups'] as $groupKey => $group): ?>
-                                <div class="col-12">
-                                    <div class="border rounded p-2 bg-light">
-                                        <div class="d-flex align-items-center mb-2 pb-1 border-bottom">
-                                            <i class="mdi <?= $group['icon'] ?> text-secondary fs-5 me-2"></i>
-                                            <strong class="text-dark small text-uppercase"><?= $group['name'] ?></strong>
-                                        </div>
-                                        <div class="row g-2">
-                                            <?php foreach ($group['items'] as $key => $item): ?>
-                                            <div class="col-md-6">
-                                                <div class="p-2 border rounded bg-white h-100 perm-box <?= !empty($item['parent']) ? 'ps-3 border-start border-start-3 border-start-secondary' : '' ?>">
-                                                    <div class="form-check form-switch mb-1">
-                                                        <input class="form-check-input perm-checkbox <?= !empty($item['is_parent']) ? 'parent-perm' : '' ?> <?= !empty($item['parent']) ? 'child-perm' : '' ?>" 
-                                                               type="checkbox" 
-                                                               id="perm_sidebar_<?= str_replace('.', '_', $key) ?>" 
-                                                               data-key="<?= $key ?>"
-                                                               <?= !empty($item['parent']) ? 'data-parent="' . $item['parent'] . '"' : '' ?>
-                                                               onchange="onPermCheckboxChange(this)">
-                                                        <label class="form-check-label fw-semibold" for="perm_sidebar_<?= str_replace('.', '_', $key) ?>">
-                                                            <?= $item['label'] ?>
-                                                            <?php if (!empty($item['is_parent'])): ?>
-                                                                <span class="badge bg-soft-primary text-primary ms-1" style="font-size: 0.65rem;">Akses Utama</span>
-                                                            <?php elseif (!empty($item['parent'])): ?>
-                                                                <span class="badge bg-soft-warning text-warning ms-1" style="font-size: 0.65rem;">Wajib Lihat Aktif</span>
-                                                            <?php endif; ?>
-                                                        </label>
-                                                    </div>
-                                                    <small class="text-muted d-block ps-4" style="font-size: 0.78rem;"><?= $item['desc'] ?></small>
-                                                </div>
-                                            </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                    </div>
-                    
-                </div>
-            </div>
-            <div class="modal-footer bg-light">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                <button type="button" class="btn btn-primary" onclick="savePermissions()">
-                    <i class="mdi mdi-content-save"></i> Simpan Hak Akses
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteRoleModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content">
-            <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title">Hapus Role</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body text-center">
-                <i class="mdi mdi-alert-circle-outline text-danger" style="font-size: 3rem;"></i>
-                <p class="mt-2">Apakah Anda yakin ingin menghapus role <strong id="deleteRoleName"></strong>?</p>
-                <input type="hidden" id="deleteRoleId">
-            </div>
-            <div class="modal-footer justify-content-center">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                <button type="button" class="btn btn-danger" onclick="confirmDeleteRole()">
-                    <i class="mdi mdi-delete"></i> Hapus
-                </button>
-<input type="hidden" id="permRoleId">
                 <div id="permissionsContent">
                     
                     <!-- ======================================================== -->
@@ -1119,6 +940,9 @@ function updateSubPermissionDependencies() {
     
     // 5. Reports: reports.export requires reports.view
     syncChild('reports.view');
+    
+    // 6. Documentation: documentation.upload requires documentation.view
+    syncChild('documentation.view');
 }
 
 function onViewModeChange() {
@@ -1197,6 +1021,7 @@ function savePermissions() {
             permissions['requests.delete'] = 0;
         }
         if (!permissions['reports.view']) permissions['reports.export'] = 0;
+        if (!permissions['documentation.view']) permissions['documentation.upload'] = 0;
     }
     
     $.post('', { 

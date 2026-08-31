@@ -875,6 +875,154 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// Handle upload project documents
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_project_documents') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    
+    if ($projectId && hasPermission('documentation.upload')) {
+        if (!empty($_FILES['documents']['name'][0])) {
+            $uploadDir = __DIR__ . '/../../uploads/project_documents/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            
+            $forbiddenExtensions = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phar', 'exe', 'dll', 'so', 'bat', 'cmd', 'sh', 'vbs', 'pl', 'cgi', 'htaccess', 'htpasswd'];
+            $maxSize = 100 * 1024 * 1024; // 100MB
+            $uploadedCount = 0;
+            $errors = [];
+            
+            $inputCategory = trim($_POST['category'] ?? 'Umum / Referensi');
+            if ($inputCategory === 'custom' && !empty($_POST['custom_category'])) {
+                $inputCategory = trim($_POST['custom_category']);
+            }
+            $inputDescription = trim($_POST['description'] ?? '');
+            $inputTitle = trim($_POST['title'] ?? '');
+            
+            $totalFiles = count($_FILES['documents']['name']);
+            
+            for ($i = 0; $i < $totalFiles; $i++) {
+                if ($_FILES['documents']['error'][$i] !== UPLOAD_ERR_OK) {
+                    continue;
+                }
+                
+                $originalName = $_FILES['documents']['name'][$i];
+                $tmpName = $_FILES['documents']['tmp_name'][$i];
+                $fileSize = $_FILES['documents']['size'][$i];
+                $fileType = $_FILES['documents']['type'][$i];
+                
+                $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+                
+                if (in_array($ext, $forbiddenExtensions)) {
+                    $errors[] = "File <strong>$originalName</strong> ditolak karena jenis file berisiko dieksekusi.";
+                    continue;
+                }
+                
+                if ($fileSize > $maxSize) {
+                    $errors[] = "File <strong>$originalName</strong> melebihi batas ukuran 100MB.";
+                    continue;
+                }
+                
+                $storedFilename = 'doc_' . $projectId . '_' . time() . '_' . $i . '_' . mt_rand(1000, 9999) . '.' . $ext;
+                $targetPath = $uploadDir . $storedFilename;
+                
+                if (move_uploaded_file($tmpName, $targetPath)) {
+                    // Document title: if user specified title and only 1 file, use it; otherwise use title or filename
+                    $docTitle = ($totalFiles === 1 && !empty($inputTitle)) 
+                        ? $inputTitle 
+                        : pathinfo($originalName, PATHINFO_FILENAME);
+                    
+                    dbInsert("
+                        INSERT INTO project_documents (project_id, title, filename, original_name, file_type, file_size, category, description, uploaded_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ", [
+                        $projectId,
+                        $docTitle,
+                        $storedFilename,
+                        $originalName,
+                        $fileType,
+                        $fileSize,
+                        $inputCategory ?: 'Umum / Referensi',
+                        $inputDescription ?: null,
+                        $_SESSION['user_id']
+                    ]);
+                    $uploadedCount++;
+                } else {
+                    $errors[] = "Gagal memindahkan file <strong>$originalName</strong> ke folder server.";
+                }
+            }
+            
+            if ($uploadedCount > 0) {
+                setFlash('success', "$uploadedCount dokumen proyek berhasil diunggah.");
+            }
+            if (!empty($errors)) {
+                setFlash('error', implode('<br>', $errors));
+            }
+        } else {
+            setFlash('error', 'Silakan pilih dokumen yang ingin diunggah terlebih dahulu.');
+        }
+    } else {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk mengunggah dokumen proyek.');
+    }
+    
+    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    exit;
+}
+
+// Handle edit project document
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_project_document') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $docId = intval($_POST['doc_id'] ?? 0);
+    $title = trim($_POST['title'] ?? '');
+    $category = trim($_POST['category'] ?? '');
+    if ($category === 'custom' && !empty($_POST['custom_category'])) {
+        $category = trim($_POST['custom_category']);
+    }
+    $description = trim($_POST['description'] ?? '');
+    
+    if ($projectId && $docId && hasPermission('documentation.upload')) {
+        if (!empty($title)) {
+            dbExecute("
+                UPDATE project_documents 
+                SET title = ?, category = ?, description = ? 
+                WHERE id = ? AND project_id = ?
+            ", [$title, $category ?: 'Umum / Referensi', $description ?: null, $docId, $projectId]);
+            setFlash('success', 'Informasi dokumen berhasil diperbarui.');
+        } else {
+            setFlash('error', 'Judul dokumen tidak boleh kosong.');
+        }
+    } else {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk mengubah data dokumen.');
+    }
+    
+    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    exit;
+}
+
+// Handle delete project document
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_project_document') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $docId = intval($_POST['doc_id'] ?? 0);
+    
+    if ($projectId && $docId && hasPermission('documentation.upload')) {
+        $doc = dbGetRow("SELECT filename, title, original_name FROM project_documents WHERE id = ? AND project_id = ?", [$docId, $projectId]);
+        if ($doc) {
+            $filepath = __DIR__ . '/../../uploads/project_documents/' . $doc['filename'];
+            if (file_exists($filepath)) {
+                @unlink($filepath);
+            }
+            dbExecute("DELETE FROM project_documents WHERE id = ? AND project_id = ?", [$docId, $projectId]);
+            setFlash('success', 'Dokumen "' . sanitize($doc['title']) . '" berhasil dihapus.');
+        } else {
+            setFlash('error', 'Dokumen tidak ditemukan.');
+        }
+    } else {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus dokumen.');
+    }
+    
+    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    exit;
+}
+
 // Include Master Data handlers for POST actions (must be before rab_rap_handlers)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $projectId = $_GET['id'] ?? null;
@@ -954,6 +1102,7 @@ if (isset($_GET['action']) && hasPermission('projects.edit')) {
 // Get summary data
 $itemCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 $ahspCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
+$docCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 
 // RAB Summary - base total (optimized: JOIN instead of correlated subquery)
 $rabBaseTotal = dbGetRow("
@@ -1215,6 +1364,16 @@ require_once __DIR__ . '/../../includes/header.php';
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (hasPermission('documentation.view')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'documentation' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=documentation">
+                    <i class="mdi mdi-folder-multiple-image"></i> Dokumentasi
+                    <?php if ($docCount > 0): ?>
+                    <span class="badge bg-primary"><?= $docCount ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
+            <?php endif; ?>
         </ul>
     </div>
     <div class="card-body">
@@ -1254,6 +1413,13 @@ require_once __DIR__ . '/../../includes/header.php';
                     include __DIR__ . '/tabs/requests.php';
                 } else {
                     echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Pengajuan.</div>';
+                }
+                break;
+            case 'documentation':
+                if (hasPermission('documentation.view')) {
+                    include __DIR__ . '/tabs/documentation.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Dokumentasi Proyek.</div>';
                 }
                 break;
             case 'detail':

@@ -179,6 +179,7 @@ function loadUserPermissions($roleName, $clearCache = false) {
                 'requests.view', 'requests.create', 'requests.approve', 'requests.delete',
                 'reports.view', 'reports.export',
                 'master_data.view', 'master_data.edit',
+                'documentation.view', 'documentation.upload',
                 'admin.roles', 'admin.users'
             ];
             foreach ($defaultKeys as $key) {
