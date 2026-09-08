@@ -11,6 +11,12 @@ require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
 
+if (!hasPermission('requests.view') && !hasPermission('requests.approve')) {
+    setFlash('error', 'Anda tidak memiliki akses ke halaman pengajuan.');
+    header('Location: ' . getBaseUrl() . '/index.php');
+    exit;
+}
+
 // Handle Delete Request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_request') {
     if (!hasPermission('requests.delete')) {

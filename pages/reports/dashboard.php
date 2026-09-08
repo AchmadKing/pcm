@@ -5,9 +5,16 @@
  * Updated for new per-project master data structure and comprehensive Export feature
  */
 
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/functions.php';
+require_once __DIR__ . '/../../config/database.php';
+
+requireLogin();
+requirePermission('reports.view');
+
 $pageTitle = 'Dashboard Laporan';
 require_once __DIR__ . '/../../includes/header.php';
-requirePermission('reports.view');
+
 
 $projectId = $_GET['project_id'] ?? '';
 

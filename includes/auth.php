@@ -304,6 +304,38 @@ function hasPermission($permissionKey) {
     return isset($permissions[$permissionKey]) && !empty($permissions[$permissionKey]);
 }
 
+/**
+ * Check if current user has any active permissions or project access
+ * @return bool
+ */
+function hasAnyPermission() {
+    if (isSuperAdmin()) {
+        return true;
+    }
+    
+    $role = $_SESSION['user_role'] ?? '';
+    if (empty($role)) {
+        return false;
+    }
+    
+    $permissions = loadUserPermissions($role);
+    
+    // Check if project view mode allows access (not 'none')
+    if (isset($permissions['_view_mode']) && $permissions['_view_mode'] !== 'none') {
+        return true;
+    }
+    
+    // Check if any explicit permission is granted
+    foreach ($permissions as $key => $val) {
+        if ($key[0] !== '_' && !empty($val)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+
 
 // ============================================
 // ROLE CHECK FUNCTIONS (SIMPLIFIED)

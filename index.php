@@ -4,8 +4,45 @@
  * PCM - Project Cost Management System
  */
 
-$pageTitle = 'Dashboard';
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/functions.php';
+
+requireLogin();
+
+$hasAccess = hasAnyPermission();
+$pageTitle = $hasAccess ? 'Dashboard' : 'Akses Dibatasi';
 require_once __DIR__ . '/includes/header.php';
+
+if (!$hasAccess):
+?>
+<div class="row justify-content-center my-5 py-4">
+    <div class="col-md-8 col-lg-6 col-xl-5">
+        <div class="card shadow border-0 mt-4">
+            <div class="card-body p-4 p-sm-5 text-center">
+                <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-soft-danger text-danger mb-4" style="width: 80px; height: 80px;">
+                    <i class="mdi mdi-shield-lock-outline" style="font-size: 40px;"></i>
+                </div>
+                <h4 class="fw-bold text-dark mb-3">Akses Dibatasi</h4>
+                <p class="text-muted font-size-15 mb-4 leading-relaxed">
+                    Anda tidak memiliki akses silahkan hubungi administrator atau pihak terkait.
+                </p>
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-primary px-4 py-2 waves-effect waves-light" onclick="window.location.reload();">
+                        <i class="mdi mdi-refresh me-1"></i> Reload
+                    </button>
+                    <a href="<?= $baseUrl ?>/pages/auth/logout.php" class="btn btn-danger px-4 py-2 waves-effect waves-light">
+                        <i class="mdi mdi-power me-1"></i> Logout
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php
+require_once __DIR__ . '/includes/footer.php';
+exit;
+endif;
+
 
 // Get statistics for dashboard
 $stats = [

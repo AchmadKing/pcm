@@ -117,14 +117,37 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
             <div data-simplebar class="h-100">
                 <div id="sidebar-menu">
                     <ul class="metismenu list-unstyled" id="side-menu">
+                        <?php if (!hasAnyPermission()): ?>
+                        <li class="menu-title">Hak Akses</li>
+                        <li>
+                            <div class="px-3 py-4 text-center">
+                                <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-soft-danger text-danger mb-3" style="width: 48px; height: 48px;">
+                                    <i class="mdi mdi-shield-lock-outline" style="font-size: 24px;"></i>
+                                </div>
+                                <p class="text-muted font-size-12 mb-3">
+                                    Anda tidak memiliki akses silahkan hubungi administrator atau pihak terkait.
+                                </p>
+                                <div class="d-grid gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary waves-effect" onclick="window.location.reload();">
+                                        <i class="mdi mdi-refresh me-1"></i> Reload
+                                    </button>
+                                    <a href="<?= $baseUrl ?>/pages/auth/logout.php" class="btn btn-sm btn-danger waves-effect">
+                                        <i class="mdi mdi-power me-1"></i> Logout
+                                    </a>
+                                </div>
+                            </div>
+                        </li>
+                        <?php else: ?>
                         <li class="menu-title">Menu</li>
                         
-                        <!-- Dashboard - All Users -->
+                        <!-- Dashboard -->
                         <li class="<?= $currentPage == 'index' && $currentDir == 'pcm_project' ? 'mm-active' : '' ?>">
                             <a href="<?= $baseUrl ?>/index.php" class="waves-effect">
                                 <i class="mdi mdi-view-dashboard"></i>
                                 <span>Dashboard</span>
                             </a>
+                        </li>
+                        
                         <!-- Projects - Only visible if user has project access -->
                         <?php if (getProjectViewMode() !== 'none'): ?>
                         <li class="<?= $currentDir == 'projects' ? 'mm-active' : '' ?>">
@@ -146,15 +169,18 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                         <?php endif; ?>
                         
                         <!-- Requests -->
+                        <?php if (hasPermission('requests.view') || hasPermission('requests.approve') || hasPermission('requests.create')): ?>
                         <li class="<?= $currentDir == 'requests' ? 'mm-active' : '' ?>">
                             <a href="javascript:void(0);">
                                 <i class="mdi mdi-file-document-edit"></i>
                                 <span>Pengajuan Dana<span class="float-end menu-arrow"><i class="mdi mdi-chevron-right"></i></span> </span>
                             </a>
                             <ul class="sub-menu">
+                                <?php if (hasPermission('requests.view')): ?>
                                 <li class="<?= $currentPage == 'index' && $currentDir == 'requests' ? 'mm-active' : '' ?>">
                                     <a href="<?= $baseUrl ?>/pages/requests/index.php">Daftar Pengajuan</a>
                                 </li>
+                                <?php endif; ?>
                                 <?php if (hasPermission('requests.approve')): ?>
                                 <li class="<?= $currentPage == 'approval' ? 'mm-active' : '' ?>">
                                     <a href="<?= $baseUrl ?>/pages/requests/approval.php">Approval Center</a>
@@ -162,6 +188,7 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                                 <?php endif; ?>
                             </ul>
                         </li>
+                        <?php endif; ?>
                         
                         <?php if (hasPermission('reports.view')): ?>
                         <li class="<?= $currentDir == 'reports' ? 'mm-active' : '' ?>">
@@ -203,6 +230,7 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                             </ul>
                         </li>
                         <?php endif; ?>
+                        <?php endif; // hasAnyPermission ?>
                     </ul>
                 </div>
             </div>
