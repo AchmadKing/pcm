@@ -713,6 +713,25 @@ require_once __DIR__ . '/../../config/database.php';
 
 requireLogin();
 
+// Check if POST payload exceeded PHP post_max_size (which empties $_POST & $_FILES)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && isset($_SERVER['CONTENT_LENGTH']) && (int)$_SERVER['CONTENT_LENGTH'] > 0) {
+    $projectId = intval($_GET['id'] ?? 0);
+    $tab = $_GET['tab'] ?? 'documentation';
+    $maxPost = ini_get('post_max_size');
+    $isAjax = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') || !empty($_POST['is_ajax']);
+    $errorMsg = "Ukuran file yang diunggah melebihi batas konfigurasi server PHP (post_max_size = $maxPost). Silakan pilih file yang lebih kecil atau unggah secara bertahap.";
+    
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => $errorMsg]);
+        exit;
+    }
+    
+    setFlash('error', $errorMsg);
+    header('Location: view.php?id=' . $projectId . '&tab=' . $tab);
+    exit;
+}
+
 // Handle start project action (must be before HTML output)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'start_project') {
     $projectId = $_GET['id'] ?? null;
@@ -875,117 +894,311 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-// Handle upload project documents
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_project_documents') {
+// ========================================================
+// DOCUMENTATION & FILE MANAGER HANDLERS
+// ========================================================
+
+// Handle create folder
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_document_folder') {
     $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $parentId = !empty($_POST['parent_id']) ? intval($_POST['parent_id']) : null;
+    $folderName = trim($_POST['name'] ?? '');
     
     if ($projectId && hasPermission('documentation.upload')) {
-        if (!empty($_FILES['documents']['name'][0])) {
-            $uploadDir = __DIR__ . '/../../uploads/project_documents/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
+        if (!empty($folderName)) {
+            // Check duplicate folder name in same parent
+            $existing = dbGetRow("
+                SELECT id FROM project_document_folders 
+                WHERE project_id = ? AND name = ? AND (parent_id = ? OR (parent_id IS NULL AND ? IS NULL))
+            ", [$projectId, $folderName, $parentId, $parentId]);
             
-            $forbiddenExtensions = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phar', 'exe', 'dll', 'so', 'bat', 'cmd', 'sh', 'vbs', 'pl', 'cgi', 'htaccess', 'htpasswd'];
-            $maxSize = 100 * 1024 * 1024; // 100MB
-            $uploadedCount = 0;
-            $errors = [];
-            
-            $inputCategory = trim($_POST['category'] ?? 'Umum / Referensi');
-            if ($inputCategory === 'custom' && !empty($_POST['custom_category'])) {
-                $inputCategory = trim($_POST['custom_category']);
-            }
-            $inputDescription = trim($_POST['description'] ?? '');
-            $inputTitle = trim($_POST['title'] ?? '');
-            
-            $totalFiles = count($_FILES['documents']['name']);
-            
-            for ($i = 0; $i < $totalFiles; $i++) {
-                if ($_FILES['documents']['error'][$i] !== UPLOAD_ERR_OK) {
-                    continue;
-                }
-                
-                $originalName = $_FILES['documents']['name'][$i];
-                $tmpName = $_FILES['documents']['tmp_name'][$i];
-                $fileSize = $_FILES['documents']['size'][$i];
-                $fileType = $_FILES['documents']['type'][$i];
-                
-                $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-                
-                if (in_array($ext, $forbiddenExtensions)) {
-                    $errors[] = "File <strong>$originalName</strong> ditolak karena jenis file berisiko dieksekusi.";
-                    continue;
-                }
-                
-                if ($fileSize > $maxSize) {
-                    $errors[] = "File <strong>$originalName</strong> melebihi batas ukuran 100MB.";
-                    continue;
-                }
-                
-                $storedFilename = 'doc_' . $projectId . '_' . time() . '_' . $i . '_' . mt_rand(1000, 9999) . '.' . $ext;
-                $targetPath = $uploadDir . $storedFilename;
-                
-                if (move_uploaded_file($tmpName, $targetPath)) {
-                    // Document title: if user specified title and only 1 file, use it; otherwise use title or filename
-                    $docTitle = ($totalFiles === 1 && !empty($inputTitle)) 
-                        ? $inputTitle 
-                        : pathinfo($originalName, PATHINFO_FILENAME);
-                    
-                    dbInsert("
-                        INSERT INTO project_documents (project_id, title, filename, original_name, file_type, file_size, category, description, uploaded_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ", [
-                        $projectId,
-                        $docTitle,
-                        $storedFilename,
-                        $originalName,
-                        $fileType,
-                        $fileSize,
-                        $inputCategory ?: 'Umum / Referensi',
-                        $inputDescription ?: null,
-                        $_SESSION['user_id']
-                    ]);
-                    $uploadedCount++;
-                } else {
-                    $errors[] = "Gagal memindahkan file <strong>$originalName</strong> ke folder server.";
-                }
-            }
-            
-            if ($uploadedCount > 0) {
-                setFlash('success', "$uploadedCount dokumen proyek berhasil diunggah.");
-            }
-            if (!empty($errors)) {
-                setFlash('error', implode('<br>', $errors));
+            if ($existing) {
+                setFlash('error', "Folder dengan nama \"$folderName\" sudah ada di folder ini.");
+            } else {
+                dbInsert("
+                    INSERT INTO project_document_folders (project_id, parent_id, name, created_by)
+                    VALUES (?, ?, ?, ?)
+                ", [$projectId, $parentId, $folderName, $_SESSION['user_id']]);
+                setFlash('success', "Folder \"$folderName\" berhasil dibuat.");
             }
         } else {
-            setFlash('error', 'Silakan pilih dokumen yang ingin diunggah terlebih dahulu.');
+            setFlash('error', 'Nama folder tidak boleh kosong.');
         }
     } else {
-        setFlash('error', 'Anda tidak memiliki hak akses untuk mengunggah dokumen proyek.');
+        setFlash('error', 'Anda tidak memiliki hak akses untuk membuat folder.');
     }
     
-    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    $redirectUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($parentId ? '&folder_id=' . $parentId : '');
+    header('Location: ' . $redirectUrl);
     exit;
 }
 
-// Handle edit project document
+// Handle rename folder
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'rename_document_folder') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $folderId = intval($_POST['folder_id'] ?? 0);
+    $newName = trim($_POST['name'] ?? '');
+    $parentId = !empty($_POST['parent_id']) ? intval($_POST['parent_id']) : null;
+    
+    if ($projectId && $folderId && hasPermission('documentation.upload')) {
+        if (!empty($newName)) {
+            $folder = dbGetRow("SELECT id, parent_id FROM project_document_folders WHERE id = ? AND project_id = ?", [$folderId, $projectId]);
+            if ($folder) {
+                dbExecute("UPDATE project_document_folders SET name = ? WHERE id = ? AND project_id = ?", [$newName, $folderId, $projectId]);
+                setFlash('success', 'Nama folder berhasil diubah.');
+                $parentId = $folder['parent_id'];
+            } else {
+                setFlash('error', 'Folder tidak ditemukan.');
+            }
+        } else {
+            setFlash('error', 'Nama folder tidak boleh kosong.');
+        }
+    } else {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk mengubah nama folder.');
+    }
+    
+    $redirectUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($parentId ? '&folder_id=' . $parentId : '');
+    header('Location: ' . $redirectUrl);
+    exit;
+}
+
+// Handle delete folder (recursively delete physical files and subfolders)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_document_folder') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $folderId = intval($_POST['folder_id'] ?? 0);
+    $returnFolderId = !empty($_POST['return_folder_id']) ? intval($_POST['return_folder_id']) : null;
+    
+    if ($projectId && $folderId && hasPermission('documentation.upload')) {
+        $folder = dbGetRow("SELECT id, name, parent_id FROM project_document_folders WHERE id = ? AND project_id = ?", [$folderId, $projectId]);
+        if ($folder) {
+            // Find all subfolder IDs recursively
+            $folderIds = [$folderId];
+            $queue = [$folderId];
+            while (!empty($queue)) {
+                $curr = array_shift($queue);
+                $children = dbGetAll("SELECT id FROM project_document_folders WHERE parent_id = ? AND project_id = ?", [$curr, $projectId]);
+                foreach ($children as $c) {
+                    $cId = intval($c['id']);
+                    $folderIds[] = $cId;
+                    $queue[] = $cId;
+                }
+            }
+            
+            // Delete all physical files in these folders
+            $inList = implode(',', $folderIds);
+            $docs = dbGetAll("SELECT filename FROM project_documents WHERE folder_id IN ($inList) AND project_id = ?", [$projectId]);
+            $uploadDir = __DIR__ . '/../../uploads/project_documents/';
+            foreach ($docs as $d) {
+                $fpath = $uploadDir . $d['filename'];
+                if (file_exists($fpath)) {
+                    @unlink($fpath);
+                }
+            }
+            
+            // Delete folder (foreign key cascades subfolders and document records)
+            dbExecute("DELETE FROM project_document_folders WHERE id = ? AND project_id = ?", [$folderId, $projectId]);
+            setFlash('success', 'Folder "' . sanitize($folder['name']) . '" dan seluruh isinya berhasil dihapus.');
+            $returnFolderId = $folder['parent_id'];
+        } else {
+            setFlash('error', 'Folder tidak ditemukan.');
+        }
+    } else {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus folder.');
+    }
+    
+    $redirectUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($returnFolderId ? '&folder_id=' . $returnFolderId : '');
+    header('Location: ' . $redirectUrl);
+    exit;
+}
+
+// Handle upload project documents
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_project_documents') {
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    $folderId = !empty($_POST['folder_id']) ? intval($_POST['folder_id']) : null;
+    $isAjax = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') || !empty($_POST['is_ajax']);
+    
+    // Verify folder belongs to project if specified
+    if ($folderId) {
+        $fCheck = dbGetRow("SELECT id FROM project_document_folders WHERE id = ? AND project_id = ?", [$folderId, $projectId]);
+        if (!$fCheck) {
+            $folderId = null;
+        }
+    }
+    
+    $redirectTabUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($folderId ? '&folder_id=' . $folderId : '');
+    
+    if (!$projectId || !hasPermission('documentation.upload')) {
+        $msg = 'Anda tidak memiliki hak akses untuk mengunggah dokumen proyek.';
+        if ($isAjax) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => $msg]);
+            exit;
+        }
+        setFlash('error', $msg);
+        header('Location: ' . $redirectTabUrl);
+        exit;
+    }
+    
+    if (!empty($_FILES['documents']['name'][0]) || (isset($_FILES['documents']['name']) && is_array($_FILES['documents']['name']) && count(array_filter($_FILES['documents']['name'])) > 0)) {
+        $uploadDir = __DIR__ . '/../../uploads/project_documents/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        
+        $forbiddenExtensions = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phar', 'exe', 'dll', 'so', 'bat', 'cmd', 'sh', 'vbs', 'pl', 'cgi', 'htaccess', 'htpasswd'];
+        $maxSize = 40 * 1024 * 1024; // 40MB aligned with server limits
+        $uploadedCount = 0;
+        $errors = [];
+        
+        $inputDescription = trim($_POST['description'] ?? '');
+        $inputTitle = trim($_POST['title'] ?? '');
+        
+        $totalFiles = count($_FILES['documents']['name']);
+        
+        for ($i = 0; $i < $totalFiles; $i++) {
+            $rawName = $_FILES['documents']['name'][$i] ?? '';
+            if (empty($rawName)) {
+                continue;
+            }
+            
+            $errCode = $_FILES['documents']['error'][$i] ?? UPLOAD_ERR_OK;
+            if ($errCode !== UPLOAD_ERR_OK) {
+                switch ($errCode) {
+                    case UPLOAD_ERR_INI_SIZE:
+                    case UPLOAD_ERR_FORM_SIZE:
+                        $errors[] = "File <strong>$rawName</strong> melebihi batas ukuran maksimal server (" . ini_get('upload_max_filesize') . ").";
+                        break;
+                    case UPLOAD_ERR_PARTIAL:
+                        $errors[] = "File <strong>$rawName</strong> hanya terunggah sebagian.";
+                        break;
+                    case UPLOAD_ERR_NO_FILE:
+                        break;
+                    default:
+                        $errors[] = "File <strong>$rawName</strong> gagal diunggah (Kode Error: $errCode).";
+                        break;
+                }
+                continue;
+            }
+            
+            $originalName = $rawName;
+            $tmpName = $_FILES['documents']['tmp_name'][$i];
+            $fileSize = $_FILES['documents']['size'][$i];
+            $fileType = $_FILES['documents']['type'][$i];
+            
+            $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+            
+            if (in_array($ext, $forbiddenExtensions)) {
+                $errors[] = "File <strong>$originalName</strong> ditolak karena jenis file berisiko dieksekusi.";
+                continue;
+            }
+            
+            if ($fileSize > $maxSize) {
+                $errors[] = "File <strong>$originalName</strong> melebihi batas ukuran 40MB.";
+                continue;
+            }
+            
+            // Handle custom filename/title set in upload queue
+            $customFileName = trim($_POST['file_names'][$i] ?? '');
+            if (!empty($customFileName)) {
+                $customExt = strtolower(pathinfo($customFileName, PATHINFO_EXTENSION));
+                $finalOriginalName = ($customExt === $ext) ? $customFileName : ($customFileName . '.' . $ext);
+            } else {
+                $finalOriginalName = $originalName;
+            }
+            
+            $customTitle = trim($_POST['titles'][$i] ?? $_POST['custom_names'][$i] ?? '');
+            if (!empty($customTitle)) {
+                $docTitle = $customTitle;
+            } else if ($totalFiles === 1 && !empty($inputTitle)) {
+                $docTitle = $inputTitle;
+            } else {
+                $docTitle = pathinfo($finalOriginalName, PATHINFO_FILENAME);
+            }
+            
+            $storedFilename = 'doc_' . $projectId . '_' . time() . '_' . $i . '_' . mt_rand(1000, 9999) . '.' . $ext;
+            $targetPath = $uploadDir . $storedFilename;
+            
+            if (move_uploaded_file($tmpName, $targetPath)) {
+                dbInsert("
+                    INSERT INTO project_documents (project_id, folder_id, title, filename, original_name, file_type, file_size, category, description, uploaded_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                ", [
+                    $projectId,
+                    $folderId,
+                    $docTitle,
+                    $storedFilename,
+                    $finalOriginalName,
+                    $fileType,
+                    $fileSize,
+                    $inputDescription ?: null,
+                    $_SESSION['user_id']
+                ]);
+                $uploadedCount++;
+            } else {
+                $errors[] = "Gagal memindahkan file <strong>$originalName</strong> ke folder server.";
+            }
+        }
+        
+        if ($isAjax) {
+            header('Content-Type: application/json');
+            if ($uploadedCount > 0) {
+                $msg = "$uploadedCount dokumen berhasil diunggah.";
+                setFlash('success', $msg);
+                echo json_encode([
+                    'success' => true,
+                    'message' => $msg . (!empty($errors) ? '<br>' . implode('<br>', $errors) : ''),
+                    'uploaded_count' => $uploadedCount,
+                    'errors' => $errors,
+                    'redirect' => $redirectTabUrl
+                ]);
+            } else {
+                echo json_encode([
+                    'success' => false,
+                    'message' => !empty($errors) ? implode('<br>', $errors) : 'Gagal mengunggah dokumen proyek.'
+                ]);
+            }
+            exit;
+        }
+        
+        if ($uploadedCount > 0) {
+            setFlash('success', "$uploadedCount dokumen berhasil diunggah.");
+        }
+        if (!empty($errors)) {
+            setFlash('error', implode('<br>', $errors));
+        }
+    } else {
+        $noFileMsg = 'Silakan pilih dokumen yang ingin diunggah terlebih dahulu.';
+        if ($isAjax) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => $noFileMsg]);
+            exit;
+        }
+        setFlash('error', $noFileMsg);
+    }
+    
+    header('Location: ' . $redirectTabUrl);
+    exit;
+}
+
+// Handle edit project document (rename & edit notes - no category)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_project_document') {
     $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
     $docId = intval($_POST['doc_id'] ?? 0);
     $title = trim($_POST['title'] ?? '');
-    $category = trim($_POST['category'] ?? '');
-    if ($category === 'custom' && !empty($_POST['custom_category'])) {
-        $category = trim($_POST['custom_category']);
-    }
     $description = trim($_POST['description'] ?? '');
+    $folderId = !empty($_POST['folder_id']) ? intval($_POST['folder_id']) : null;
     
     if ($projectId && $docId && hasPermission('documentation.upload')) {
         if (!empty($title)) {
+            $doc = dbGetRow("SELECT folder_id FROM project_documents WHERE id = ? AND project_id = ?", [$docId, $projectId]);
+            if ($doc) {
+                $folderId = $doc['folder_id'];
+            }
             dbExecute("
                 UPDATE project_documents 
-                SET title = ?, category = ?, description = ? 
+                SET title = ?, description = ? 
                 WHERE id = ? AND project_id = ?
-            ", [$title, $category ?: 'Umum / Referensi', $description ?: null, $docId, $projectId]);
+            ", [$title, $description ?: null, $docId, $projectId]);
             setFlash('success', 'Informasi dokumen berhasil diperbarui.');
         } else {
             setFlash('error', 'Judul dokumen tidak boleh kosong.');
@@ -994,7 +1207,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         setFlash('error', 'Anda tidak memiliki hak akses untuk mengubah data dokumen.');
     }
     
-    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    $redirectUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($folderId ? '&folder_id=' . $folderId : '');
+    header('Location: ' . $redirectUrl);
     exit;
 }
 
@@ -1002,10 +1216,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_project_document') {
     $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
     $docId = intval($_POST['doc_id'] ?? 0);
+    $folderId = !empty($_POST['folder_id']) ? intval($_POST['folder_id']) : null;
     
     if ($projectId && $docId && hasPermission('documentation.upload')) {
-        $doc = dbGetRow("SELECT filename, title, original_name FROM project_documents WHERE id = ? AND project_id = ?", [$docId, $projectId]);
+        $doc = dbGetRow("SELECT filename, title, original_name, folder_id FROM project_documents WHERE id = ? AND project_id = ?", [$docId, $projectId]);
         if ($doc) {
+            $folderId = $doc['folder_id'];
             $filepath = __DIR__ . '/../../uploads/project_documents/' . $doc['filename'];
             if (file_exists($filepath)) {
                 @unlink($filepath);
@@ -1019,7 +1235,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         setFlash('error', 'Anda tidak memiliki hak akses untuk menghapus dokumen.');
     }
     
-    header('Location: view.php?id=' . $projectId . '&tab=documentation');
+    $redirectUrl = 'view.php?id=' . $projectId . '&tab=documentation' . ($folderId ? '&folder_id=' . $folderId : '');
+    header('Location: ' . $redirectUrl);
     exit;
 }
 
