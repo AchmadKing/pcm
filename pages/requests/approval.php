@@ -582,11 +582,19 @@ require_once __DIR__ . '/../../includes/header.php';
                                 $afterApproval = $remainingQty - $item['coefficient'];
                             ?>
                             <tr class="<?= $isOverQty ? 'table-danger' : '' ?>">
-                                <td><code><?= sanitize($item['item_code'] ?? $item['code'] ?? '-') ?></code></td>
+                                <td>
+                                    <code><?= sanitize($item['item_code'] ?? '-') ?></code>
+                                    <?php if (!empty($item['code'])): ?>
+                                    <br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size:0.7rem;"><i class="mdi mdi-briefcase-outline"></i> <?= sanitize($item['code']) ?></span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <?= sanitize($item['item_name']) ?>
+                                    <?php if (!empty($item['subcategory_name'])): ?>
+                                    <div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> <?= sanitize($item['code'] ? $item['code'] . ' - ' : '') ?><?= sanitize($item['subcategory_name']) ?></div>
+                                    <?php endif; ?>
                                     <?php if ($item['notes']): ?>
-                                    <br><small class="text-muted"><?= sanitize($item['notes']) ?></small>
+                                    <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-end"><?= formatNumber($item['coefficient'], 4) ?></td>

@@ -1516,7 +1516,10 @@ require_once __DIR__ . '/../../includes/header.php';
             <div class="card-body">
                 <div class="d-flex">
                     <div class="flex-grow-1">
-                        <p class="text-muted fw-medium mb-2">Sisa Anggaran(RAP-Realisasi)</p>
+                        <p class="text-muted fw-medium mb-2">
+                            Sisa Anggaran
+                            <small class="text-muted d-block fw-normal">(RAP - Realisasi)</small>
+                        </p>
                         <h5 class="mb-0 <?= $sisaAnggaran < 0 ? 'text-danger' : '' ?>"><?= formatRupiah($sisaAnggaran) ?></h5>
                     </div>
                     <div class="avatar-sm align-self-center ms-2 flex-shrink-0">

@@ -143,7 +143,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_rap_pekerjaan' && $projectId)
 }
 
 // AJAX: Get items from selected RAP pekerjaan (by subcategory IDs and item type)
-// Groups items by item_code, summing sisa across all selected subcategories
+// Returns items grouped by selected subcategory (pekerjaan)
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && isset($_GET['subcategory_ids']) && isset($_GET['item_type'])) {
     header('Content-Type: application/json');
     
@@ -164,12 +164,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
     // Build placeholders for IN clause
     $placeholders = implode(',', array_fill(0, count($subcategoryIds), '?'));
     
-    // Get all items per subcategory from Master Data RAP tables (ungrouped)
+    // Get info of all selected subcategories in proper order
+    $subcatInfo = dbGetAll("
+        SELECT rs.id, rs.code, rs.name, rs.unit, rs.category_id, rc.code as category_code, rc.name as category_name
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rs.id IN ($placeholders)
+        ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+    ", $subcategoryIds);
+    
+    // Get all items per subcategory from Master Data RAP tables
     $params = array_merge($subcategoryIds, [$itemType]);
     $rawItems = dbGetAll("
         SELECT d.id, pir.category as item_type, pir.item_code, pir.name, pir.unit, 
                d.coefficient as ahsp_coefficient, COALESCE(d.unit_price, pir.price) as unit_price, pir.actual_price,
                rs.id as subcategory_id, rs.code as subcat_code, rs.name as subcat_name, rs.unit as subcat_unit,
+               rs.category_id,
                ri.volume as rap_volume,
                (d.coefficient * COALESCE(ri.volume, 0)) as rap_qty,
                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
@@ -189,45 +199,50 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
         ORDER BY rs.sort_order, rs.code, pir.name
     ", $params);
     
-    // Group by item_code: sum rap_qty and used_qty, collect subcategory details
-    $grouped = [];
+    // Group items by subcategory_id
+    $itemsBySubcat = [];
     foreach ($rawItems as $item) {
-        $code = $item['item_code'];
-        if (!isset($grouped[$code])) {
-            $grouped[$code] = [
-                'item_code' => $code,
-                'name' => $item['name'],
-                'unit' => ($itemType === 'upah' && !empty($item['subcat_unit']) ? $item['subcat_unit'] : $item['unit']),
-                'item_type' => $item['item_type'],
-                'unit_price' => $item['unit_price'],
-                'actual_price' => $item['actual_price'],
-                'ahsp_coefficient' => floatval($item['ahsp_coefficient']),
-                'rap_qty' => 0,
-                'used_qty' => 0,
-                'subcat_details' => [] // per-subcategory capacity for sequential filling
-            ];
-        }
+        $subId = intval($item['subcategory_id']);
         $rapQty = floatval($item['rap_qty']);
         $usedQty = floatval($item['used_qty']);
-        $grouped[$code]['rap_qty'] += $rapQty;
-        $grouped[$code]['used_qty'] += $usedQty;
-        $grouped[$code]['subcat_details'][] = [
-            'subcategory_id' => intval($item['subcategory_id']),
+        $sisaQty = $rapQty - $usedQty;
+        
+        $itemsBySubcat[$subId][] = [
+            'id' => $item['id'],
+            'category_id' => $item['category_id'],
+            'subcategory_id' => $subId,
             'subcat_code' => $item['subcat_code'],
             'subcat_name' => $item['subcat_name'],
-            'subcat_unit' => $item['subcat_unit'],
+            'item_code' => $item['item_code'],
+            'name' => $item['name'],
+            'unit' => ($itemType === 'upah' && !empty($item['subcat_unit']) ? $item['subcat_unit'] : $item['unit']),
+            'item_type' => $item['item_type'],
+            'unit_price' => floatval($item['unit_price']),
+            'actual_price' => floatval($item['actual_price']),
             'ahsp_coefficient' => floatval($item['ahsp_coefficient']),
             'rap_qty' => $rapQty,
             'used_qty' => $usedQty,
-            'sisa' => $rapQty - $usedQty
+            'sisa_qty' => $sisaQty
         ];
-        // Use actual_price if available, otherwise keep highest unit_price
-        if ($item['actual_price'] > $grouped[$code]['actual_price']) {
-            $grouped[$code]['actual_price'] = $item['actual_price'];
-        }
     }
     
-    echo json_encode(['success' => true, 'data' => array_values($grouped)]);
+    // Structure result as list of selected pekerjaan with their items
+    $result = [];
+    foreach ($subcatInfo as $sc) {
+        $subId = intval($sc['id']);
+        $subcatItems = $itemsBySubcat[$subId] ?? [];
+        $result[] = [
+            'subcategory_id' => $subId,
+            'subcat_code' => $sc['code'],
+            'subcat_name' => $sc['name'],
+            'category_id' => $sc['category_id'],
+            'category_code' => $sc['category_code'],
+            'category_name' => $sc['category_name'],
+            'items' => $subcatItems
+        ];
+    }
+    
+    echo json_encode(['success' => true, 'data' => $result]);
     exit;
 }
 
@@ -397,6 +412,8 @@ if ($projectId) {
                 $resubmitItems[] = [
                     'category_id' => $item['category_id'],
                     'subcategory_id' => $item['subcategory_id'],
+                    'subcat_code' => $item['subcategory_code'] ?? '',
+                    'subcat_name' => $item['subcategory_name'] ?? '',
                     'item_code' => $item['item_code'] ?: '',
                     'item_type' => $item['item_type'] ?: '',
                     'item_name' => $item['item_name'],
@@ -486,6 +503,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         foreach ($items as $item) {
             $categoryId = intval($item['category_id'] ?? 0);
             $subcategoryId = intval($item['subcategory_id'] ?? 0);
+            if ($subcategoryId && !$categoryId) {
+                $subcatInfoRow = dbGetRow("SELECT category_id FROM rab_subcategories WHERE id = ?", [$subcategoryId]);
+                if ($subcatInfoRow) {
+                    $categoryId = intval($subcatInfoRow['category_id']);
+                }
+            }
             $itemCode = trim($item['item_code'] ?? '');
             $itemType = trim($item['item_type'] ?? '');
             $itemName = trim($item['item_name'] ?? '');
@@ -708,10 +731,13 @@ require_once __DIR__ . '/../../includes/header.php';
 .readonly-field { background-color: #e9ecef !important; }
 .select2-container { width: 100% !important; }
 /* Multi-item checkbox styles */
-#itemCheckboxContainer { max-height: 400px; overflow-y: auto; }
+#itemCheckboxContainer { max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px; }
 #itemCheckboxContainer table th,
 #itemCheckboxContainer table td { vertical-align: middle; font-size: 0.85rem; }
-#itemCheckboxContainer .item-check-row:hover { background: #f0f7ff; }
+#itemCheckboxContainer thead th { position: sticky; top: 0; z-index: 5; background-color: #f1f3f6 !important; }
+#itemCheckboxContainer .subcat-header-row { background-color: #f0f4fd !important; border-top: 2px solid #b8d4fe; }
+#itemCheckboxContainer .subcat-header-row:hover { background-color: #e5edfc !important; }
+#itemCheckboxContainer .item-check-row:hover { background: #f8faff; }
 #itemCheckboxContainer .item-check-row.selected { background: #e8f5e9; }
 .btn-add-selected { position: sticky; bottom: 0; background: #fff; border-top: 2px solid #28a745; }
 </style>
@@ -1253,17 +1279,23 @@ $(document).ready(function() {
     // When selection changes, enable/disable item type dropdown
     function onRapSelectionChange() {
         const selectedIds = getSelectedSubcategoryIds();
+        const currentType = $('#itemTypeSelect').val();
+        
         if (selectedIds.length > 0) {
-            $('#itemTypeSelect').html(`
-                <option value="">-- Pilih Jenis Item --</option>
-                <option value="upah">Upah</option>
-                <option value="material">Material</option>
-                <option value="alat">Alat</option>
-            `).prop('disabled', false);
+            $('#itemTypeSelect').prop('disabled', false);
+            if (currentType) {
+                // Trigger item type change to reload items with new selection
+                $('#itemTypeSelect').trigger('change');
+                return;
+            }
         } else {
-            $('#itemTypeSelect').html('<option value="">-- Pilih Pekerjaan dahulu --</option>').prop('disabled', true);
+            $('#itemTypeSelect').val('').prop('disabled', true);
+            $('#itemCheckboxContainer').html('<div class="text-center text-muted py-4"><i class="mdi mdi-arrow-left"></i> Pilih Pekerjaan dahulu</div>');
+            $('#addSelectedItemsBtn').prop('disabled', true);
+            $('#selectedItemCount').text('0 item dipilih');
+            return;
         }
-        // Reset item checkbox container
+        // Reset item checkbox container if no itemType selected yet
         $('#itemCheckboxContainer').html('<div class="text-center text-muted py-4"><i class="mdi mdi-arrow-left"></i> Pilih Jenis Item terlebih dahulu</div>');
         $('#addSelectedItemsBtn').prop('disabled', true);
         $('#selectedItemCount').text('0 item dipilih');
@@ -1297,10 +1329,16 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(res) {
                 if (res.success) {
-                    if (res.data.length > 0) {
+                    let totalItemsCount = 0;
+                    if (res.data && res.data.length > 0) {
+                        res.data.forEach(function(pek) {
+                            totalItemsCount += (pek.items ? pek.items.length : 0);
+                        });
+                    }
+                    if (totalItemsCount > 0) {
                         renderItemCheckboxes(res.data, itemType);
                     } else {
-                        $('#itemCheckboxContainer').html('<div class="text-center text-muted py-4"><i class="mdi mdi-alert-circle-outline"></i> Tidak ada item ' + itemType + '</div>');
+                        $('#itemCheckboxContainer').html('<div class="text-center text-muted py-4"><i class="mdi mdi-alert-circle-outline"></i> Tidak ada item ' + itemType + ' pada pekerjaan yang dipilih</div>');
                     }
                 } else {
                     $('#itemCheckboxContainer').html('<div class="text-center text-danger py-4">Gagal memuat item: ' + res.message + '</div>');
@@ -1312,15 +1350,16 @@ $(document).ready(function() {
         });
     });
     
-    // Render item checkboxes table (items grouped by item_code)
-    function renderItemCheckboxes(items, itemType) {
+    // Render item checkboxes table grouped by selected pekerjaan
+    function renderItemCheckboxes(pekerjaanList, itemType) {
         const isUpah = itemType === 'upah';
+        const colCount = isUpah ? 8 : 7;
         
-        let html = '<table class="table table-sm table-hover mb-0">';
-        html += '<thead class="table-secondary" style="position:sticky;top:0;z-index:1;">';
+        let html = '<table class="table table-sm table-hover mb-0" id="itemSelectionTable">';
+        html += '<thead class="table-secondary">';
         html += '<tr>';
-        html += '<th width="35" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllItems" title="Pilih Semua"></th>';
-        html += '<th width="50">Kode</th>';
+        html += '<th width="35" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllItems" title="Pilih Semua Item"></th>';
+        html += '<th width="65">Kode</th>';
         html += '<th>Nama Item</th>';
         html += '<th width="60">Satuan</th>';
         
@@ -1330,82 +1369,94 @@ $(document).ready(function() {
             html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
             html += '<th width="120" class="text-center">Jml Harga</th>';
         } else {
-            html += '<th width="80" class="text-center">Sisa Total</th>';
+            html += '<th width="80" class="text-center">Sisa</th>';
             html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
             html += '<th width="100" class="text-center">Koefisien <span class="text-danger">*</span></th>';
         }
         
         html += '</tr></thead><tbody>';
         
-        items.forEach(function(item, idx) {
-            const price = item.actual_price || item.unit_price;
-            const ahspCoef = parseFloat(item.ahsp_coefficient) || 0;
-            const rapQty = parseFloat(item.rap_qty) || 0;
-            const usedQty = parseFloat(item.used_qty) || 0;
-            const sisaQty = rapQty - usedQty;
-            const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+        let globalItemIdx = 0;
+        pekerjaanList.forEach(function(pek) {
+            const hasItems = pek.items && pek.items.length > 0;
             
-            // Build tooltip showing per-pekerjaan breakdown
-            let tooltipLines = [];
-            if (item.subcat_details && item.subcat_details.length > 1) {
-                item.subcat_details.forEach(function(sd) {
-                    const sdSisa = sd.sisa > 0 ? sd.sisa.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
-                    tooltipLines.push(sd.subcat_code + ': sisa ' + sdSisa);
+            // Pekerjaan Header Row
+            html += '<tr class="subcat-header-row" data-subcat-id="' + pek.subcategory_id + '">';
+            html += '<td class="text-center">';
+            if (hasItems) {
+                html += '<input type="checkbox" class="form-check-input subcat-group-check" data-subcat-id="' + pek.subcategory_id + '" title="Pilih Semua Item di Pekerjaan Ini">';
+            } else {
+                html += '<i class="mdi mdi-minus text-muted" style="font-size: 0.8rem;"></i>';
+            }
+            html += '</td>';
+            html += '<td colspan="' + (colCount - 1) + '">';
+            html += '<div class="d-flex align-items-center justify-content-between">';
+            html += '<div>';
+            html += '<i class="mdi mdi-briefcase-outline me-1 text-primary"></i>';
+            html += '<strong>' + escapeHtml(pek.subcat_code) + '. ' + escapeHtml(pek.subcat_name) + '</strong>';
+            html += '</div>';
+            if (hasItems) {
+                html += '<span class="badge bg-primary bg-opacity-25 text-primary" style="font-size: 0.72rem;">' + pek.items.length + ' item</span>';
+            } else {
+                html += '<span class="badge bg-secondary bg-opacity-25 text-secondary" style="font-size: 0.7rem;">Tidak ada item ' + itemType + '</span>';
+            }
+            html += '</div></td></tr>';
+            
+            if (hasItems) {
+                pek.items.forEach(function(item) {
+                    const price = item.actual_price || item.unit_price;
+                    const ahspCoef = parseFloat(item.ahsp_coefficient) || 0;
+                    const sisaQty = parseFloat(item.sisa_qty) || 0;
+                    const rapQty = parseFloat(item.rap_qty) || 0;
+                    const usedQty = parseFloat(item.used_qty) || 0;
+                    const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+                    const idx = globalItemIdx++;
+                    
+                    html += '<tr class="item-check-row" data-subcat-id="' + pek.subcategory_id + '">';
+                    html += '<td class="text-center">';
+                    html += '<input type="checkbox" class="form-check-input item-checkbox" ';
+                    html += 'data-subcat-id="' + pek.subcategory_id + '" ';
+                    html += 'data-subcat-code="' + escapeHtml(pek.subcat_code) + '" ';
+                    html += 'data-subcat-name="' + escapeHtml(pek.subcat_name) + '" ';
+                    html += 'data-category-id="' + (pek.category_id || '') + '" ';
+                    html += 'data-code="' + (item.item_code || '') + '" ';
+                    html += 'data-name="' + escapeHtml(item.name) + '" ';
+                    html += 'data-unit="' + escapeHtml(item.unit) + '" ';
+                    html += 'data-price="' + price + '" ';
+                    html += 'data-ahsp-coef="' + ahspCoef + '" ';
+                    html += 'data-sisa-qty="' + sisaQty + '" ';
+                    html += 'data-rap-qty="' + rapQty + '" ';
+                    html += 'data-used-qty="' + usedQty + '" ';
+                    html += 'data-item-type="' + item.item_type + '">';
+                    html += '</td>';
+                    html += '<td><small class="text-muted">' + (item.item_code || '-') + '</small></td>';
+                    html += '<td class="ps-3">' + escapeHtml(item.name) + '</td>';
+                    html += '<td><small>' + escapeHtml(item.unit) + '</small></td>';
+                    
+                    if (isUpah) {
+                        html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
+                        html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
+                        html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
+                        html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
+                    } else {
+                        html += '<td class="text-center"><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaText + '</small></td>';
+                        html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
+                        html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
+                    }
+                    html += '</tr>';
                 });
             }
-            const tooltipAttr = tooltipLines.length > 0 
-                ? ' data-bs-toggle="tooltip" data-bs-placement="left" title="' + escapeHtml(tooltipLines.join('\n')) + '"' 
-                : '';
-            
-            // Store subcat_details as JSON in data attribute
-            const subcatDetailsJson = JSON.stringify(item.subcat_details || []);
-            
-            html += '<tr class="item-check-row">';
-            html += '<td class="text-center">';
-            html += '<input type="checkbox" class="form-check-input item-checkbox" ';
-            html += 'data-code="' + (item.item_code || '') + '" ';
-            html += 'data-name="' + escapeHtml(item.name) + '" ';
-            html += 'data-unit="' + item.unit + '" ';
-            html += 'data-price="' + price + '" ';
-            html += 'data-ahsp-coef="' + ahspCoef + '" ';
-            html += 'data-sisa-qty="' + sisaQty + '" ';
-            html += 'data-item-type="' + item.item_type + '" ';
-            html += "data-subcat-details='" + subcatDetailsJson.replace(/'/g, '&#39;') + "'>";
-            html += '</td>';
-            html += '<td><small class="text-muted">' + (item.item_code || '-') + '</small></td>';
-            html += '<td>' + escapeHtml(item.name);
-            // Show pekerjaan count badge if item spans multiple pekerjaan
-            if (item.subcat_details && item.subcat_details.length > 1) {
-                html += ' <span class="badge bg-info bg-opacity-25 text-info" style="font-size:0.7rem;">' + item.subcat_details.length + ' pekerjaan</span>';
-            }
-            html += '</td>';
-            html += '<td><small>' + item.unit + '</small></td>';
-            
-            if (isUpah) {
-                html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
-                html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
-                html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="0" data-idx="' + idx + '"></td>';
-                html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
-            } else {
-                html += '<td class="text-center"' + tooltipAttr + '><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + '">' + sisaText + '</small></td>';
-                html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="0" data-idx="' + idx + '"></td>';
-                html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
-            }
-            html += '</tr>';
         });
         
         html += '</tbody></table>';
         $('#itemCheckboxContainer').html(html);
-        
-        // Re-init tooltips for sisa breakdown
-        $('[data-bs-toggle="tooltip"]').tooltip();
     }
-
     
     // Auto-format price inputs in the checkbox table
     $(document).on('input', '.item-price-input', function() {
         autoFormatInput($(this));
         updateRowJmlHarga($(this).closest('tr'));
+        checkRowOnInput($(this));
     });
     
     // Allow numbers and comma for workplan / coef inputs in the checkbox table
@@ -1413,19 +1464,44 @@ $(document).ready(function() {
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
         updateRowJmlHarga($(this).closest('tr'));
+        checkRowOnInput($(this));
     });
     
     $(document).on('input', '.item-coef-input', function() {
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
+        checkRowOnInput($(this));
     });
+
+    // Helper to auto-check row checkbox when user types value
+    function checkRowOnInput(inputElem) {
+        const row = inputElem.closest('tr');
+        const cb = row.find('.item-checkbox');
+        const val = inputElem.val();
+        if (val && parseNumber(val) > 0 && !cb.prop('checked')) {
+            cb.prop('checked', true);
+            row.addClass('selected');
+            const subId = cb.data('subcat-id');
+            const totalInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]').length;
+            const checkedInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]:checked').length;
+            $('.subcat-group-check[data-subcat-id="' + subId + '"]').prop('checked', totalInSub > 0 && totalInSub === checkedInSub);
+            
+            const total = $('.item-checkbox').length;
+            const checked = $('.item-checkbox:checked').length;
+            $('#selectAllItems').prop('checked', total > 0 && total === checked);
+            updateSelectedItemCount();
+        }
+    }
 
     function updateRowJmlHarga(row) {
         if ($('#itemTypeSelect').val() === 'upah') {
             const cb = row.find('.item-checkbox');
             const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
             const workPlan = parseNumber(row.find('.item-workplan-input').val());
-            const price = parseNumber(row.find('.item-price-input').val());
+            let price = parseNumber(row.find('.item-price-input').val());
+            if (price <= 0) {
+                price = parseFloat(cb.data('price')) || 0;
+            }
             const jmlHarga = ahspCoef * workPlan * price;
             row.find('.item-total-price-cell').text(formatRupiah(jmlHarga));
         }
@@ -1434,18 +1510,39 @@ $(document).ready(function() {
     // Handle "Select All Items" checkbox
     $(document).on('change', '#selectAllItems', function() {
         const isChecked = $(this).prop('checked');
-        $('.item-checkbox').prop('checked', isChecked);
+        $('.item-checkbox, .subcat-group-check').prop('checked', isChecked);
         $('.item-check-row').toggleClass('selected', isChecked);
+        updateSelectedItemCount();
+    });
+
+    // Handle subcategory group checkbox
+    $(document).on('change', '.subcat-group-check', function() {
+        const subId = $(this).data('subcat-id');
+        const isChecked = $(this).prop('checked');
+        $('.item-checkbox[data-subcat-id="' + subId + '"]').prop('checked', isChecked);
+        $('.item-check-row[data-subcat-id="' + subId + '"]').toggleClass('selected', isChecked);
+        
+        // Update #selectAllItems
+        const total = $('.item-checkbox').length;
+        const checked = $('.item-checkbox:checked').length;
+        $('#selectAllItems').prop('checked', total > 0 && total === checked);
         updateSelectedItemCount();
     });
     
     // Handle individual item checkbox
     $(document).on('change', '.item-checkbox', function() {
+        const subId = $(this).data('subcat-id');
         $(this).closest('tr').toggleClass('selected', $(this).prop('checked'));
+        
+        // Update this subcat group checkbox
+        const totalInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]').length;
+        const checkedInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]:checked').length;
+        $('.subcat-group-check[data-subcat-id="' + subId + '"]').prop('checked', totalInSub > 0 && totalInSub === checkedInSub);
+        
         // Update "Select All" state
         const total = $('.item-checkbox').length;
         const checked = $('.item-checkbox:checked').length;
-        $('#selectAllItems').prop('checked', total === checked);
+        $('#selectAllItems').prop('checked', total > 0 && total === checked);
         updateSelectedItemCount();
     });
     
@@ -1470,7 +1567,11 @@ $(document).ready(function() {
         checkedItems.each(function() {
             const cb = $(this);
             const row = cb.closest('tr');
-            const price = parseNumber(row.find('.item-price-input').val());
+            let price = parseNumber(row.find('.item-price-input').val());
+            if (price <= 0) {
+                price = parseFloat(cb.data('price')) || 0;
+            }
+            
             const itemType = cb.data('item-type');
             let actualCoef = 0;
 
@@ -1494,30 +1595,27 @@ $(document).ready(function() {
             }
             row.removeClass('table-danger');
             
-            // Get subcat_details for sequential filling
-            let subcatDetails = [];
-            try {
-                subcatDetails = JSON.parse(cb.attr('data-subcat-details') || '[]');
-            } catch(e) { subcatDetails = []; }
-            
-            // Use first subcategory as primary (for backward compatibility)
-            const primarySubcatId = subcatDetails.length > 0 ? subcatDetails[0].subcategory_id : null;
+            const subcatId = cb.data('subcat-id');
+            const subcatCode = cb.data('subcat-code');
+            const subcatName = cb.data('subcat-name');
+            const categoryId = cb.data('category-id');
             
             addItemRow({
-                category_id: null,
-                subcategory_id: primarySubcatId,
+                category_id: categoryId || null,
+                subcategory_id: subcatId,
+                subcat_code: subcatCode,
+                subcat_name: subcatName,
                 item_code: cb.data('code'),
                 item_type: itemType || '',
                 item_name: cb.data('name'),
                 unit: cb.data('unit'),
                 unit_price: price,
                 coefficient: actualCoef,
-                subcat_details: subcatDetails,
+                subcat_details: null,
                 rap_unit_price: parseFloat(cb.data('price')) || 0,
                 sisa_qty: parseFloat(cb.data('sisa-qty')) || 0,
                 is_readonly: true
             });
-
             
             addedCount++;
             // Uncheck the added item and reset its inputs
@@ -1529,7 +1627,13 @@ $(document).ready(function() {
             row.find('.item-total-price-cell').text('Rp 0');
         });
         
-        // Update select all and counter
+        // Update subcat group checkboxes & select all
+        $('.subcat-group-check').each(function() {
+            const subId = $(this).data('subcat-id');
+            const totalInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]').length;
+            const checkedInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]:checked').length;
+            $(this).prop('checked', totalInSub > 0 && totalInSub === checkedInSub);
+        });
         $('#selectAllItems').prop('checked', false);
         updateSelectedItemCount();
         
@@ -1680,24 +1784,29 @@ $(document).ready(function() {
             }
         }
         
+        const subcatBadge = data.subcat_code ? `<br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size: 0.72rem;" title="${escapeHtml(data.subcat_name || '')}"><i class="mdi mdi-briefcase-outline"></i> ${escapeHtml(data.subcat_code)}</span>` : '';
+        const subcatSubtitle = data.subcat_name ? `<div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> ${escapeHtml(data.subcat_code ? data.subcat_code + ' - ' : '')}${escapeHtml(data.subcat_name)}</div>` : '';
+        
         const row = `
             <tr class="item-row" data-index="${itemIndex}" data-item-type="${data.item_type || ''}" 
                 data-rap-unit-price="${rapUnitPrice}" data-sisa-qty="${sisaQty}">
                 <td class="text-center">${itemIndex}</td>
                 <td>
-                    <small class="text-muted">${data.item_code || '<em>Custom</em>'}</small>
-                    <input type="hidden" name="items[${itemIndex}][category_id]" value="${data.category_id}">
-                    <input type="hidden" name="items[${itemIndex}][subcategory_id]" value="${data.subcategory_id}">
-                    <input type="hidden" name="items[${itemIndex}][item_code]" value="${data.item_code}">
+                    <small class="text-muted fw-semibold">${data.item_code || '<em>Custom</em>'}</small>
+                    ${subcatBadge}
+                    <input type="hidden" name="items[${itemIndex}][category_id]" value="${data.category_id || ''}">
+                    <input type="hidden" name="items[${itemIndex}][subcategory_id]" value="${data.subcategory_id || ''}">
+                    <input type="hidden" name="items[${itemIndex}][item_code]" value="${data.item_code || ''}">
                     <input type="hidden" name="items[${itemIndex}][item_type]" value="${data.item_type || ''}">
-                    <input type="hidden" name="items[${itemIndex}][subcat_details]" value='${JSON.stringify(data.subcat_details || []).replace(/'/g, "&#39;")}' >
+                    <input type="hidden" name="items[${itemIndex}][subcat_details]" value='${data.subcat_details ? JSON.stringify(data.subcat_details).replace(/'/g, "&#39;") : ""}'>
                 </td>
                 <td>
-                    <input type="text" name="items[${itemIndex}][item_name]" value="${data.item_name}" 
+                    <input type="text" name="items[${itemIndex}][item_name]" value="${escapeHtml(data.item_name)}" 
                            ${readonlyName} placeholder="Nama Item" required>
+                    ${subcatSubtitle}
                 </td>
                 <td>
-                    <input type="text" name="items[${itemIndex}][unit]" value="${data.unit}" 
+                    <input type="text" name="items[${itemIndex}][unit]" value="${escapeHtml(data.unit)}" 
                            ${readonlyUnit} placeholder="Sat" required>
                 </td>
                 <td>
@@ -1778,6 +1887,40 @@ $(document).ready(function() {
         const total = price * coef;
         
         row.find('.total-price').val(formatNumber(total));
+        
+        // Dynamically update Status Harga
+        const rapUnitPrice = parseFloat(row.data('rap-unit-price')) || 0;
+        if (rapUnitPrice > 0 && price > 0) {
+            const hargaLapangan = price * coef;
+            const hargaRap = rapUnitPrice * coef;
+            if (hargaLapangan > hargaRap) {
+                const pct = Math.round(((hargaLapangan - hargaRap) / hargaRap) * 100);
+                row.find('.status-harga-cell').html('<span class="badge bg-danger">LEBIH MAHAL ' + pct + '%</span>');
+            } else if (hargaLapangan < hargaRap) {
+                const pct = Math.round(((hargaRap - hargaLapangan) / hargaRap) * 100);
+                row.find('.status-harga-cell').html('<span class="badge bg-success">HEMAT ' + pct + '%</span>');
+            } else {
+                row.find('.status-harga-cell').html('<span class="badge bg-success">AMAN</span>');
+            }
+        }
+        
+        // Dynamically update Status Qty
+        const sisaQty = parseFloat(row.data('sisa-qty')) || 0;
+        if (sisaQty > 0 || rapUnitPrice > 0) {
+            const afterApproval = sisaQty - coef;
+            if (coef > sisaQty && sisaQty >= 0) {
+                row.find('.status-qty-cell').html(
+                    '<span class="badge bg-danger">⚠️ OVER QTY</span>' +
+                    '<br><small class="text-danger">Proyeksi sisa: ' + afterApproval.toLocaleString('id-ID', {maximumFractionDigits: 4}) + '</small>'
+                );
+            } else {
+                row.find('.status-qty-cell').html(
+                    '<span class="badge bg-success">OK</span>' +
+                    '<br><small class="text-success">Proyeksi sisa: ' + afterApproval.toLocaleString('id-ID', {maximumFractionDigits: 4}) + '</small>'
+                );
+            }
+        }
+        
         calculateGrandTotal();
     }
     
