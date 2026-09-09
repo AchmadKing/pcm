@@ -16,6 +16,7 @@ $baseUrl = getBaseUrl();
 // Determine current page for active menu highlighting
 $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 $currentDir = basename(dirname($_SERVER['PHP_SELF']));
+$hasSidebar = hasAnyPermission();
 ?>
 <!doctype html>
 <html lang="id">
@@ -46,10 +47,16 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
         .table th { white-space: nowrap; }
         .btn-action { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
         .required::after { content: ' *'; color: red; }
+        <?php if (!$hasSidebar): ?>
+        .main-content { margin-left: 0 !important; }
+        .footer { left: 0 !important; }
+        .navbar-brand-box { width: auto !important; }
+        <?php endif; ?>
     </style>
 </head>
 
 <body data-sidebar="dark">
+    <?php if ($hasSidebar): ?>
     <script>
         (function() {
             var collapsed = sessionStorage.getItem('pcm_sidebar_collapsed');
@@ -60,6 +67,7 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
             }
         })();
     </script>
+    <?php endif; ?>
     <div id="layout-wrapper">
         
         <!-- Header -->
@@ -76,9 +84,11 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                             </span>
                         </a>
                     </div>
+                    <?php if ($hasSidebar): ?>
                     <button type="button" class="btn btn-sm px-3 font-size-24 header-item waves-effect" id="vertical-menu-btn">
                         <i class="mdi mdi-menu"></i>
                     </button>
+                    <?php endif; ?>
                 </div>
 
                 <div class="d-flex">
@@ -113,31 +123,11 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
         </header>
 
         <!-- Left Sidebar -->
+        <?php if ($hasSidebar): ?>
         <div class="vertical-menu">
             <div data-simplebar class="h-100">
                 <div id="sidebar-menu">
                     <ul class="metismenu list-unstyled" id="side-menu">
-                        <?php if (!hasAnyPermission()): ?>
-                        <li class="menu-title">Hak Akses</li>
-                        <li>
-                            <div class="px-3 py-4 text-center">
-                                <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-soft-danger text-danger mb-3" style="width: 48px; height: 48px;">
-                                    <i class="mdi mdi-shield-lock-outline" style="font-size: 24px;"></i>
-                                </div>
-                                <p class="text-muted font-size-12 mb-3">
-                                    Anda tidak memiliki akses silahkan hubungi administrator atau pihak terkait.
-                                </p>
-                                <div class="d-grid gap-2">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary waves-effect" onclick="window.location.reload();">
-                                        <i class="mdi mdi-refresh me-1"></i> Reload
-                                    </button>
-                                    <a href="<?= $baseUrl ?>/pages/auth/logout.php" class="btn btn-sm btn-danger waves-effect">
-                                        <i class="mdi mdi-power me-1"></i> Logout
-                                    </a>
-                                </div>
-                            </div>
-                        </li>
-                        <?php else: ?>
                         <li class="menu-title">Menu</li>
                         
                         <!-- Dashboard -->
@@ -230,11 +220,11 @@ $currentDir = basename(dirname($_SERVER['PHP_SELF']));
                             </ul>
                         </li>
                         <?php endif; ?>
-                        <?php endif; // hasAnyPermission ?>
                     </ul>
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- Main Content -->
         <div class="main-content">
