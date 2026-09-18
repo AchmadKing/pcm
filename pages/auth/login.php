@@ -38,9 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="id">
 <head>
     <meta charset="utf-8" />
-    <title>Login | PCM - Project Cost Management</title>
+    <title>Login | PCC - Project Cost Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta content="Project Cost Management System" name="description" />
+    <meta content="Project Cost Control System" name="description" />
     <link rel="shortcut icon" href="<?= $baseUrl ?>/dist/assets/images/favicon.ico">
     
     <!-- Bootstrap Css -->
@@ -64,11 +64,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         <div class="text-center">
                                             <div>
                                                 <h2 class="text-primary">
-                                                    <i class="mdi mdi-clipboard-text-outline"></i> PCM
+                                                    <i class="mdi mdi-clipboard-text-outline"></i> PCC
                                                 </h2>
                                             </div>
                                             <h4 class="font-size-18 mt-4">Selamat Datang!</h4>
-                                            <p class="text-muted">Silakan login untuk melanjutkan ke sistem PCM.</p>
+                                            <p class="text-muted">Silakan login untuk melanjutkan ke sistem PCC.</p>
                                         </div>
 
                                         <?php if ($error): ?>
@@ -124,8 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <p class="text-muted mb-3">
                                                 <small><strong>Tim Lapangan:</strong> field_team / password</small>
                                             </p>
-                                            <p>© <script>document.write(new Date().getFullYear())</script> PCM. 
-                                               Project Cost Management System</p>
+                                            <p>© <script>document.write(new Date().getFullYear())</script> PCC. 
+                                               Project Cost Control System</p>
                                         </div>
                                     </div>
                                 </div>

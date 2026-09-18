@@ -1,7 +1,7 @@
 <?php
 /**
  * Main Entry Point - Dashboard
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/includes/auth.php';
@@ -136,7 +136,7 @@ try {
             <h4 class="mb-sm-0">Dashboard</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="javascript: void(0);">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="javascript: void(0);">PCC</a></li>
                     <li class="breadcrumb-item active">Dashboard</li>
                 </ol>
             </div>

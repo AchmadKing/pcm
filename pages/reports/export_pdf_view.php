@@ -1,7 +1,7 @@
 <?php
 /**
  * Print / PDF Template for Project Reports
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 if (!defined('DB_HOST')) {
@@ -19,7 +19,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laporan PCM - <?= htmlspecialchars($isAllProjects ? 'Semua Proyek' : $selectedProject['name']) ?> (<?= htmlspecialchars($periodeLabel) ?>)</title>
+    <title>Laporan PCC - <?= htmlspecialchars($isAllProjects ? 'Semua Proyek' : $selectedProject['name']) ?> (<?= htmlspecialchars($periodeLabel) ?>)</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -211,7 +211,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
     
     <!-- Kop Laporan -->
     <div class="report-header">
-        <h2>PCM - Project Cost Management System</h2>
+        <h2>PCC - Project Cost Control System</h2>
         <?php if ($type === 'rekap'): ?>
             <h3>Laporan Rekapitulasi Proyek & Realisasi</h3>
         <?php elseif ($type === 'transactions'): ?>
@@ -424,7 +424,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     <th width="80">Kode</th>
                     <th>Uraian Item / Pekerjaan</th>
                     <th width="50">Satuan</th>
-                    <th width="70" class="text-end">Koefisien</th>
+                    <th width="70" class="text-end">Volume</th>
                     <th width="95" class="text-end">Harga Satuan</th>
                     <th width="115" class="text-end">Total Biaya (Rp)</th>
                     <th width="90">Pemohon</th>

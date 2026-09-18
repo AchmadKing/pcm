@@ -1,7 +1,7 @@
 <?php
 /**
  * Export Request Details to PDF (Print-Ready HTML)
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/../../includes/auth.php';
@@ -304,7 +304,7 @@ $baseUrl = getBaseUrl();
 <div class="page-container">
     <div class="report-header">
         <h2>Laporan Pengajuan Dana</h2>
-        <p>PCM - Project Cost Management System</p>
+        <p>PCC - Project Cost Control System</p>
     </div>
 
     <div class="info-section">
@@ -387,7 +387,7 @@ $baseUrl = getBaseUrl();
                 <th width="100">Kode</th>
                 <th>Uraian Pekerjaan / Item</th>
                 <th width="60">Satuan</th>
-                <th width="100" class="text-end">Koefisien</th>
+                <th width="100" class="text-end">Volume</th>
                 <th width="120" class="text-end">Harga Satuan</th>
                 <th width="140" class="text-end">Jumlah</th>
             </tr>

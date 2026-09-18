@@ -2,7 +2,7 @@
 /**
  * Actualization Report - Laporan Aktual
  * Records remaining budget (sisa anggaran) per approved request
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/../../includes/auth.php';
@@ -290,7 +290,7 @@ require_once __DIR__ . '/../../includes/header.php';
             </h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Pengajuan</a></li>
                     <li class="breadcrumb-item"><a href="view_request.php?id=<?= $requestId ?>">Detail</a></li>
                     <li class="breadcrumb-item active">Laporan Aktual</li>

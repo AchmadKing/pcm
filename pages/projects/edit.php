@@ -1,7 +1,7 @@
 <?php
 /**
  * Edit Project
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/../../includes/auth.php';
@@ -88,7 +88,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Edit Proyek</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Proyek</a></li>
                     <li class="breadcrumb-item active">Edit</li>
                 </ol>

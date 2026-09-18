@@ -1067,7 +1067,7 @@ function renderRequestDetail(index) {
     html += '<table class="table table-bordered table-sm mb-0">';
     html += '<thead class="table-light">';
     html += '<tr><th style="width:80px">Kode</th><th>Uraian</th><th style="width:55px">Satuan</th>' +
-            '<th style="width:90px" class="text-end">Koefisien</th>' +
+            '<th style="width:90px" class="text-end">Volume</th>' +
             '<th style="width:110px" class="text-end">Harga</th>' +
             '<th style="width:130px" class="text-end">Jumlah</th></tr>';
     html += '</thead><tbody>';

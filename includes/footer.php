@@ -3,7 +3,7 @@
                 <div class="container-fluid">
                     <div class="row">
                         <div class="col-sm-6">
-                            <script>document.write(new Date().getFullYear())</script> © PCM - Project Cost Management
+                            <script>document.write(new Date().getFullYear())</script> © PCC - Project Cost Control
                         </div>
                     </div>
                 </div>
@@ -451,7 +451,7 @@ document.getElementById('confirmActionBtn').addEventListener('click', function()
 
 <script>
 /* ==========================================================================
-   PCM Scroll & View Position Preservation System
+   PCC Scroll & View Position Preservation System
    Preserves exact user view position and scroll location across all page actions,
    reloads, form submissions, edit/delete/add operations on Master Data, RAB, RAP.
    ========================================================================== */

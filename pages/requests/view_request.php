@@ -1,7 +1,7 @@
 <?php
 /**
  * View Request Details
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // IMPORTANT: Process all logic that may redirect BEFORE including header.php
@@ -154,7 +154,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0"><?= sanitize($request['request_number']) ?></h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Pengajuan</a></li>
                     <li class="breadcrumb-item active">Detail</li>
                 </ol>
@@ -371,7 +371,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <th width="100">Kode</th>
                                 <th>Uraian</th>
                                 <th width="60">Satuan</th>
-                                <th width="100" class="text-end">Koefisien</th>
+                                <th width="100" class="text-end">Volume</th>
                                 <th width="130" class="text-end">Harga</th>
                                 <th width="150" class="text-end">Jumlah</th>
                             </tr>

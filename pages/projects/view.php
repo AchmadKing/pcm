@@ -1,7 +1,7 @@
 <?php
 /**
  * Project Dashboard - Tabbed View
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // AJAX Handler: Weekly Detail Modal - returns FULL request details for a specific week+subcategory
@@ -356,8 +356,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// AJAX Handler for RAB/RAP Volume Updates & Drag-and-Drop Category Head-Sub
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['ajax_update_rab_volume', 'ajax_update_rap_volume', 'ajax_move_category_head_sub'])) {
+// AJAX Handler for RAB/RAP Volume Updates & Category Reordering / Head-Sub Drag-and-Drop
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], [
+    'ajax_update_rab_volume', 
+    'ajax_update_rap_volume', 
+    'ajax_move_category_head_sub',
+    'ajax_reorder_rab_categories',
+    'ajax_move_category_order',
+    'ajax_move_category_relative'
+])) {
     require_once __DIR__ . '/../../config/database.php';
     require_once __DIR__ . '/../../includes/functions.php';
     require_once __DIR__ . '/../../includes/auth.php';
@@ -372,16 +379,210 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     }
     
     $action = $_POST['action'];
+    $projectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
     
     try {
         if ($action === 'ajax_move_category_head_sub') {
             $catId = intval($_POST['category_id'] ?? 0);
-            $headSubId = !empty($_POST['head_sub_id']) ? intval($_POST['head_sub_id']) : null;
+            $headSubId = isset($_POST['head_sub_id']) && $_POST['head_sub_id'] !== '' && $_POST['head_sub_id'] !== '0' ? intval($_POST['head_sub_id']) : null;
             if (!$catId) {
                 die(json_encode(['success' => false, 'message' => 'Kategori tidak valid!']));
             }
+            $cat = dbGetRow("SELECT project_id FROM rab_categories WHERE id = ?", [$catId]);
+            if (!$cat) {
+                die(json_encode(['success' => false, 'message' => 'Kategori tidak ditemukan!']));
+            }
+            $pId = $projectId ?: $cat['project_id'];
             dbExecute("UPDATE rab_categories SET head_sub_id = ? WHERE id = ?", [$headSubId, $catId]);
-            die(json_encode(['success' => true, 'message' => 'Kategori berhasil dipindahkan!']));
+            resequenceRabCategoriesAndSubcategories($pId);
+            $newOrder = dbGetAll("SELECT id, code, head_sub_id, sort_order FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+            die(json_encode(['success' => true, 'message' => 'Kategori berhasil dipindahkan!', 'new_order' => $newOrder]));
+        }
+
+        if ($action === 'ajax_reorder_rab_categories') {
+            $categoriesRaw = $_POST['categories'] ?? [];
+            if (is_string($categoriesRaw)) {
+                $categoriesRaw = json_decode($categoriesRaw, true) ?: [];
+            }
+            
+            if (empty($categoriesRaw)) {
+                die(json_encode(['success' => false, 'message' => 'Data urutan kategori kosong!']));
+            }
+            
+            $sortIdx = 1;
+            $pId = $projectId;
+            foreach ($categoriesRaw as $item) {
+                $cId = is_array($item) ? intval($item['id'] ?? 0) : intval($item);
+                if (!$cId) continue;
+                
+                if (!$pId) {
+                    $catInfo = dbGetRow("SELECT project_id FROM rab_categories WHERE id = ?", [$cId]);
+                    if ($catInfo) $pId = $catInfo['project_id'];
+                }
+                
+                if (is_array($item) && array_key_exists('head_sub_id', $item)) {
+                    $hsId = (!empty($item['head_sub_id']) && $item['head_sub_id'] !== '0') ? intval($item['head_sub_id']) : null;
+                    dbExecute("UPDATE rab_categories SET sort_order = ?, head_sub_id = ? WHERE id = ?", [$sortIdx, $hsId, $cId]);
+                } else {
+                    dbExecute("UPDATE rab_categories SET sort_order = ? WHERE id = ?", [$sortIdx, $cId]);
+                }
+                $sortIdx++;
+            }
+            
+            if ($pId) {
+                resequenceRabCategoriesAndSubcategories($pId);
+            }
+            $newOrder = dbGetAll("SELECT id, code, head_sub_id, sort_order FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+            die(json_encode(['success' => true, 'message' => 'Urutan kategori berhasil disimpan!', 'new_order' => $newOrder]));
+        }
+
+        if ($action === 'ajax_move_category_order') {
+            $catId = intval($_POST['category_id'] ?? 0);
+            $direction = $_POST['direction'] ?? 'up';
+            
+            if (!$catId) {
+                die(json_encode(['success' => false, 'message' => 'Kategori tidak valid!']));
+            }
+            
+            $cat = dbGetRow("SELECT id, project_id, head_sub_id, sort_order FROM rab_categories WHERE id = ?", [$catId]);
+            if (!$cat) {
+                die(json_encode(['success' => false, 'message' => 'Kategori tidak ditemukan!']));
+            }
+            $pId = $projectId ?: $cat['project_id'];
+            
+            $allCats = dbGetAll("SELECT id, sort_order, head_sub_id FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+            $currentIndex = -1;
+            foreach ($allCats as $idx => $c) {
+                if ($c['id'] == $catId) {
+                    $currentIndex = $idx;
+                    break;
+                }
+            }
+            
+            if ($currentIndex === -1) {
+                die(json_encode(['success' => false, 'message' => 'Kategori tidak ditemukan dalam proyek!']));
+            }
+            
+            $targetIndex = ($direction === 'up') ? $currentIndex - 1 : $currentIndex + 1;
+            if ($targetIndex >= 0 && $targetIndex < count($allCats)) {
+                // Swap positions in array
+                $temp = $allCats[$currentIndex];
+                $allCats[$currentIndex] = $allCats[$targetIndex];
+                $allCats[$targetIndex] = $temp;
+                
+                // If moving between different head-subs, inherit the target position's head_sub_id
+                $targetHsId = $allCats[$targetIndex]['head_sub_id'];
+                
+                // Update all sort orders
+                $s = 1;
+                foreach ($allCats as $c) {
+                    dbExecute("UPDATE rab_categories SET sort_order = ? WHERE id = ?", [$s, $c['id']]);
+                    $s++;
+                }
+                
+                resequenceRabCategoriesAndSubcategories($pId);
+                $newOrder = dbGetAll("SELECT id, code, head_sub_id, sort_order FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+                die(json_encode(['success' => true, 'message' => 'Urutan kategori berhasil diubah!', 'new_order' => $newOrder]));
+            } else {
+                die(json_encode(['success' => true, 'message' => 'Kategori sudah berada di posisi paling ' . ($direction === 'up' ? 'atas' : 'bawah') . '.', 'no_change' => true]));
+            }
+        }
+
+        if ($action === 'ajax_move_category_relative') {
+            $sourceCatId = intval($_POST['source_cat_id'] ?? 0);
+            $targetCatId = intval($_POST['target_cat_id'] ?? 0);
+            $position = $_POST['position'] ?? 'after'; // 'before' or 'after'
+            $targetHeadSubId = isset($_POST['target_head_sub_id']) && $_POST['target_head_sub_id'] !== '' && $_POST['target_head_sub_id'] !== '0' ? intval($_POST['target_head_sub_id']) : null;
+            
+            if (!$sourceCatId) {
+                die(json_encode(['success' => false, 'message' => 'Kategori sumber tidak valid!']));
+            }
+            
+            $sourceCat = dbGetRow("SELECT id, project_id, head_sub_id FROM rab_categories WHERE id = ?", [$sourceCatId]);
+            if (!$sourceCat) {
+                die(json_encode(['success' => false, 'message' => 'Kategori sumber tidak ditemukan!']));
+            }
+            $pId = $projectId ?: $sourceCat['project_id'];
+            
+            $allCats = dbGetAll("SELECT id, head_sub_id FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+            
+            // Remove source from list
+            $filteredCats = [];
+            foreach ($allCats as $c) {
+                if ($c['id'] != $sourceCatId) {
+                    $filteredCats[] = $c;
+                }
+            }
+            
+            $newOrderedList = [];
+            $inserted = false;
+            
+            if ($targetCatId && $targetCatId != $sourceCatId) {
+                $targetCat = dbGetRow("SELECT id, head_sub_id FROM rab_categories WHERE id = ?", [$targetCatId]);
+                $finalHeadSubId = ($targetHeadSubId !== null) ? $targetHeadSubId : ($targetCat ? $targetCat['head_sub_id'] : null);
+                
+                foreach ($filteredCats as $c) {
+                    if ($c['id'] == $targetCatId) {
+                        if ($position === 'before') {
+                            $newOrderedList[] = ['id' => $sourceCatId, 'head_sub_id' => $finalHeadSubId];
+                            $newOrderedList[] = $c;
+                        } else {
+                            $newOrderedList[] = $c;
+                            $newOrderedList[] = ['id' => $sourceCatId, 'head_sub_id' => $finalHeadSubId];
+                        }
+                        $inserted = true;
+                    } else {
+                        $newOrderedList[] = $c;
+                    }
+                }
+            }
+            
+            if (!$inserted) {
+                // If dropped onto head-sub without target category or fallback, append to head_sub group
+                $finalHeadSubId = $targetHeadSubId;
+                $newOrderedList = [];
+                $placed = false;
+                
+                if ($finalHeadSubId !== null) {
+                    // Place at end of that head_sub
+                    foreach ($filteredCats as $c) {
+                        $newOrderedList[] = $c;
+                        if ($c['head_sub_id'] == $finalHeadSubId) {
+                            // will place after last item of this head_sub
+                        }
+                    }
+                    // Insert at appropriate place
+                    $lastHsIdx = -1;
+                    foreach ($filteredCats as $idx => $c) {
+                        if ($c['head_sub_id'] == $finalHeadSubId) {
+                            $lastHsIdx = $idx;
+                        }
+                    }
+                    if ($lastHsIdx !== -1) {
+                        array_splice($filteredCats, $lastHsIdx + 1, 0, [['id' => $sourceCatId, 'head_sub_id' => $finalHeadSubId]]);
+                        $newOrderedList = $filteredCats;
+                    } else {
+                        $filteredCats[] = ['id' => $sourceCatId, 'head_sub_id' => $finalHeadSubId];
+                        $newOrderedList = $filteredCats;
+                    }
+                } else {
+                    $filteredCats[] = ['id' => $sourceCatId, 'head_sub_id' => null];
+                    $newOrderedList = $filteredCats;
+                }
+            }
+            
+            // Update all sort orders and head_sub_ids
+            $sortIdx = 1;
+            foreach ($newOrderedList as $item) {
+                $cId = $item['id'];
+                $hsId = array_key_exists('head_sub_id', $item) ? $item['head_sub_id'] : null;
+                dbExecute("UPDATE rab_categories SET sort_order = ?, head_sub_id = ? WHERE id = ?", [$sortIdx, $hsId, $cId]);
+                $sortIdx++;
+            }
+            
+            resequenceRabCategoriesAndSubcategories($pId);
+            $newOrder = dbGetAll("SELECT id, code, head_sub_id, sort_order FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$pId]);
+            die(json_encode(['success' => true, 'message' => 'Kategori berhasil dipindahkan!', 'new_order' => $newOrder]));
         }
         
         $id = intval($_POST['id'] ?? 0);
@@ -1399,7 +1600,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0"><?= sanitize($project['name']) ?></h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Proyek</a></li>
                     <li class="breadcrumb-item active">Dashboard</li>
                 </ol>

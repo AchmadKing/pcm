@@ -1,7 +1,7 @@
 <?php
 /**
  * Common Header with Sidebar
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/auth.php';
@@ -22,9 +22,9 @@ $hasSidebar = hasAnyPermission();
 <html lang="id">
 <head>
     <meta charset="utf-8" />
-    <title><?= $pageTitle ?? 'Dashboard' ?> | PCM - Project Cost Management</title>
+    <title><?= $pageTitle ?? 'Dashboard' ?> | PCC - Project Cost Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta content="Project Cost Management System" name="description" />
+    <meta content="Project Cost Control System" name="description" />
     <link rel="shortcut icon" href="<?= $baseUrl ?>/dist/assets/images/favicon.ico">
     
     <!-- Bootstrap Css -->
@@ -77,7 +77,7 @@ $hasSidebar = hasAnyPermission();
                     <div class="navbar-brand-box">
                         <a href="<?= $baseUrl ?>/index.php" class="logo">
                             <span class="logo-light fs-5 fw-semibold">
-                                <i class="mdi mdi-clipboard-text-outline"></i> PCM
+                                <i class="mdi mdi-clipboard-text-outline"></i> PCC
                             </span>
                             <span class="logo-sm fs-2">
                                 <i class="mdi mdi-clipboard-text-outline"></i>
@@ -131,7 +131,7 @@ $hasSidebar = hasAnyPermission();
                         <li class="menu-title">Menu</li>
                         
                         <!-- Dashboard -->
-                        <li class="<?= $currentPage == 'index' && $currentDir == 'pcm_project' ? 'mm-active' : '' ?>">
+                        <li class="<?= $currentPage == 'index' && ($currentDir == 'pcm_project' || $currentDir == 'pcc_project' || $currentDir == basename(dirname(__DIR__))) ? 'mm-active' : '' ?>">
                             <a href="<?= $baseUrl ?>/index.php" class="waves-effect">
                                 <i class="mdi mdi-view-dashboard"></i>
                                 <span>Dashboard</span>

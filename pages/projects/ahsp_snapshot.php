@@ -1,7 +1,7 @@
 <?php
 /**
  * AHSP Snapshot Editor - View/Edit AHSP details for snapshot subcategory
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Changes here do NOT affect master data or original RAB
  */
 
@@ -203,7 +203,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Analisa Harga Satuan Pekerjaan (Salinan)</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Proyek</a></li>
                     <li class="breadcrumb-item"><a href="view.php?id=<?= $projectId ?>"><?= sanitize($subcategory['project_name']) ?></a></li>
                     <li class="breadcrumb-item"><a href="rab_snapshot.php?id=<?= $snapshotId ?>"><?= sanitize($subcategory['snapshot_name']) ?></a></li>

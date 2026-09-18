@@ -123,7 +123,18 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
 
 <!-- Action Buttons -->
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-    <h5 class="mb-0"><?= sanitize($project['name']) ?></h5>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h5 class="mb-0"><?= sanitize($project['name']) ?></h5>
+        <!-- Search Input for RAB -->
+        <div class="input-group input-group-sm ms-md-2" style="width: 240px;">
+            <span class="input-group-text bg-white border-end-0"><i class="mdi mdi-magnify text-muted"></i></span>
+            <input type="text" class="form-control border-start-0" id="searchRabInput" placeholder="Cari pekerjaan, kode..." autocomplete="off">
+            <button class="btn btn-outline-secondary border-start-0 d-none" type="button" id="clearSearchRabBtn" title="Reset pencarian">
+                <i class="mdi mdi-close"></i>
+            </button>
+        </div>
+        <span id="rabSearchResultCount" class="badge bg-primary-subtle text-primary small d-none"></span>
+    </div>
     <div class="d-flex flex-wrap gap-2">
         <!-- Expand / Collapse All -->
         <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" onclick="toggleAllRabRows(true)" title="Buka Semua Tampilan Tabel">
@@ -172,6 +183,11 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
         <button class="btn btn-outline-success btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#importRabModal">
             <i class="mdi mdi-upload"></i> Import CSV
         </button>
+        <?php if (!empty($categories)): ?>
+        <button class="btn btn-outline-primary btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#rearrangeCategoryModal" title="Atur Urutan Kategori RAB">
+            <i class="mdi mdi-sort-variant"></i> Atur Urutan
+        </button>
+        <?php endif; ?>
         <button class="btn btn-outline-primary btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#addHeadSubModal">
             <i class="mdi mdi-folder-plus-outline"></i> Tambah Head-Sub
         </button>
@@ -211,11 +227,48 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
     </div>
 </div>
 
+<!-- RAB Table Styles (Sticky Floating Header) -->
+<style>
+/* Ensure main-content allows sticky to viewport */
+.main-content {
+    overflow: visible !important;
+}
+
+/* Floating Synced Sticky Header for RAB */
+.rab-floating-header-wrapper {
+    position: fixed;
+    top: 70px;
+    z-index: 999;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    display: none;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+    background-color: #212529;
+    border-bottom: 2px solid #212529;
+}
+.rab-floating-header-wrapper .rab-table,
+.rab-floating-header-wrapper table {
+    margin-bottom: 0 !important;
+}
+.rab-floating-header-wrapper th {
+    border-top: none !important;
+    background-color: #212529 !important;
+    color: #fff !important;
+    vertical-align: middle !important;
+}
+
+@media print {
+    .rab-floating-header-wrapper {
+        display: none !important;
+    }
+}
+</style>
+
 <!-- RAB Table -->
-<div class="table-responsive">
-    <table class="table table-bordered mb-0" id="rabTable">
+<div class="table-responsive rab-scroll-wrapper" id="rabTableWrapper">
+    <table class="table table-bordered mb-0 rab-table" id="rabTable">
         <thead class="table-dark">
-            <tr>
+            <tr class="rab-header-row">
                 <th width="80">No</th>
                 <th>Uraian Pekerjaan</th>
                 <th width="80">Satuan</th>
@@ -288,12 +341,12 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                         $subcats = $data['subcategories'];
                     ?>
                         <!-- Category Header Row -->
-                        <tr class="table-primary category-row hs-item-<?= $hsId ?>" data-cat-id="<?= $catId ?>">
+                        <tr class="table-primary category-row dropzone-cat hs-item-<?= $hsId ?>" data-cat-id="<?= $catId ?>" data-hs-id="<?= $hsId ?>" data-cat-name="<?= htmlspecialchars(sanitize($cat['name'])) ?>">
                             <td colspan="10" class="py-2">
                                 <div class="d-flex justify-content-between align-items-center" style="padding-left: 15px;">
                                     <div class="d-flex align-items-center gap-2">
                                         <?php if ($isEditable): ?>
-                                        <span class="drag-handle" draggable="true" data-cat-id="<?= $catId ?>" style="cursor: grab; display: inline-flex; align-items: center; padding: 2px 4px;" title="Seret ikon ini untuk memindahkan kategori ke Head-Sub lain">
+                                        <span class="drag-handle" draggable="true" data-cat-id="<?= $catId ?>" style="cursor: grab; display: inline-flex; align-items: center; padding: 2px 4px;" title="Seret ikon ini untuk mengatur urutan kategori atau memindahkan ke Head-Sub">
                                             <i class="mdi mdi-drag font-size-18 text-white-50"></i>
                                         </span>
                                         <?php endif; ?>
@@ -304,6 +357,13 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                                     </div>
                                     <?php if ($isEditable): ?>
                                     <div class="d-flex gap-1 align-items-center">
+                                        <!-- Quick Move Up / Down Buttons -->
+                                        <button type="button" class="btn btn-sm btn-outline-light py-0" onclick="moveCategoryDirection(<?= $catId ?>, 'up')" title="Geser Kategori Ke Atas" draggable="false">
+                                            <i class="mdi mdi-arrow-up"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light py-0" onclick="moveCategoryDirection(<?= $catId ?>, 'down')" title="Geser Kategori Ke Bawah" draggable="false">
+                                            <i class="mdi mdi-arrow-down"></i>
+                                        </button>
                                         <?php if (!empty($headSubs)): ?>
                                         <!-- Quick Move Dropdown -->
                                         <div class="dropdown d-inline-block">
@@ -432,12 +492,12 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                     $subcats = $data['subcategories'];
                 ?>
                     <!-- Standalone Category Header Row -->
-                    <tr class="table-primary category-row" data-cat-id="<?= $catId ?>">
+                    <tr class="table-primary category-row dropzone-cat" data-cat-id="<?= $catId ?>" data-hs-id="0" data-cat-name="<?= htmlspecialchars(sanitize($cat['name'])) ?>">
                         <td colspan="10" class="py-2">
                             <div class="d-flex justify-content-between align-items-center">
                                 <div class="d-flex align-items-center gap-2">
                                     <?php if ($isEditable): ?>
-                                    <span class="drag-handle" draggable="true" data-cat-id="<?= $catId ?>" style="cursor: grab; display: inline-flex; align-items: center; padding: 2px 4px;" title="Seret ikon ini untuk memindahkan kategori ke Head-Sub">
+                                    <span class="drag-handle" draggable="true" data-cat-id="<?= $catId ?>" style="cursor: grab; display: inline-flex; align-items: center; padding: 2px 4px;" title="Seret ikon ini untuk mengatur urutan kategori atau memindahkan ke Head-Sub">
                                         <i class="mdi mdi-drag font-size-18 text-white-50"></i>
                                     </span>
                                     <?php endif; ?>
@@ -448,6 +508,13 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                                 </div>
                                 <?php if ($isEditable): ?>
                                 <div class="d-flex gap-1 align-items-center">
+                                    <!-- Quick Move Up / Down Buttons -->
+                                    <button type="button" class="btn btn-sm btn-outline-light py-0" onclick="moveCategoryDirection(<?= $catId ?>, 'up')" title="Geser Kategori Ke Atas" draggable="false">
+                                        <i class="mdi mdi-arrow-up"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-light py-0" onclick="moveCategoryDirection(<?= $catId ?>, 'down')" title="Geser Kategori Ke Bawah" draggable="false">
+                                        <i class="mdi mdi-arrow-down"></i>
+                                    </button>
                                     <?php if (!empty($headSubs)): ?>
                                     <!-- Quick Move Dropdown -->
                                     <div class="dropdown d-inline-block">
@@ -483,7 +550,6 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                                         <i class="mdi mdi-delete"></i>
                                     </button>
                                     <form method="POST" class="d-none" id="deleteCatForm_<?= $cat['id'] ?>">
-
                                         <input type="hidden" name="action" value="delete_category">
                                         <input type="hidden" name="category_id" value="<?= $cat['id'] ?>">
                                     </form>
@@ -770,6 +836,85 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
     </div>
 </div>
 
+<!-- Rearrange Categories Modal -->
+<div class="modal fade" id="rearrangeCategoryModal" tabindex="-1" aria-labelledby="rearrangeCategoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light py-2">
+                <h5 class="modal-title" id="rearrangeCategoryModalLabel"><i class="mdi mdi-sort-variant text-primary"></i> Atur Urutan Kategori RAB</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="mdi mdi-information-outline"></i>
+                    <strong>Petunjuk:</strong> Tarik (drag & drop) ikon <i class="mdi mdi-drag"></i> untuk mengubah urutan kategori, atau gunakan tombol panah (<strong>&uarr;</strong> / <strong>&darr;</strong>). Anda juga dapat mengubah Head-Sub masing-masing kategori melalui pilihan dropdown. Huruf kode (A, B, C...) dan sub-kategori akan otomatis disesuaikan.
+                </div>
+                
+                <ul class="list-group sortable-cat-modal-list" id="rearrangeCatSortableList">
+                    <?php 
+                    $modalCatIndex = 1;
+                    foreach ($categories as $mCat): 
+                        $mSubCount = dbGetRow("SELECT COUNT(*) as cnt FROM rab_subcategories WHERE category_id = ?", [$mCat['id']])['cnt'] ?? 0;
+                    ?>
+                    <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3 rearrange-cat-item" 
+                        data-cat-id="<?= $mCat['id'] ?>"
+                        data-original-hs-id="<?= $mCat['head_sub_id'] ?? 0 ?>">
+                        <div class="d-flex align-items-center gap-2 flex-grow-1 me-3">
+                            <span class="modal-drag-handle text-muted" style="cursor: grab; padding: 4px;" title="Drag untuk mengubah urutan">
+                                <i class="mdi mdi-drag font-size-20"></i>
+                            </span>
+                            <span class="badge bg-primary fs-6 modal-cat-code-badge" style="min-width: 28px; text-align: center;"><?= sanitize($mCat['code']) ?></span>
+                            <div>
+                                <strong class="modal-cat-name"><?= sanitize($mCat['name']) ?></strong>
+                                <span class="badge bg-light text-secondary border ms-2">
+                                    <i class="mdi mdi-format-list-bulleted"></i> <?= $mSubCount ?> sub
+                                </span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <?php if (!empty($headSubs)): ?>
+                            <div style="min-width: 170px;">
+                                <select class="form-select form-select-sm modal-cat-hs-select" style="font-size: 12px;">
+                                    <option value="0" <?= empty($mCat['head_sub_id']) ? 'selected' : '' ?>>-- Tanpa Head-Sub --</option>
+                                    <?php foreach ($headSubs as $mHs): ?>
+                                    <option value="<?= $mHs['id'] ?>" <?= ($mCat['head_sub_id'] ?? 0) == $mHs['id'] ? 'selected' : '' ?>>
+                                        <?= !empty($mHs['code']) ? sanitize($mHs['code']) . ' - ' : '' ?><?= sanitize($mHs['name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <?php endif; ?>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary btn-modal-move-up" title="Geser ke Atas">
+                                    <i class="mdi mdi-arrow-up"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-modal-move-down" title="Geser ke Bawah">
+                                    <i class="mdi mdi-arrow-down"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </li>
+                    <?php 
+                        $modalCatIndex++;
+                    endforeach; 
+                    ?>
+                </ul>
+            </div>
+            <div class="modal-footer d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary" onclick="resetRearrangeModalList()">
+                    <i class="mdi mdi-restore"></i> Reset
+                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveRearrangeCat" onclick="saveRearrangeModalOrder()">
+                        <i class="mdi mdi-check"></i> Simpan Urutan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Import RAB Modal -->
 <div class="modal fade" id="importRabModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -935,7 +1080,7 @@ body.is-dragging-active .dropzone-head-sub * {
     color: #000 !important;
 }
 
-/* Blur Box Overlay Effect on Dropzone */
+/* Blur Box Overlay Effect on Head-Sub Dropzone */
 .dropzone-head-sub.drag-over::after {
     content: attr(data-drop-text);
     position: absolute;
@@ -964,6 +1109,42 @@ body.is-dragging-active .dropzone-head-sub * {
     0% { background: rgba(255, 193, 7, 0.88); border-color: #000; }
     100% { background: rgba(255, 152, 0, 0.96); border-color: #ffffff; }
 }
+
+/* Category Row Droppable Indicator */
+.category-row.dropzone-cat {
+    transition: background-color 0.15s ease, border-top 0.15s ease, border-bottom 0.15s ease;
+    position: relative;
+}
+.category-row.dropzone-cat.drag-over-top {
+    border-top: 4px solid #fd7e14 !important;
+    background-color: #fff3cd !important;
+}
+.category-row.dropzone-cat.drag-over-bottom {
+    border-bottom: 4px solid #fd7e14 !important;
+    background-color: #fff3cd !important;
+}
+
+/* Modal Rearrange Styles */
+.rearrange-cat-placeholder {
+    height: 48px;
+    background: #e9ecef;
+    border: 2px dashed #0d6efd;
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+.rearrange-cat-item {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    border-radius: 6px !important;
+    margin-bottom: 6px;
+    border: 1px solid #dee2e6;
+    background: #ffffff;
+}
+.rearrange-cat-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.modal-drag-handle:hover {
+    color: #0d6efd !important;
+}
 </style>
 
 
@@ -982,7 +1163,7 @@ $(document).ready(function() {
         helper: function() {
             var catRow = $(this).closest('.category-row');
             var catTitle = catRow.find('strong').text() || 'Kategori';
-            return $('<div class="drag-helper-card"><i class="mdi mdi-folder-move me-2"></i>' + catTitle + '</div>').appendTo('body');
+            return $('<div class="drag-helper-card"><i class="mdi mdi-cursor-move me-2"></i>' + catTitle + '</div>').appendTo('body');
         },
         revert: 'invalid',
         cursor: 'grabbing',
@@ -1008,6 +1189,45 @@ $(document).ready(function() {
             $('body').removeClass('is-dragging-active');
             $('.category-row').removeClass('is-dragging');
             $('.dropzone-head-sub').removeClass('drag-over');
+            $('.category-row').removeClass('drag-over-top drag-over-bottom');
+        }
+    });
+
+    // Make Category Rows droppable for relative ordering (Before / After)
+    $('.category-row.dropzone-cat').droppable({
+        accept: '.drag-handle',
+        tolerance: 'pointer',
+        over: function(event, ui) {
+            var sourceCatId = ui.draggable.attr('data-cat-id');
+            var targetCatId = $(this).attr('data-cat-id');
+            if (sourceCatId == targetCatId) return;
+
+            var offset = $(this).offset();
+            var height = $(this).outerHeight();
+            var posY = event.pageY - offset.top;
+
+            if (posY < height / 2) {
+                $(this).addClass('drag-over-top').removeClass('drag-over-bottom');
+            } else {
+                $(this).addClass('drag-over-bottom').removeClass('drag-over-top');
+            }
+        },
+        out: function(event, ui) {
+            $(this).removeClass('drag-over-top drag-over-bottom');
+        },
+        drop: function(event, ui) {
+            var sourceCatId = ui.draggable.attr('data-cat-id');
+            var targetCatId = $(this).attr('data-cat-id');
+            $(this).removeClass('drag-over-top drag-over-bottom');
+
+            if (!sourceCatId || !targetCatId || sourceCatId == targetCatId) return;
+
+            var offset = $(this).offset();
+            var height = $(this).outerHeight();
+            var posY = event.pageY - offset.top;
+            var position = (posY < height / 2) ? 'before' : 'after';
+
+            reorderCategoryRelative(sourceCatId, targetCatId, position);
         }
     });
 
@@ -1021,18 +1241,14 @@ $(document).ready(function() {
             var catId = ui.draggable.attr('data-cat-id');
 
             if (catId) {
-                moveCategoryToHeadSub(catId, hsId);
+                reorderCategoryRelative(catId, 0, 'after', hsId);
             }
         }
     });
     <?php endif; ?>
 
-
-
-
     // Initialize Select2 for AHSP dropdown
     $('#addSubcategoryModal').on('shown.bs.modal', function () {
-
         $('.select2-ahsp').select2({
             placeholder: '-- Ketik untuk mencari AHSP --',
             allowClear: true,
@@ -1061,6 +1277,41 @@ $(document).ready(function() {
         var headSubId = $(e.relatedTarget).data('headSubId');
         if (headSubId) {
             $('#add_cat_head_sub_id').val(headSubId);
+        }
+    });
+
+    // Initialize Modal Sortable List
+    if ($('#rearrangeCatSortableList').length) {
+        $('#rearrangeCatSortableList').sortable({
+            handle: '.modal-drag-handle',
+            placeholder: 'rearrange-cat-placeholder',
+            axis: 'y',
+            cursor: 'grabbing',
+            update: function(event, ui) {
+                updateModalLetterBadges();
+            }
+        });
+    }
+
+    // Modal Move Up Button
+    $(document).on('click', '.btn-modal-move-up', function(e) {
+        e.preventDefault();
+        var item = $(this).closest('.rearrange-cat-item');
+        var prev = item.prev('.rearrange-cat-item');
+        if (prev.length) {
+            item.insertBefore(prev);
+            updateModalLetterBadges();
+        }
+    });
+
+    // Modal Move Down Button
+    $(document).on('click', '.btn-modal-move-down', function(e) {
+        e.preventDefault();
+        var item = $(this).closest('.rearrange-cat-item');
+        var next = item.next('.rearrange-cat-item');
+        if (next.length) {
+            item.insertAfter(next);
+            updateModalLetterBadges();
         }
     });
 });
@@ -1157,9 +1408,442 @@ function restoreRabCollapsedState() {
     });
 }
 
+// Live search filter implementation for RAB
+function filterRabTable(query) {
+    query = (query || '').trim().toLowerCase();
+    var hasQuery = query.length > 0;
+    
+    $('#clearSearchRabBtn').toggleClass('d-none', !hasQuery);
+    $('#rabNoSearchResultsRow').remove();
+    
+    if (!hasQuery) {
+        $('#rabSearchResultCount').addClass('d-none').text('');
+        restoreRabCollapsedState();
+        return;
+    }
+    
+    var matchedSubcatCount = 0;
+    var matchedCatIds = new Set();
+    var matchedHsIds = new Set();
+    
+    // 1. Evaluate subcategory rows
+    $('#rabTable tbody tr').each(function() {
+        var row = $(this);
+        if (row.hasClass('head-sub-row') || row.hasClass('category-row') || row.hasClass('table-secondary') || row.hasClass('table-info') || row.hasClass('table-light') || row.hasClass('dropzone-head-sub')) {
+            return;
+        }
+        
+        var text = row.text().toLowerCase();
+        var catId = 0;
+        var classList = (row.attr('class') || '').split(/\s+/);
+        classList.forEach(function(cls) {
+            var m = cls.match(/^cat-item-(\d+)$/);
+            if (m) catId = parseInt(m[1]);
+        });
+        
+        var catName = '';
+        var hsName = '';
+        var hsId = 0;
+        if (catId) {
+            var catRow = $('.category-row[data-cat-id="' + catId + '"]');
+            catName = (catRow.find('strong').text() || '').toLowerCase();
+            hsId = parseInt(catRow.attr('data-hs-id')) || 0;
+            if (hsId) {
+                var hsRow = $('.head-sub-row[data-hs-id="' + hsId + '"]');
+                hsName = (hsRow.find('strong').text() || '').toLowerCase();
+            }
+        }
+        
+        var isMatch = text.indexOf(query) !== -1 || catName.indexOf(query) !== -1 || hsName.indexOf(query) !== -1;
+        if (isMatch) {
+            row.show();
+            matchedSubcatCount++;
+            if (catId) {
+                matchedCatIds.add(catId);
+                if (hsId) matchedHsIds.add(hsId);
+            }
+        } else {
+            row.hide();
+        }
+    });
+    
+    // 2. Direct category matches
+    $('.category-row').each(function() {
+        var catRow = $(this);
+        var catId = parseInt(catRow.attr('data-cat-id'));
+        var hsId = parseInt(catRow.attr('data-hs-id')) || 0;
+        var catTitle = (catRow.find('strong').text() || '').toLowerCase();
+        
+        if (catTitle.indexOf(query) !== -1) {
+            matchedCatIds.add(catId);
+            if (hsId) matchedHsIds.add(hsId);
+            $('.cat-item-' + catId + ':not(.category-row):not(.table-secondary)').each(function() {
+                $(this).show();
+                matchedSubcatCount++;
+            });
+        }
+    });
+    
+    // 3. Direct Head-Sub matches
+    $('.head-sub-row').each(function() {
+        var hsRow = $(this);
+        var hsId = parseInt(hsRow.attr('data-hs-id'));
+        var hsTitle = (hsRow.find('strong').text() || '').toLowerCase();
+        
+        if (hsTitle.indexOf(query) !== -1 && hsId) {
+            matchedHsIds.add(hsId);
+            $('.hs-item-' + hsId).each(function() {
+                var row = $(this);
+                if (row.hasClass('category-row')) {
+                    var cId = parseInt(row.attr('data-cat-id'));
+                    if (cId) matchedCatIds.add(cId);
+                    row.show();
+                } else if (!row.hasClass('table-info') && !row.hasClass('table-secondary') && !row.hasClass('table-light')) {
+                    row.show();
+                    matchedSubcatCount++;
+                }
+            });
+        }
+    });
+    
+    // 4. Show/hide category headers & total rows
+    $('.category-row').each(function() {
+        var catId = parseInt($(this).attr('data-cat-id'));
+        if (matchedCatIds.has(catId)) {
+            $(this).show();
+            $('#cat-chevron-' + catId).removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+            $('.table-secondary.cat-item-' + catId).show();
+        } else {
+            $(this).hide();
+            $('.table-secondary.cat-item-' + catId).hide();
+        }
+    });
+    
+    // 5. Show/hide Head-Sub headers & total rows
+    $('.head-sub-row').each(function() {
+        var hsId = parseInt($(this).attr('data-hs-id'));
+        if (matchedHsIds.has(hsId)) {
+            $(this).show();
+            $('#hs-chevron-' + hsId).removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+            $('.table-info.hs-item-' + hsId).show();
+            $('.hs-item-' + hsId + '.table-light').hide();
+        } else {
+            $(this).hide();
+            $('.table-info.hs-item-' + hsId).hide();
+            $('.hs-item-' + hsId + '.table-light').hide();
+        }
+    });
+    
+    var hasStandaloneMatches = false;
+    matchedCatIds.forEach(function(cId) {
+        var catRow = $('.category-row[data-cat-id="' + cId + '"]');
+        if (!catRow.attr('data-hs-id') || catRow.attr('data-hs-id') == '0') {
+            hasStandaloneMatches = true;
+        }
+    });
+    $('.dropzone-head-sub[data-hs-id="0"]').toggle(hasStandaloneMatches);
+    
+    // 6. Show result count badge and no-results alert if 0
+    if (matchedSubcatCount > 0 || matchedCatIds.size > 0) {
+        $('#rabSearchResultCount').removeClass('d-none').text('Ditemukan: ' + matchedSubcatCount + ' pekerjaan');
+    } else {
+        $('#rabSearchResultCount').removeClass('d-none').text('0 pekerjaan');
+        var emptyRow = $('<tr id="rabNoSearchResultsRow"><td colspan="10" class="text-center text-muted py-4"><i class="mdi mdi-magnify font-size-24 d-block mb-1 text-secondary"></i>Tidak ada pekerjaan yang cocok dengan pencarian "<strong>' + query.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</strong>"</td></tr>');
+        $('#rabTable tbody').append(emptyRow);
+    }
+}
+
 $(document).ready(function() {
     restoreRabCollapsedState();
+    
+    $('#searchRabInput').on('input', function() {
+        filterRabTable($(this).val());
+    });
+    
+    $('#clearSearchRabBtn').on('click', function() {
+        $('#searchRabInput').val('');
+        filterRabTable('');
+        $('#searchRabInput').focus();
+    });
 });
+
+// Single-step move category up or down
+function moveCategoryDirection(catId, direction) {
+    var catRow = $('.category-row[data-cat-id="' + catId + '"]');
+    if (catRow.length) {
+        catRow.css('opacity', '0.5');
+    }
+    $.ajax({
+        url: 'view.php?id=<?= $projectId ?>',
+        type: 'POST',
+        data: {
+            action: 'ajax_move_category_order',
+            category_id: catId,
+            direction: direction
+        },
+        dataType: 'json',
+        success: function(res) {
+            if (res.success) {
+                if (res.no_change) {
+                    catRow.css('opacity', '1');
+                    return;
+                }
+                if (res.new_order) {
+                    applyCategoryReorder(res.new_order);
+                } else {
+                    location.reload();
+                }
+            } else {
+                catRow.css('opacity', '1');
+                alert('Gagal mengubah urutan: ' + (res.message || 'Error'));
+            }
+        },
+        error: function() {
+            catRow.css('opacity', '1');
+            alert('Terjadi kesalahan saat mengubah urutan kategori.');
+        }
+    });
+}
+
+// Reorder category relative to target category or into head-sub
+function reorderCategoryRelative(sourceCatId, targetCatId, position, targetHeadSubId) {
+    var data = {
+        action: 'ajax_move_category_relative',
+        source_cat_id: sourceCatId,
+        target_cat_id: targetCatId || 0,
+        position: position || 'after'
+    };
+    if (typeof targetHeadSubId !== 'undefined') {
+        data.target_head_sub_id = targetHeadSubId;
+    }
+
+    $.ajax({
+        url: 'view.php?id=<?= $projectId ?>',
+        type: 'POST',
+        data: data,
+        dataType: 'json',
+        success: function(res) {
+            if (res.success) {
+                if (res.new_order) {
+                    applyCategoryReorder(res.new_order);
+                } else {
+                    location.reload();
+                }
+            } else {
+                alert('Gagal memindahkan kategori: ' + (res.message || 'Error'));
+            }
+        },
+        error: function() {
+            alert('Terjadi kesalahan saat memindahkan kategori.');
+        }
+    });
+}
+
+// Convert 1-based index to Category letter code (A, B, C... Z, AA, AB...)
+function getJsCategoryCode(index) {
+    index = parseInt(index) || 1;
+    if (index <= 0) return 'A';
+    var code = '';
+    while (index > 0) {
+        index--;
+        code = String.fromCharCode(65 + (index % 26)) + code;
+        index = Math.floor(index / 26);
+    }
+    return code;
+}
+
+// Update letter code badges in modal list
+function updateModalLetterBadges() {
+    $('#rearrangeCatSortableList .rearrange-cat-item').each(function(idx) {
+        var code = getJsCategoryCode(idx + 1);
+        $(this).find('.modal-cat-code-badge').text(code);
+    });
+}
+
+// Apply new category order directly into the DOM without page reload
+function applyCategoryReorder(newOrder) {
+    if (!newOrder || !newOrder.length) return;
+
+    // 1. Update text, code badges, and attributes for all categories and their subcategories
+    newOrder.forEach(function(item) {
+        var catId = item.id;
+        var catCode = item.code;
+        var catHeader = $('.category-row[data-cat-id="' + catId + '"]');
+        if (!catHeader.length) return;
+
+        catHeader.css('opacity', '1');
+        catHeader.attr('data-hs-id', item.head_sub_id || 0);
+
+        // Update category title text
+        var catName = catHeader.attr('data-cat-name') || '';
+        catHeader.find('strong.font-size-14').text(catCode + '. ' + catName);
+
+        // Update subcategory codes: catCode + '.' + subIndex
+        var subIndex = 1;
+        $('.cat-item-' + catId + ':not(.category-row):not(.table-secondary)').each(function() {
+            $(this).find('td:first').text(catCode + '.' + subIndex);
+            subIndex++;
+        });
+
+        // Update category total row label
+        $('.table-secondary.cat-item-' + catId).find('td:first strong').text('JUMLAH ' + catCode);
+
+        // Update active class in dropdowns
+        var dropdownMenu = catHeader.find('.dropdown-menu');
+        if (dropdownMenu.length) {
+            dropdownMenu.find('.dropdown-item').removeClass('active');
+            var targetHs = item.head_sub_id || 0;
+            dropdownMenu.find('.dropdown-item').each(function() {
+                var onclick = $(this).attr('onclick') || '';
+                if (onclick.indexOf('moveCategoryToHeadSub(' + catId + ', ' + targetHs + ')') !== -1) {
+                    $(this).addClass('active');
+                }
+            });
+        }
+    });
+
+    // 2. Rearrange DOM rows in the table
+    var hasHeadSubs = $('.head-sub-row').length > 0;
+
+    if (hasHeadSubs) {
+        var hsGroups = {};
+        newOrder.forEach(function(item) {
+            var hsKey = (item.head_sub_id || 0).toString();
+            if (!hsGroups[hsKey]) hsGroups[hsKey] = [];
+            hsGroups[hsKey].push(item.id);
+        });
+
+        // For each head-sub header row
+        $('.head-sub-row').each(function() {
+            var hsId = $(this).attr('data-hs-id');
+            var hsHeader = $(this);
+            var catIdsInHs = hsGroups[hsId] || [];
+
+            var insertAfterElem = hsHeader;
+            var emptyRow = $('.hs-item-' + hsId + '.table-light');
+            if (catIdsInHs.length > 0 && emptyRow.length) {
+                emptyRow.remove();
+            }
+
+            catIdsInHs.forEach(function(cId) {
+                var catRows = $('.category-row[data-cat-id="' + cId + '"]').add('.cat-item-' + cId);
+                // Update hs-item class
+                catRows.removeClass(function(index, className) {
+                    return (className.match(/(^|\s)hs-item-\S+/g) || []).join(' ');
+                }).addClass('hs-item-' + hsId);
+
+                insertAfterElem.after(catRows);
+                insertAfterElem = catRows.last();
+            });
+        });
+
+        // Standalone section (without head-sub)
+        var standaloneHeader = $('.dropzone-head-sub[data-hs-id="0"]');
+        var standaloneCatIds = hsGroups['0'] || [];
+        if (standaloneHeader.length) {
+            var insertAfterStandalone = standaloneHeader;
+            standaloneCatIds.forEach(function(cId) {
+                var catRows = $('.category-row[data-cat-id="' + cId + '"]').add('.cat-item-' + cId);
+                catRows.removeClass(function(index, className) {
+                    return (className.match(/(^|\s)hs-item-\S+/g) || []).join(' ');
+                });
+                insertAfterStandalone.after(catRows);
+                insertAfterStandalone = catRows.last();
+            });
+        }
+    } else {
+        // No head-subs: reorder all categories sequentially
+        var tbody = $('#rabTable tbody');
+        var prevElem = null;
+        newOrder.forEach(function(item) {
+            var catRows = $('.category-row[data-cat-id="' + item.id + '"]').add('.cat-item-' + item.id);
+            if (prevElem === null) {
+                tbody.prepend(catRows);
+            } else {
+                prevElem.after(catRows);
+            }
+            prevElem = catRows.last();
+        });
+    }
+
+    // Brief highlight animation for visual feedback
+    newOrder.forEach(function(item) {
+        var catRow = $('.category-row[data-cat-id="' + item.id + '"]');
+        catRow.css('background-color', 'rgba(25, 118, 210, 0.25)');
+        setTimeout(function() {
+            catRow.css('background-color', '');
+        }, 600);
+    });
+}
+
+// Reset Modal List to initial state
+function resetRearrangeModalList() {
+    location.reload();
+}
+
+// Save Modal Order
+function saveRearrangeModalOrder() {
+    var btn = $('#btnSaveRearrangeCat');
+    var originalBtnHtml = btn.html();
+    
+    var categories = [];
+    $('#rearrangeCatSortableList .rearrange-cat-item').each(function() {
+        var catId = parseInt($(this).attr('data-cat-id'));
+        var hsSelect = $(this).find('.modal-cat-hs-select');
+        var hsId = hsSelect.length ? hsSelect.val() : $(this).attr('data-original-hs-id');
+        categories.push({
+            id: catId,
+            head_sub_id: hsId
+        });
+    });
+
+    if (categories.length === 0) {
+        alert('Tidak ada kategori untuk diurutkan.');
+        return;
+    }
+
+    btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Menyimpan...');
+
+    $.ajax({
+        url: 'view.php?id=<?= $projectId ?>',
+        type: 'POST',
+        data: {
+            action: 'ajax_reorder_rab_categories',
+            categories: JSON.stringify(categories)
+        },
+        dataType: 'json',
+        success: function(res) {
+            if (res.success) {
+                if (res.new_order) {
+                    // Check if any head_sub changed — if so, reload because DOM structure differs
+                    var hsChanged = false;
+                    res.new_order.forEach(function(item) {
+                        var catRow = $('.category-row[data-cat-id="' + item.id + '"]');
+                        var currentHs = catRow.attr('data-hs-id') || '0';
+                        var newHs = (item.head_sub_id || 0).toString();
+                        if (currentHs !== newHs) hsChanged = true;
+                    });
+                    if (hsChanged) {
+                        location.reload();
+                    } else {
+                        applyCategoryReorder(res.new_order);
+                        var modal = bootstrap.Modal.getInstance(document.getElementById('rearrangeCategoryModal'));
+                        if (modal) modal.hide();
+                    }
+                } else {
+                    location.reload();
+                }
+            } else {
+                alert('Gagal menyimpan urutan: ' + (res.message || 'Error'));
+                btn.prop('disabled', false).html(originalBtnHtml);
+            }
+        },
+        error: function() {
+            alert('Terjadi kesalahan saat menyimpan urutan kategori.');
+            btn.prop('disabled', false).html(originalBtnHtml);
+        }
+    });
+}
 
 function moveCategoryToHeadSub(catId, hsId) {
 
@@ -1174,6 +1858,8 @@ function moveCategoryToHeadSub(catId, hsId) {
         dataType: 'json',
         success: function(res) {
             if (res.success) {
+                // Head-sub change requires reload because DOM structure involves
+                // moving rows between head-sub sections with different CSS classes
                 location.reload();
             } else {
                 alert('Gagal memindahkan kategori: ' + res.message);
@@ -1267,6 +1953,151 @@ function showAhspModal(ahspId) {
             document.getElementById('ahspDetailBody').innerHTML = '<div class="alert alert-danger">Gagal memuat data: ' + err.message + '</div>';
         });
 }
+
+// Floating Synced Sticky Header Implementation for RAB
+(function initRabStickyHeader() {
+    function setupStickyHeader() {
+        var origWrapper = document.getElementById('rabTableWrapper') || document.querySelector('.rab-scroll-wrapper');
+        var origTable = document.getElementById('rabTable');
+        if (!origWrapper || !origTable) return;
+        
+        var origThead = origTable.querySelector('thead');
+        if (!origThead) return;
+
+        // Remove any existing floating header wrapper
+        var existing = document.getElementById('rabFloatingHeader');
+        if (existing) existing.remove();
+
+        // Create floating container
+        var floatWrapper = document.createElement('div');
+        floatWrapper.id = 'rabFloatingHeader';
+        floatWrapper.className = 'rab-floating-header-wrapper';
+        
+        // Create cloned table and thead
+        var floatTable = document.createElement('table');
+        floatTable.className = origTable.className + ' rab-floating-table';
+        
+        var clonedThead = origThead.cloneNode(true);
+        var clonedIds = clonedThead.querySelectorAll('[id]');
+        for (var k = 0; k < clonedIds.length; k++) {
+            clonedIds[k].removeAttribute('id');
+        }
+        floatTable.appendChild(clonedThead);
+        floatWrapper.appendChild(floatTable);
+        document.body.appendChild(floatWrapper);
+
+        // Sync column widths between original thead and cloned thead
+        function syncWidths() {
+            var origTableWidth = origTable.offsetWidth;
+            floatTable.style.width = origTableWidth + 'px';
+            floatTable.style.minWidth = origTableWidth + 'px';
+            
+            var origRows = origThead.querySelectorAll('tr');
+            var cloneRows = clonedThead.querySelectorAll('tr');
+            for (var r = 0; r < origRows.length; r++) {
+                if (!cloneRows[r]) continue;
+                cloneRows[r].style.height = origRows[r].offsetHeight + 'px';
+                var origThs = origRows[r].children;
+                var cloneThs = cloneRows[r].children;
+                for (var i = 0; i < origThs.length; i++) {
+                    if (cloneThs[i]) {
+                        var rect = origThs[i].getBoundingClientRect();
+                        var w = rect.width;
+                        cloneThs[i].style.width = w + 'px';
+                        cloneThs[i].style.minWidth = w + 'px';
+                        cloneThs[i].style.maxWidth = w + 'px';
+                        cloneThs[i].style.boxSizing = 'border-box';
+                    }
+                }
+            }
+        }
+
+        // Update position and visibility on scroll
+        function updatePosition() {
+            var topbar = document.getElementById('page-topbar');
+            var topOffset = topbar ? topbar.offsetHeight : 70;
+            
+            var rect = origWrapper.getBoundingClientRect();
+            var theadRect = origThead.getBoundingClientRect();
+            var theadHeight = origThead.offsetHeight;
+            var tableBottom = rect.bottom;
+            
+            // Show floating header when original header has scrolled past the topbar,
+            // and hide before the table completely leaves the view
+            if (theadRect.top <= topOffset && tableBottom > (topOffset + theadHeight + 30)) {
+                floatWrapper.style.display = 'block';
+                floatWrapper.style.top = topOffset + 'px';
+                floatWrapper.style.left = rect.left + 'px';
+                floatWrapper.style.width = rect.width + 'px';
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+            } else {
+                floatWrapper.style.display = 'none';
+            }
+        }
+
+        // Bidirectional horizontal scroll sync
+        var isSyncing = false;
+        origWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        floatWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                origWrapper.scrollLeft = floatWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        floatWrapper.addEventListener('wheel', function(e) {
+            if (e.deltaX) {
+                origWrapper.scrollLeft += e.deltaX;
+            }
+        }, { passive: true });
+
+        // Window scroll and resize listeners with requestAnimationFrame
+        var ticking = false;
+        function onScrollOrResize() {
+            if (!ticking) {
+                window.requestAnimationFrame(function() {
+                    syncWidths();
+                    updatePosition();
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        }
+
+        window.addEventListener('scroll', onScrollOrResize, { passive: true });
+        window.addEventListener('resize', onScrollOrResize, { passive: true });
+
+        // Observe size changes via ResizeObserver
+        if (window.ResizeObserver) {
+            var ro = new ResizeObserver(function() {
+                syncWidths();
+                updatePosition();
+            });
+            ro.observe(origWrapper);
+            ro.observe(origTable);
+        }
+
+        // Initial measurement
+        setTimeout(function() {
+            syncWidths();
+            updatePosition();
+        }, 50);
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setupStickyHeader();
+    } else {
+        document.addEventListener('DOMContentLoaded', setupStickyHeader);
+    }
+})();
 </script>
 
 <!-- AHSP Detail Modal -->

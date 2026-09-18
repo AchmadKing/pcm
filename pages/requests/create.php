@@ -1,7 +1,7 @@
 <?php
 /**
  * Create Request - Dynamic Form with Category/Subcategory Selection
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/../../includes/auth.php';
@@ -678,10 +678,15 @@ require_once __DIR__ . '/../../includes/header.php';
 <div class="row">
     <div class="col-12">
         <div class="page-title-box d-sm-flex align-items-center justify-content-between">
-            <h4 class="mb-sm-0">Buat Pengajuan Dana</h4>
+            <div class="d-flex align-items-center">
+                <h4 class="mb-sm-0 me-3">Buat Pengajuan Dana</h4>
+                <button type="button" class="btn btn-outline-primary btn-sm rounded-pill shadow-sm" data-bs-toggle="modal" data-bs-target="#modalLaborCalculator">
+                    <i class="mdi mdi-calculator me-1"></i> Kalkulator Tenaga Kerja
+                </button>
+            </div>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Pengajuan</a></li>
                     <li class="breadcrumb-item active">Buat Baru</li>
                 </ol>
@@ -758,7 +763,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         Mode Pengajuan Ulang: Memuat dari <?= sanitize($resubmitReq['request_number'] ?: 'REQ-' . $resubmitReq['id']) ?>
                     </h6>
                     <div class="text-muted small">
-                        Seluruh item pengajuan dan file lampiran telah dimuat otomatis. Anda dapat menyesuaikan harga/koefisien, menghapus item yang salah, menambah item baru, atau mengedit lampiran sebelum mengirim.
+                        Seluruh item pengajuan dan file lampiran telah dimuat otomatis. Anda dapat menyesuaikan harga/volume, menghapus item yang salah, menambah item baru, atau mengedit lampiran sebelum mengirim.
                     </div>
                     <?php if (!empty($resubmitReq['rejection_reason'])): ?>
                     <div class="mt-2 p-2 bg-light rounded border border-warning-subtle text-danger small">
@@ -867,7 +872,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <th>Nama Item</th>
                                     <th width="70">Satuan</th>
                                     <th width="120">Harga Satuan</th>
-                                    <th width="90" id="tableCoefHeader">Koefisien</th>
+                                    <th width="90" id="tableCoefHeader">Volume</th>
                                     <th width="130">Total Harga</th>
                                     <th width="100">Catatan</th>
                                     <th width="100">Status Harga</th>
@@ -1371,7 +1376,7 @@ $(document).ready(function() {
         } else {
             html += '<th width="80" class="text-center">Sisa</th>';
             html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
-            html += '<th width="100" class="text-center">Koefisien <span class="text-danger">*</span></th>';
+            html += '<th width="100" class="text-center">Volume <span class="text-danger">*</span></th>';
         }
         
         html += '</tr></thead><tbody>';
@@ -1641,7 +1646,7 @@ $(document).ready(function() {
             showToast(addedCount + ' item berhasil ditambahkan', 'success');
         }
         if (errorCount > 0) {
-            showToast(errorCount + ' item dilewati (harga/koefisien/rencana kerja belum diisi)', 'warning');
+            showToast(errorCount + ' item dilewati (harga/volume/rencana kerja belum diisi)', 'warning');
         }
     });
     
@@ -2479,5 +2484,7 @@ $extraScripts = ob_get_clean();
 ?>
 
 <?php endif; ?>
+
+<?php require_once __DIR__ . '/partials/modal_labor_calculator.php'; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

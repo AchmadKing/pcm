@@ -1,7 +1,7 @@
 <?php
 /**
  * AHSP Viewer - View/Edit AHSP details for RAB subcategory
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // AJAX Handler - must be first
@@ -191,7 +191,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Analisa Harga Satuan Pekerjaan</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="view.php?id=<?= $projectId ?>"><?= sanitize($project['name']) ?></a></li>
                     <li class="breadcrumb-item"><a href="rab.php?id=<?= $projectId ?>">RAB</a></li>
                     <li class="breadcrumb-item active">AHSP</li>

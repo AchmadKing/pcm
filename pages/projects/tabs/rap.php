@@ -219,7 +219,18 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
 
 <!-- Action Buttons -->
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-    <h5 class="mb-0"><?= sanitize($project['name']) ?></h5>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h5 class="mb-0"><?= sanitize($project['name']) ?></h5>
+        <!-- Search Input for RAP -->
+        <div class="input-group input-group-sm ms-md-2" style="width: 240px;">
+            <span class="input-group-text bg-white border-end-0"><i class="mdi mdi-magnify text-muted"></i></span>
+            <input type="text" class="form-control border-start-0" id="searchRapInput" placeholder="Cari pekerjaan, kode..." autocomplete="off">
+            <button class="btn btn-outline-secondary border-start-0 d-none" type="button" id="clearSearchRapBtn" title="Reset pencarian">
+                <i class="mdi mdi-close"></i>
+            </button>
+        </div>
+        <span id="rapSearchResultCount" class="badge bg-primary-subtle text-primary small d-none"></span>
+    </div>
     <div class="d-flex flex-wrap gap-2">
         <!-- Expand / Collapse All -->
         <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" onclick="toggleAllRapRows(true)" title="Buka Semua Tampilan Tabel">
@@ -300,11 +311,48 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
     </div>
 </div>
 
+<!-- RAP Table Styles (Sticky Floating Header) -->
+<style>
+/* Ensure main-content allows sticky to viewport */
+.main-content {
+    overflow: visible !important;
+}
+
+/* Floating Synced Sticky Header for RAP */
+.rap-floating-header-wrapper {
+    position: fixed;
+    top: 70px;
+    z-index: 999;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    display: none;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+    background-color: #212529;
+    border-bottom: 2px solid #212529;
+}
+.rap-floating-header-wrapper .rap-table,
+.rap-floating-header-wrapper table {
+    margin-bottom: 0 !important;
+}
+.rap-floating-header-wrapper th {
+    border-top: none !important;
+    background-color: #212529 !important;
+    color: #fff !important;
+    vertical-align: middle !important;
+}
+
+@media print {
+    .rap-floating-header-wrapper {
+        display: none !important;
+    }
+}
+</style>
+
 <!-- RAP Table -->
-<div class="table-responsive">
-    <table class="table table-bordered mb-0" id="rapTable">
+<div class="table-responsive rap-scroll-wrapper" id="rapTableWrapper">
+    <table class="table table-bordered mb-0 rap-table" id="rapTable">
         <thead class="table-dark">
-            <tr>
+            <tr class="rap-header-row">
                 <th width="80">No</th>
                 <th>Uraian Pekerjaan</th>
                 <th width="80">Satuan</th>
@@ -365,7 +413,7 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                         $catAlat = $data['total_alat'];
                     ?>
                         <!-- Category Header Row -->
-                        <tr class="table-primary category-row hs-rap-item-<?= $hsId ?>" data-cat-id="<?= $catId ?>">
+                        <tr class="table-primary category-row hs-rap-item-<?= $hsId ?>" data-cat-id="<?= $catId ?>" data-hs-id="<?= $hsId ?>">
                             <td colspan="11" class="py-2">
                                 <div class="d-flex align-items-center gap-2" style="padding-left: 15px;">
                                     <button type="button" class="btn btn-sm btn-primary p-0 px-2 toggle-cat-rap-btn" onclick="toggleCategoryRap(<?= $catId ?>)" title="Tutup / Buka Kategori">
@@ -488,7 +536,7 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
             <!-- Render Standalone Categories -->
             <?php if (!empty($standaloneCats)): ?>
                 <?php if (!empty($headSubs)): ?>
-                <tr class="table-dark">
+                <tr class="table-dark head-sub-row-rap" data-hs-id="0">
                     <td colspan="11" class="py-2"><strong class="font-size-14 text-uppercase">KATEGORI TANPA HEAD-SUB</strong></td>
                 </tr>
                 <?php endif; ?>
@@ -502,7 +550,7 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                     $catAlat = $data['total_alat'];
                 ?>
                     <!-- Standalone Category Header Row -->
-                    <tr class="table-primary category-row" data-cat-id="<?= $catId ?>">
+                    <tr class="table-primary category-row" data-cat-id="<?= $catId ?>" data-hs-id="0">
                         <td colspan="11" class="py-2">
                             <div class="d-flex align-items-center gap-2" style="padding-left: 15px;">
                                 <button type="button" class="btn btn-sm btn-primary p-0 px-2 toggle-cat-rap-btn" onclick="toggleCategoryRap(<?= $catId ?>)" title="Tutup / Buka Kategori">
@@ -913,8 +961,164 @@ function restoreRapCollapsedState() {
     });
 }
 
+// Live search filter implementation for RAP
+function filterRapTable(query) {
+    query = (query || '').trim().toLowerCase();
+    var hasQuery = query.length > 0;
+    
+    $('#clearSearchRapBtn').toggleClass('d-none', !hasQuery);
+    $('#rapNoSearchResultsRow').remove();
+    
+    if (!hasQuery) {
+        $('#rapSearchResultCount').addClass('d-none').text('');
+        restoreRapCollapsedState();
+        return;
+    }
+    
+    var matchedSubcatCount = 0;
+    var matchedCatIds = new Set();
+    var matchedHsIds = new Set();
+    
+    // 1. Evaluate subcategory rows
+    $('#rapTable tbody tr').each(function() {
+        var row = $(this);
+        if (row.hasClass('head-sub-row-rap') || row.hasClass('category-row') || row.hasClass('table-secondary') || row.hasClass('table-info') || row.hasClass('table-light') || row.hasClass('table-dark')) {
+            return;
+        }
+        
+        var text = row.text().toLowerCase();
+        var catId = 0;
+        var classList = (row.attr('class') || '').split(/\s+/);
+        classList.forEach(function(cls) {
+            var m = cls.match(/^cat-rap-item-(\d+)$/);
+            if (m) catId = parseInt(m[1]);
+        });
+        
+        var catName = '';
+        var hsName = '';
+        var hsId = 0;
+        if (catId) {
+            var catRow = $('.category-row[data-cat-id="' + catId + '"]');
+            catName = (catRow.find('strong').text() || '').toLowerCase();
+            hsId = parseInt(catRow.attr('data-hs-id')) || 0;
+            if (hsId) {
+                var hsRow = $('.head-sub-row-rap[data-hs-id="' + hsId + '"]');
+                hsName = (hsRow.find('strong').text() || '').toLowerCase();
+            }
+        }
+        
+        var isMatch = text.indexOf(query) !== -1 || catName.indexOf(query) !== -1 || hsName.indexOf(query) !== -1;
+        if (isMatch) {
+            row.show();
+            matchedSubcatCount++;
+            if (catId) {
+                matchedCatIds.add(catId);
+                if (hsId) matchedHsIds.add(hsId);
+            }
+        } else {
+            row.hide();
+        }
+    });
+    
+    // 2. Direct category matches
+    $('.category-row').each(function() {
+        var catRow = $(this);
+        var catId = parseInt(catRow.attr('data-cat-id'));
+        var hsId = parseInt(catRow.attr('data-hs-id')) || 0;
+        var catTitle = (catRow.find('strong').text() || '').toLowerCase();
+        
+        if (catTitle.indexOf(query) !== -1) {
+            matchedCatIds.add(catId);
+            if (hsId) matchedHsIds.add(hsId);
+            $('.cat-rap-item-' + catId + ':not(.category-row):not(.table-secondary)').each(function() {
+                $(this).show();
+                matchedSubcatCount++;
+            });
+        }
+    });
+    
+    // 3. Direct Head-Sub matches
+    $('.head-sub-row-rap').each(function() {
+        var hsRow = $(this);
+        var hsId = parseInt(hsRow.attr('data-hs-id'));
+        var hsTitle = (hsRow.find('strong').text() || '').toLowerCase();
+        
+        if (hsTitle.indexOf(query) !== -1 && hsId) {
+            matchedHsIds.add(hsId);
+            $('.hs-rap-item-' + hsId).each(function() {
+                var row = $(this);
+                if (row.hasClass('category-row')) {
+                    var cId = parseInt(row.attr('data-cat-id'));
+                    if (cId) matchedCatIds.add(cId);
+                    row.show();
+                } else if (!row.hasClass('table-info') && !row.hasClass('table-secondary') && !row.hasClass('table-light')) {
+                    row.show();
+                    matchedSubcatCount++;
+                }
+            });
+        }
+    });
+    
+    // 4. Show/hide category headers & total rows
+    $('.category-row').each(function() {
+        var catId = parseInt($(this).attr('data-cat-id'));
+        if (matchedCatIds.has(catId)) {
+            $(this).show();
+            $('#cat-rap-chevron-' + catId).removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+            $('.table-secondary.cat-rap-item-' + catId).show();
+        } else {
+            $(this).hide();
+            $('.table-secondary.cat-rap-item-' + catId).hide();
+        }
+    });
+    
+    // 5. Show/hide Head-Sub headers & total rows
+    $('.head-sub-row-rap').each(function() {
+        var hsId = parseInt($(this).attr('data-hs-id'));
+        if (hsId === 0) return;
+        if (matchedHsIds.has(hsId)) {
+            $(this).show();
+            $('#hs-rap-chevron-' + hsId).removeClass('mdi-chevron-right').addClass('mdi-chevron-down');
+            $('.table-info.hs-rap-item-' + hsId).show();
+            $('.hs-rap-item-' + hsId + '.table-light').hide();
+        } else {
+            $(this).hide();
+            $('.table-info.hs-rap-item-' + hsId).hide();
+            $('.hs-rap-item-' + hsId + '.table-light').hide();
+        }
+    });
+    
+    var hasStandaloneMatches = false;
+    matchedCatIds.forEach(function(cId) {
+        var catRow = $('.category-row[data-cat-id="' + cId + '"]');
+        if (!catRow.attr('data-hs-id') || catRow.attr('data-hs-id') == '0') {
+            hasStandaloneMatches = true;
+        }
+    });
+    $('.head-sub-row-rap[data-hs-id="0"]').toggle(hasStandaloneMatches);
+    
+    // 6. Show result count badge and empty state if 0
+    if (matchedSubcatCount > 0 || matchedCatIds.size > 0) {
+        $('#rapSearchResultCount').removeClass('d-none').text('Ditemukan: ' + matchedSubcatCount + ' pekerjaan');
+    } else {
+        $('#rapSearchResultCount').removeClass('d-none').text('0 pekerjaan');
+        var emptyRow = $('<tr id="rapNoSearchResultsRow"><td colspan="11" class="text-center text-muted py-4"><i class="mdi mdi-magnify font-size-24 d-block mb-1 text-secondary"></i>Tidak ada pekerjaan yang cocok dengan pencarian "<strong>' + query.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</strong>"</td></tr>');
+        $('#rapTable tbody').append(emptyRow);
+    }
+}
+
 $(document).ready(function() {
     restoreRapCollapsedState();
+    
+    $('#searchRapInput').on('input', function() {
+        filterRapTable($(this).val());
+    });
+    
+    $('#clearSearchRapBtn').on('click', function() {
+        $('#searchRapInput').val('');
+        filterRapTable('');
+        $('#searchRapInput').focus();
+    });
     
     // Initialize tooltips
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -961,6 +1165,151 @@ function printPdfPreviewRap() {
         iframe.contentWindow.print();
     }
 }
+
+// Floating Synced Sticky Header Implementation for RAP
+(function initRapStickyHeader() {
+    function setupStickyHeader() {
+        var origWrapper = document.getElementById('rapTableWrapper') || document.querySelector('.rap-scroll-wrapper');
+        var origTable = document.getElementById('rapTable');
+        if (!origWrapper || !origTable) return;
+        
+        var origThead = origTable.querySelector('thead');
+        if (!origThead) return;
+
+        // Remove any existing floating header wrapper
+        var existing = document.getElementById('rapFloatingHeader');
+        if (existing) existing.remove();
+
+        // Create floating container
+        var floatWrapper = document.createElement('div');
+        floatWrapper.id = 'rapFloatingHeader';
+        floatWrapper.className = 'rap-floating-header-wrapper';
+        
+        // Create cloned table and thead
+        var floatTable = document.createElement('table');
+        floatTable.className = origTable.className + ' rap-floating-table';
+        
+        var clonedThead = origThead.cloneNode(true);
+        var clonedIds = clonedThead.querySelectorAll('[id]');
+        for (var k = 0; k < clonedIds.length; k++) {
+            clonedIds[k].removeAttribute('id');
+        }
+        floatTable.appendChild(clonedThead);
+        floatWrapper.appendChild(floatTable);
+        document.body.appendChild(floatWrapper);
+
+        // Sync column widths between original thead and cloned thead
+        function syncWidths() {
+            var origTableWidth = origTable.offsetWidth;
+            floatTable.style.width = origTableWidth + 'px';
+            floatTable.style.minWidth = origTableWidth + 'px';
+            
+            var origRows = origThead.querySelectorAll('tr');
+            var cloneRows = clonedThead.querySelectorAll('tr');
+            for (var r = 0; r < origRows.length; r++) {
+                if (!cloneRows[r]) continue;
+                cloneRows[r].style.height = origRows[r].offsetHeight + 'px';
+                var origThs = origRows[r].children;
+                var cloneThs = cloneRows[r].children;
+                for (var i = 0; i < origThs.length; i++) {
+                    if (cloneThs[i]) {
+                        var rect = origThs[i].getBoundingClientRect();
+                        var w = rect.width;
+                        cloneThs[i].style.width = w + 'px';
+                        cloneThs[i].style.minWidth = w + 'px';
+                        cloneThs[i].style.maxWidth = w + 'px';
+                        cloneThs[i].style.boxSizing = 'border-box';
+                    }
+                }
+            }
+        }
+
+        // Update position and visibility on scroll
+        function updatePosition() {
+            var topbar = document.getElementById('page-topbar');
+            var topOffset = topbar ? topbar.offsetHeight : 70;
+            
+            var rect = origWrapper.getBoundingClientRect();
+            var theadRect = origThead.getBoundingClientRect();
+            var theadHeight = origThead.offsetHeight;
+            var tableBottom = rect.bottom;
+            
+            // Show floating header when original header has scrolled past the topbar,
+            // and hide before the table completely leaves the view
+            if (theadRect.top <= topOffset && tableBottom > (topOffset + theadHeight + 30)) {
+                floatWrapper.style.display = 'block';
+                floatWrapper.style.top = topOffset + 'px';
+                floatWrapper.style.left = rect.left + 'px';
+                floatWrapper.style.width = rect.width + 'px';
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+            } else {
+                floatWrapper.style.display = 'none';
+            }
+        }
+
+        // Bidirectional horizontal scroll sync
+        var isSyncing = false;
+        origWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                floatWrapper.scrollLeft = origWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        floatWrapper.addEventListener('scroll', function() {
+            if (!isSyncing) {
+                isSyncing = true;
+                origWrapper.scrollLeft = floatWrapper.scrollLeft;
+                isSyncing = false;
+            }
+        }, { passive: true });
+
+        floatWrapper.addEventListener('wheel', function(e) {
+            if (e.deltaX) {
+                origWrapper.scrollLeft += e.deltaX;
+            }
+        }, { passive: true });
+
+        // Window scroll and resize listeners with requestAnimationFrame
+        var ticking = false;
+        function onScrollOrResize() {
+            if (!ticking) {
+                window.requestAnimationFrame(function() {
+                    syncWidths();
+                    updatePosition();
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        }
+
+        window.addEventListener('scroll', onScrollOrResize, { passive: true });
+        window.addEventListener('resize', onScrollOrResize, { passive: true });
+
+        // Observe size changes via ResizeObserver
+        if (window.ResizeObserver) {
+            var ro = new ResizeObserver(function() {
+                syncWidths();
+                updatePosition();
+            });
+            ro.observe(origWrapper);
+            ro.observe(origTable);
+        }
+
+        // Initial measurement
+        setTimeout(function() {
+            syncWidths();
+            updatePosition();
+        }, 50);
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setupStickyHeader();
+    } else {
+        document.addEventListener('DOMContentLoaded', setupStickyHeader);
+    }
+})();
 </script>
 <?php 
 $extraScripts = ob_get_clean();

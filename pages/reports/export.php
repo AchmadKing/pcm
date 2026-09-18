@@ -1,7 +1,7 @@
 <?php
 /**
  * Export Laporan Proyek (CSV & PDF)
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Fitur Export Fleksibel: Seluruh Proyek atau Per Proyek, dengan Filter Periode Tanggal
  */
 
@@ -97,7 +97,7 @@ if ($format === 'csv') {
         // REKAPITULASI SUMMARY CSV
         // -------------------------------------------------------------
         fputcsv($output, ['LAPORAN REKAPITULASI BIAYA & REALISASI PROYEK'], $delimiter);
-        fputcsv($output, ['PCM - Project Cost Management System'], $delimiter);
+        fputcsv($output, ['PCC - Project Cost Control System'], $delimiter);
         fputcsv($output, ['Cakupan Proyek', ':', $isAllProjects ? 'Semua Proyek' : $selectedProject['name']], $delimiter);
         fputcsv($output, ['Periode', ':', $periodeLabel], $delimiter);
         fputcsv($output, ['Tanggal Cetak', ':', date('d-m-Y H:i') . ' WIB'], $delimiter);
@@ -213,7 +213,7 @@ if ($format === 'csv') {
         // DETAIL REALISASI & TRANSAKSI PENGAJUAN CSV
         // -------------------------------------------------------------
         fputcsv($output, ['LAPORAN DETAIL REALISASI & PENGELUARAN DANA'], $delimiter);
-        fputcsv($output, ['PCM - Project Cost Management System'], $delimiter);
+        fputcsv($output, ['PCC - Project Cost Control System'], $delimiter);
         fputcsv($output, ['Cakupan Proyek', ':', $isAllProjects ? 'Semua Proyek' : $selectedProject['name']], $delimiter);
         fputcsv($output, ['Periode Transaksi', ':', $periodeLabel], $delimiter);
         fputcsv($output, ['Tanggal Cetak', ':', date('d-m-Y H:i') . ' WIB'], $delimiter);
@@ -223,7 +223,7 @@ if ($format === 'csv') {
         fputcsv($output, [
             'No', 'Tanggal Pengajuan', 'No. Pengajuan', 'Nama Proyek', 'Minggu Ke',
             'Kode Pekerjaan', 'Kategori / Pekerjaan', 'Kode Item', 'Uraian Pekerjaan / Item',
-            'Satuan', 'Koefisien', 'Harga Satuan (Rp)', 'Total Biaya (Rp)', 'Pemohon', 'Catatan'
+            'Satuan', 'Volume', 'Harga Satuan (Rp)', 'Total Biaya (Rp)', 'Pemohon', 'Catatan'
         ], $delimiter);
 
         $transactions = fetchProjectTransactions($accessibleProjectIds, $projectId, $startDate, $endDate);
@@ -393,7 +393,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Export Laporan Proyek</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="dashboard.php">Laporan</a></li>
                     <li class="breadcrumb-item active">Export</li>
                 </ol>
@@ -467,7 +467,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <input class="form-check-input me-3" type="radio" name="type" value="transactions">
                                 <div>
                                     <div class="fw-bold text-dark">Detail Realisasi & Transaksi Pengeluaran</div>
-                                    <small class="text-muted">Daftar rinci seluruh item pekerjaan yang diajukan dan disetujui (koefisien, harga satuan, total nominal, nomor request, pemohon) dalam periode.</small>
+                                    <small class="text-muted">Daftar rinci seluruh item pekerjaan yang diajukan dan disetujui (volume, harga satuan, total nominal, nomor request, pemohon) dalam periode.</small>
                                 </div>
                             </label>
 

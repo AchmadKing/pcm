@@ -2121,4 +2121,39 @@ function deleteRequest($requestId) {
     return $res > 0;
 }
 
+/**
+ * Resequence RAB categories and subcategories for a project
+ * Ensures sequential sort_orders (1, 2, 3...) and synchronized code letters (A, B, C...)
+ * as well as subcategory codes (A.1, A.2, B.1, B.2...)
+ * 
+ * @param int $projectId
+ * @return void
+ */
+function resequenceRabCategoriesAndSubcategories($projectId) {
+    $projectId = intval($projectId);
+    if ($projectId <= 0) return;
+
+    // Get all categories in current sort_order, then id
+    $categories = dbGetAll("SELECT id, code, sort_order FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$projectId]);
+    
+    $catIndex = 1;
+    foreach ($categories as $cat) {
+        $newCatCode = getCategoryCodeFromIndex($catIndex);
+        dbExecute("UPDATE rab_categories SET sort_order = ?, code = ? WHERE id = ? AND project_id = ?", 
+            [$catIndex, $newCatCode, $cat['id'], $projectId]);
+        
+        // Resequence subcategories within this category
+        $subcats = dbGetAll("SELECT id, code, sort_order FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order ASC, id ASC", [$cat['id']]);
+        $subIndex = 1;
+        foreach ($subcats as $sub) {
+            $newSubCode = $newCatCode . '.' . $subIndex;
+            dbExecute("UPDATE rab_subcategories SET sort_order = ?, code = ? WHERE id = ?", 
+                [$subIndex, $newSubCode, $sub['id']]);
+            $subIndex++;
+        }
+        
+        $catIndex++;
+    }
+}
+
 

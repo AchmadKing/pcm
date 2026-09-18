@@ -1,7 +1,7 @@
 <?php
 /**
  * Reports Dashboard
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Updated for new per-project master data structure and comprehensive Export feature
  */
 
@@ -65,7 +65,7 @@ $overallStats = getOverallProjectsRealtimeStats();
             <h4 class="mb-sm-0">Dashboard Laporan & Analisa Biaya</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item active">Dashboard Laporan</li>
                 </ol>
             </div>

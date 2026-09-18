@@ -1,7 +1,7 @@
 <?php
 /**
  * RAB Snapshot Editor - View/Edit Salinan RAB
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Layout matches RAB exactly (minus action column)
  */
 
@@ -187,7 +187,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Salinan RAB: <?= sanitize($snapshot['name']) ?></h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Proyek</a></li>
                     <li class="breadcrumb-item"><a href="view.php?id=<?= $projectId ?>"><?= sanitize($snapshot['project_name']) ?></a></li>
                     <li class="breadcrumb-item"><a href="rab.php?id=<?= $projectId ?>">RAB</a></li>

@@ -1,7 +1,7 @@
 <?php
 /**
  * Approval Center
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // IMPORTANT: Process all logic that may redirect BEFORE including header.php
@@ -443,7 +443,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Approval Center</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item active">Approval</li>
                 </ol>
             </div>
@@ -552,7 +552,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             <tr>
                                 <th>Kode</th>
                                 <th>Uraian</th>
-                                <th class="text-end">Koef.</th>
+                                <th class="text-end">Volume</th>
                                 <th class="text-end">Harga Satuan</th>
                                 <th class="text-end">Total Lapangan</th>
                                 <th class="text-end">Harga RAP</th>

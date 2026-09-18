@@ -1,7 +1,7 @@
 <?php
 /**
  * Logout Handler
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 session_start();

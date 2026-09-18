@@ -20,7 +20,7 @@ ensureRabHeadSubsTableExists();
 // Define actions that THIS handler processes (prevents intercepting master_data actions)
 $rabRapActions = [
     'add_head_sub', 'edit_head_sub', 'delete_head_sub',
-    'add_category', 'edit_category', 'add_subcategory', 'delete_category', 'delete_subcategory',
+    'add_category', 'edit_category', 'add_subcategory', 'delete_category', 'delete_subcategory', 'reorder_categories',
     'update_ppn', 'update_volume', 'submit_rab', 'reopen_rab',
     'create_snapshot', 'delete_snapshot', 'import_rab', 'import_rap',
     'update_rap_volume', 'generate_rap', 'sync_from_reference'
@@ -72,6 +72,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     throw new Exception('Head-Sub tidak valid!');
                 }
                 dbExecute("DELETE FROM rab_head_subs WHERE id = ? AND project_id = ?", [$headSubId, $projectId]);
+                resequenceRabCategoriesAndSubcategories($projectId);
                 setFlash('success', 'Head-Sub berhasil dihapus!');
                 break;
 
@@ -88,6 +89,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_categories WHERE project_id = ?", [$projectId]);
                 dbInsert("INSERT INTO rab_categories (project_id, head_sub_id, code, name, sort_order) VALUES (?, ?, ?, ?, ?)", 
                     [$projectId, $headSubId, $nextCode, $name, $maxSort['next']]);
+                resequenceRabCategoriesAndSubcategories($projectId);
                 setFlash('success', 'Kategori berhasil ditambahkan!');
                 break;
 
@@ -100,10 +102,31 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 }
                 dbExecute("UPDATE rab_categories SET name = ?, head_sub_id = ? WHERE id = ? AND project_id = ?",
                     [$name, $headSubId, $catId, $projectId]);
+                resequenceRabCategoriesAndSubcategories($projectId);
                 setFlash('success', 'Kategori berhasil diperbarui!');
                 break;
 
-                
+            case 'reorder_categories':
+                $categoryOrder = $_POST['category_order'] ?? [];
+                if (is_string($categoryOrder)) {
+                    $categoryOrder = json_decode($categoryOrder, true) ?: [];
+                }
+                $sortIdx = 1;
+                foreach ($categoryOrder as $item) {
+                    $cId = is_array($item) ? intval($item['id'] ?? 0) : intval($item);
+                    if (!$cId) continue;
+                    if (is_array($item) && array_key_exists('head_sub_id', $item)) {
+                        $hsId = (!empty($item['head_sub_id']) && $item['head_sub_id'] !== '0') ? intval($item['head_sub_id']) : null;
+                        dbExecute("UPDATE rab_categories SET sort_order = ?, head_sub_id = ? WHERE id = ? AND project_id = ?", [$sortIdx, $hsId, $cId, $projectId]);
+                    } else {
+                        dbExecute("UPDATE rab_categories SET sort_order = ? WHERE id = ? AND project_id = ?", [$sortIdx, $cId, $projectId]);
+                    }
+                    $sortIdx++;
+                }
+                resequenceRabCategoriesAndSubcategories($projectId);
+                setFlash('success', 'Urutan kategori berhasil disimpan!');
+                break;
+
             case 'add_subcategory':
                 $categoryId = $_POST['category_id'] ?? '';
                 if (empty($categoryId)) {
@@ -154,24 +177,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
             case 'delete_category':
                 $deletedCatId = $_POST['category_id'];
                 dbExecute("DELETE FROM rab_categories WHERE id = ? AND project_id = ?", [$deletedCatId, $projectId]);
-                $remainingCats = dbGetAll("SELECT id, code FROM rab_categories WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
-                $letterCode = 'A';
-                foreach ($remainingCats as $cat) {
-                    $newCode = $letterCode;
-                    if ($cat['code'] !== $newCode) {
-                        dbExecute("UPDATE rab_categories SET code = ? WHERE id = ?", [$newCode, $cat['id']]);
-                    }
-                    $subcats = dbGetAll("SELECT id, code FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, id", [$cat['id']]);
-                    $subNum = 1;
-                    foreach ($subcats as $subcat) {
-                        $newSubCode = $newCode . '.' . $subNum;
-                        if ($subcat['code'] !== $newSubCode) {
-                            dbExecute("UPDATE rab_subcategories SET code = ? WHERE id = ?", [$newSubCode, $subcat['id']]);
-                        }
-                        $subNum++;
-                    }
-                    $letterCode++;
-                }
+                resequenceRabCategoriesAndSubcategories($projectId);
                 setFlash('success', 'Kategori berhasil dihapus!');
                 break;
 

@@ -1,7 +1,7 @@
 <?php
 /**
  * Requests List
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // IMPORTANT: Process all logic that may redirect BEFORE including header.php
@@ -122,7 +122,7 @@ if ($reqViewMode === 'all') {
             <h4 class="mb-sm-0">Daftar Pengajuan Dana</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item active">Pengajuan</li>
                 </ol>
             </div>
@@ -155,6 +155,9 @@ if ($reqViewMode === 'all') {
                         </select>
                     </div>
                     <div class="col-md-5 text-end">
+                        <button type="button" class="btn btn-outline-primary btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalLaborCalculator">
+                            <i class="mdi mdi-calculator"></i> Kalkulator Tenaga Kerja
+                        </button>
                         <?php if (!hasPermission('requests.approve')): ?>
                         <a href="create.php" class="btn btn-primary btn-sm">
                             <i class="mdi mdi-plus"></i> Buat Pengajuan Baru
@@ -236,6 +239,8 @@ if ($reqViewMode === 'all') {
         </div>
     </div>
 </div>
+
+<?php require_once __DIR__ . '/partials/modal_labor_calculator.php'; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
 

@@ -271,11 +271,16 @@ $canManageTeam = ($project['status'] === 'on_progress');
                     <span class="badge bg-danger ms-2"><i class="mdi mdi-lock"></i> Terkunci</span>
                     <?php endif; ?>
                 </h6>
-                <?php if ($canMakeRequest && !$isLocked): ?>
-                <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>" class="btn btn-sm btn-success py-0 px-2">
-                    <i class="mdi mdi-plus"></i> Buat Pengajuan
-                </a>
-                <?php endif; ?>
+                <div class="d-flex align-items-center">
+                    <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 me-1" data-bs-toggle="modal" data-bs-target="#modalLaborCalculator">
+                        <i class="mdi mdi-calculator"></i> Kalkulator Tenaga Kerja
+                    </button>
+                    <?php if ($canMakeRequest && !$isLocked): ?>
+                    <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>" class="btn btn-sm btn-success py-0 px-2">
+                        <i class="mdi mdi-plus"></i> Buat Pengajuan
+                    </a>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="card-body">
                 <?php 
@@ -546,3 +551,5 @@ function confirmDeleteRequest(reqId, reqNumber) {
     window.location.href = 'view.php?id=<?= $projectId ?>&tab=requests';
 </script>
 <?php endif; ?>
+
+<?php require_once __DIR__ . '/../../requests/partials/modal_labor_calculator.php'; ?>
