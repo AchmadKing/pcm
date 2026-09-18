@@ -1,6 +1,6 @@
 -- =====================================================
 -- Migration: Add Project Document Folders & Folder ID
--- PCM - Project Cost Management System
+-- PCC - Project Cost Control System
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS project_document_folders (

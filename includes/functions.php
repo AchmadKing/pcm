@@ -1,7 +1,7 @@
 <?php
 /**
  * Helper Functions
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 // Set default timezone to Asia/Jakarta (WIB)
@@ -1586,6 +1586,20 @@ function ensureRabHeadSubsTableExists() {
                 ALTER TABLE `rab_categories` 
                 ADD COLUMN `head_sub_id` int(11) DEFAULT NULL AFTER `project_id`,
                 ADD CONSTRAINT `fk_rab_categories_head_sub` FOREIGN KEY (`head_sub_id`) REFERENCES `rab_head_subs` (`id`) ON DELETE SET NULL
+            ");
+        }
+
+        $snapCatColCheck = dbGetRow("
+            SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'rab_snapshot_categories'
+              AND COLUMN_NAME = 'head_sub_id'
+        ");
+
+        if (empty($snapCatColCheck['cnt'])) {
+            dbExecute("
+                ALTER TABLE `rab_snapshot_categories` 
+                ADD COLUMN `head_sub_id` int(11) DEFAULT NULL AFTER `original_category_id`
             ");
         }
     } catch (Exception $e) {

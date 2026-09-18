@@ -1,7 +1,7 @@
 <?php
 /**
  * Export RAB to PDF (Print-Ready HTML)
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Standalone HTML page for browser print-to-PDF
  */
 
@@ -23,24 +23,16 @@ if (!$project) {
     die('Proyek tidak ditemukan');
 }
 
-$overheadPct = getProjectOverheadProfitPct($project);
-$regionName = $project['region_name'] ?? '-';
-$ppnPercentage = $project['ppn_percentage'] ?? 11;
+// Snapshot check
+$snapshotId = isset($_GET['snapshot_id']) ? intval($_GET['snapshot_id']) : null;
+$snapshot = null;
+if ($snapshotId) {
+    $snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE id = ? AND project_id = ?", [$snapshotId, $projectId]);
+}
 
-// Get RAB data with AHSP codes
-$rabItems = dbGetAll("
-    SELECT 
-        rs.volume,
-        rs.unit_price,
-        rs.code as sub_code, rs.name as sub_name, rs.unit,
-        rc.code as cat_code, rc.name as cat_name,
-        pa.ahsp_code
-    FROM rab_subcategories rs
-    JOIN rab_categories rc ON rs.category_id = rc.id
-    LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
-    WHERE rc.project_id = ?
-    ORDER BY rc.sort_order, LENGTH(rc.code), rc.code, rs.sort_order, LENGTH(rs.code), rs.code
-", [$projectId]);
+$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot) : getProjectOverheadProfitPct($project);
+$regionName = $project['region_name'] ?? '-';
+$ppnPercentage = $snapshot ? floatval($snapshot['ppn_percentage'] ?? 11) : floatval($project['ppn_percentage'] ?? 11);
 
 // Function to get AHSP component breakdown
 function getAhspBreakdownForPdf($ahspId) {
@@ -66,9 +58,33 @@ function getAhspBreakdownForPdf($ahspId) {
 
 ensureRabHeadSubsTableExists();
 
-// Get Head-Subs and Categories for PDF
+// Get Head-Subs
 $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order, id", [$projectId]);
-$categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
+
+if ($snapshot) {
+    // Get Snapshot Categories & Subcategories
+    $categories = dbGetAll("SELECT * FROM rab_snapshot_categories WHERE snapshot_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$snapshotId]);
+    
+    // Batch AHSP details for snapshot
+    $ahspSnapRaw = dbGetAll("
+        SELECT d.snapshot_subcategory_id, d.category, SUM(d.coefficient * d.unit_price) as total_cat
+        FROM rab_snapshot_ahsp_details d
+        JOIN rab_snapshot_subcategories ss ON d.snapshot_subcategory_id = ss.id
+        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+        WHERE sc.snapshot_id = ?
+        GROUP BY d.snapshot_subcategory_id, d.category
+    ", [$snapshotId]);
+    
+    $snapAhspMap = [];
+    foreach ($ahspSnapRaw as $r) {
+        $sId = $r['snapshot_subcategory_id'];
+        if (!isset($snapAhspMap[$sId])) $snapAhspMap[$sId] = ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
+        $snapAhspMap[$sId][$r['category']] = floatval($r['total_cat']);
+        $snapAhspMap[$sId]['total'] += floatval($r['total_cat']);
+    }
+} else {
+    $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
+}
 
 $headSubMap = [];
 foreach ($headSubs as $hs) {
@@ -83,13 +99,24 @@ $standaloneCats = [];
 $grandTotal = 0;
 
 foreach ($categories as $cat) {
-    $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
+    if ($snapshot) {
+        $subcats = dbGetAll("SELECT * FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
+    } else {
+        $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
+    }
+    
     $catTotal = 0;
     $enrichedSubcats = [];
     
     foreach ($subcats as $sub) {
-        $components = getAhspBreakdownForPdf($sub['ahsp_id']);
-        $baseUnitPrice = $components['total'];
+        if ($snapshot) {
+            $comp = $snapAhspMap[$sub['id']] ?? null;
+            $baseUnitPrice = ($comp && $comp['total'] > 0) ? $comp['total'] : floatval($sub['unit_price']);
+        } else {
+            $components = getAhspBreakdownForPdf($sub['ahsp_id']);
+            $baseUnitPrice = $components['total'];
+        }
+        
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $sub['unit_price_display'] = $unitPriceWithOverhead;
         $subTotal = $sub['volume'] * $unitPriceWithOverhead;
@@ -114,17 +141,17 @@ foreach ($categories as $cat) {
     }
 }
 
-
 $ppnAmount = $grandTotal * ($ppnPercentage / 100);
 $totalWithPpn = $grandTotal + $ppnAmount;
 $totalRounded = ceil($totalWithPpn / 10) * 10;
+$reportDocTitle = $snapshot ? ('Laporan Salinan RAB (' . sanitize($snapshot['name']) . ')') : 'Laporan RAB';
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laporan RAB - <?= htmlspecialchars($project['name']) ?></title>
+    <title><?= $reportDocTitle ?> - <?= htmlspecialchars($project['name']) ?></title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -278,7 +305,7 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
 </div>
 
 <div class="page-container">
-    <div class="report-title">RENCANA ANGGARAN BIAYA (RAB)</div>
+    <div class="report-title">RENCANA ANGGARAN BIAYA (RAB<?= $snapshot ? ' - ' . htmlspecialchars($snapshot['name']) : '' ?>)</div>
 
     <table class="project-info">
         <tr><td>NAMA KEGIATAN</td><td>:</td><td><?= htmlspecialchars($project['activity_name'] ?? '-') ?></td></tr>

@@ -1,7 +1,7 @@
 <?php
 /**
  * Role Management Page
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Only accessible by users with admin.roles permission
  */
 
@@ -391,7 +391,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <h4 class="mb-sm-0">Manajemen Role</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
-                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>/index.php">PCM</a></li>
+                    <li class="breadcrumb-item"><a href="<?= $baseUrl ?>/index.php">PCC</a></li>
                     <li class="breadcrumb-item"><a href="javascript:void(0);">Pengaturan</a></li>
                     <li class="breadcrumb-item active">Manajemen Role</li>
                 </ol>

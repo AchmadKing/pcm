@@ -1,6 +1,6 @@
 -- =====================================================
 -- Migration: Add Project Documents Table & Permissions
--- PCM - Project Cost Management System
+-- PCC - Project Cost Control System
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS project_documents (

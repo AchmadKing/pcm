@@ -273,34 +273,111 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 break;
                 
             case 'create_snapshot':
-                $snapshotName = trim($_POST['snapshot_name'] ?? '');
+            case 'resync_snapshot':
+                $snapshotName = strtoupper(trim($_POST['snapshot_name'] ?? $_POST['snapshot_type'] ?? ''));
                 $snapshotDesc = trim($_POST['snapshot_description'] ?? '');
                 
                 if (empty($snapshotName)) {
-                    throw new Exception('Nama salinan harus diisi!');
+                    throw new Exception('Jenis salinan (MC0 atau CCO) harus dipilih!');
+                }
+
+                if (!in_array($snapshotName, ['MC0', 'CCO'])) {
+                    // Allow other custom snapshot names if needed, but standardize uppercase
+                    $snapshotName = strtoupper($snapshotName);
                 }
                 
-                $snapshotId = dbInsert("INSERT INTO rab_snapshots (project_id, name, description, created_by) VALUES (?, ?, ?, ?)",
-                    [$projectId, $snapshotName, $snapshotDesc, $_SESSION['user_id']]);
+                ensureRabHeadSubsTableExists();
+
+                // If snapshot with this name already exists for this project, delete old records cleanly
+                $existingSnapshots = dbGetAll("SELECT id FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = ?", [$projectId, $snapshotName]);
+                foreach ($existingSnapshots as $exSnap) {
+                    $exId = $exSnap['id'];
+                    dbExecute("
+                        DELETE d FROM rab_snapshot_ahsp_details d
+                        JOIN rab_snapshot_subcategories ss ON d.snapshot_subcategory_id = ss.id
+                        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+                        WHERE sc.snapshot_id = ?
+                    ", [$exId]);
+                    dbExecute("
+                        DELETE ss FROM rab_snapshot_subcategories ss
+                        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+                        WHERE sc.snapshot_id = ?
+                    ", [$exId]);
+                    dbExecute("DELETE FROM rab_snapshot_categories WHERE snapshot_id = ?", [$exId]);
+                    dbExecute("DELETE FROM rab_snapshots WHERE id = ?", [$exId]);
+                }
                 
-                $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order", [$projectId]);
+                $overheadPct = floatval($project['overhead_percentage'] ?? 0);
+                $profitPct = floatval($project['profit_percentage'] ?? 0);
+                $ppnPct = floatval($project['ppn_percentage'] ?? 11);
+
+                $snapshotId = dbInsert("
+                    INSERT INTO rab_snapshots (project_id, name, description, overhead_percentage, profit_percentage, ppn_percentage, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ", [$projectId, $snapshotName, $snapshotDesc, $overheadPct, $profitPct, $ppnPct, $_SESSION['user_id']]);
+                
+                $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
+                $ahspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
+
                 foreach ($categories as $cat) {
-                    $snapCatId = dbInsert("INSERT INTO rab_snapshot_categories (snapshot_id, original_category_id, code, name, sort_order) VALUES (?, ?, ?, ?, ?)",
-                        [$snapshotId, $cat['id'], $cat['code'], $cat['name'], $cat['sort_order']]);
+                    $snapCatId = dbInsert("INSERT INTO rab_snapshot_categories (snapshot_id, original_category_id, head_sub_id, code, name, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                        [$snapshotId, $cat['id'], $cat['head_sub_id'] ?? null, $cat['code'], $cat['name'], $cat['sort_order']]);
                     
-                    $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order", [$cat['id']]);
+                    $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
                     foreach ($subcats as $sub) {
-                        dbInsert("INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            [$snapCatId, $sub['id'], $sub['ahsp_id'], $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $sub['unit_price'], $sub['sort_order']]);
+                        $components = $ahspBreakdownMap[$sub['ahsp_id']] ?? ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
+                        $baseUnitPrice = $components['total'] > 0 ? $components['total'] : floatval($sub['unit_price']);
+
+                        $snapSubId = dbInsert("INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [$snapCatId, $sub['id'], $sub['ahsp_id'], $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $baseUnitPrice, $sub['sort_order']]);
+                        
+                        // Pre-populate independent AHSP details for snapshot
+                        if (!empty($sub['ahsp_id'])) {
+                            $ahspDetails = dbGetAll("
+                                SELECT d.item_id, d.coefficient, COALESCE(d.unit_price, pi.price) as unit_price, pi.category
+                                FROM project_ahsp_details d
+                                JOIN project_items pi ON d.item_id = pi.id
+                                WHERE d.ahsp_id = ?
+                                ORDER BY pi.category, d.id
+                            ", [$sub['ahsp_id']]);
+                            
+                            $sOrder = 1;
+                            foreach ($ahspDetails as $d) {
+                                dbInsert("INSERT INTO rab_snapshot_ahsp_details (snapshot_subcategory_id, item_id, category, coefficient, unit_price, total_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                    [$snapSubId, $d['item_id'], $d['category'], $d['coefficient'], $d['unit_price'], $d['coefficient'] * $d['unit_price'], $sOrder++]);
+                            }
+                        }
                     }
                 }
-                setFlash('success', 'Salinan RAB berhasil dibuat!');
+                
+                $typeNameDisplay = ($snapshotName === 'MC0') ? 'MC0 (Mutual Check 0%)' : (($snapshotName === 'CCO') ? 'CCO (Contract Change Order)' : $snapshotName);
+                setFlash('success', "Salinan RAB ($typeNameDisplay) berhasil dibuat!");
+                $redirectTab = strtolower($snapshotName);
                 break;
                 
             case 'delete_snapshot':
-                $snapshotId = $_POST['snapshot_id'];
-                dbExecute("DELETE FROM rab_snapshots WHERE id = ?", [$snapshotId]);
-                setFlash('success', 'Salinan RAB berhasil dihapus!');
+                $snapshotId = intval($_POST['snapshot_id'] ?? 0);
+                if ($snapshotId) {
+                    $snapInfo = dbGetRow("SELECT name FROM rab_snapshots WHERE id = ? AND project_id = ?", [$snapshotId, $projectId]);
+                    $snapName = $snapInfo ? $snapInfo['name'] : 'Salinan RAB';
+                    
+                    dbExecute("
+                        DELETE d FROM rab_snapshot_ahsp_details d
+                        JOIN rab_snapshot_subcategories ss ON d.snapshot_subcategory_id = ss.id
+                        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+                        WHERE sc.snapshot_id = ?
+                    ", [$snapshotId]);
+                    dbExecute("
+                        DELETE ss FROM rab_snapshot_subcategories ss
+                        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+                        WHERE sc.snapshot_id = ?
+                    ", [$snapshotId]);
+                    dbExecute("DELETE FROM rab_snapshot_categories WHERE snapshot_id = ?", [$snapshotId]);
+                    dbExecute("DELETE FROM rab_snapshots WHERE id = ?", [$snapshotId]);
+                    
+                    setFlash('success', "Salinan RAB ($snapName) berhasil dihapus!");
+                }
+                $redirectTab = 'rab';
                 break;
                 
             case 'import_rab':
@@ -714,9 +791,11 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
     }
     
     // Redirect to appropriate tab
-    $redirectTab = 'rab';
-    if (in_array($action, ['update_rap_volume', 'generate_rap', 'sync_from_reference'])) {
-        $redirectTab = 'rap';
+    if (!isset($redirectTab)) {
+        $redirectTab = 'rab';
+        if (in_array($action, ['update_rap_volume', 'generate_rap', 'sync_from_reference'])) {
+            $redirectTab = 'rap';
+        }
     }
     
     header('Location: view.php?id=' . $projectId . '&tab=' . $redirectTab);

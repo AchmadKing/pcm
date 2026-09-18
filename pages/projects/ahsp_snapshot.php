@@ -192,6 +192,9 @@ $overheadPct = getProjectOverheadProfitPct($subcategory);
 $overheadAmount = $grandTotal * ($overheadPct / 100);
 $totalWithOverhead = $grandTotal + $overheadAmount;
 
+$tabName = (stripos($subcategory['snapshot_name'], 'mc0') !== false) ? 'mc0' : 'cco';
+$backUrl = 'view.php?id=' . $projectId . '&tab=' . $tabName;
+
 $pageTitle = 'AHSP Snapshot - ' . $subcategory['name'];
 require_once __DIR__ . '/../../includes/header.php';
 ?>
@@ -200,13 +203,13 @@ require_once __DIR__ . '/../../includes/header.php';
 <div class="row">
     <div class="col-12">
         <div class="page-title-box d-sm-flex align-items-center justify-content-between">
-            <h4 class="mb-sm-0">Analisa Harga Satuan Pekerjaan (Salinan)</h4>
+            <h4 class="mb-sm-0">Analisa Harga Satuan Pekerjaan (Salinan <?= sanitize($subcategory['snapshot_name']) ?>)</h4>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
                     <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>
                     <li class="breadcrumb-item"><a href="index.php">Proyek</a></li>
                     <li class="breadcrumb-item"><a href="view.php?id=<?= $projectId ?>"><?= sanitize($subcategory['project_name']) ?></a></li>
-                    <li class="breadcrumb-item"><a href="rab_snapshot.php?id=<?= $snapshotId ?>"><?= sanitize($subcategory['snapshot_name']) ?></a></li>
+                    <li class="breadcrumb-item"><a href="<?= $backUrl ?>"><?= sanitize($subcategory['snapshot_name']) ?></a></li>
                     <li class="breadcrumb-item active">AHSP</li>
                 </ol>
             </div>
@@ -444,8 +447,8 @@ require_once __DIR__ . '/../../includes/header.php';
     
     <!-- Footer Actions -->
     <div class="card-footer">
-        <a href="rab_snapshot.php?id=<?= $snapshotId ?>" class="btn btn-secondary">
-            <i class="mdi mdi-arrow-left"></i> Kembali ke Salinan RAB
+        <a href="<?= $backUrl ?>" class="btn btn-secondary">
+            <i class="mdi mdi-arrow-left"></i> Kembali ke <?= sanitize($subcategory['snapshot_name']) ?>
         </a>
     </div>
 </div>

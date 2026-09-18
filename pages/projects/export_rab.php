@@ -1,7 +1,7 @@
 <?php
 /**
  * Export RAB to CSV
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Supports two formats:
  * - report: Full report format with headers and totals
  * - import: Simplified format for re-import (Kategori | Kode AHSP | Volume)
@@ -32,15 +32,23 @@ if (!$project) {
     exit;
 }
 
+// Snapshot check
+$snapshotId = isset($_GET['snapshot_id']) ? intval($_GET['snapshot_id']) : null;
+$snapshot = null;
+if ($snapshotId) {
+    $snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE id = ? AND project_id = ?", [$snapshotId, $projectId]);
+}
+
 // Get overhead percentage for calculation
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot) : getProjectOverheadProfitPct($project);
 
 // Region is now stored directly in project
 $regionName = $project['region_name'] ?? '-';
 
 // Set filename based on format
 $formatSuffix = ($format === 'import') ? '_IMPORT' : '';
-$filename = 'RAB' . $formatSuffix . '_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd') . '.csv';
+$snapPrefix = $snapshot ? ('_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $snapshot['name'])) : '';
+$filename = 'RAB' . $snapPrefix . $formatSuffix . '_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd') . '.csv';
 header('Content-Type: text/csv; charset=utf-8');
 header('Content-Disposition: attachment; filename="' . $filename . '"');
 
@@ -51,22 +59,40 @@ fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
 ensureRabHeadSubsTableExists();
 
-// Get RAB data with AHSP codes and Head-Sub info
-$rabItems = dbGetAll("
-    SELECT 
-        rs.volume,
-        rs.unit_price,
-        rs.code as sub_code, rs.name as sub_name, rs.unit,
-        rc.code as cat_code, rc.name as cat_name,
-        hs.code as hs_code, hs.name as hs_name,
-        pa.ahsp_code
-    FROM rab_subcategories rs
-    JOIN rab_categories rc ON rs.category_id = rc.id
-    LEFT JOIN rab_head_subs hs ON rc.head_sub_id = hs.id
-    LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
-    WHERE rc.project_id = ?
-    ORDER BY COALESCE(hs.sort_order, 99999), hs.id, rc.sort_order, LENGTH(rc.code), rc.code, rs.sort_order, LENGTH(rs.code), rs.code
-", [$projectId]);
+if ($snapshot) {
+    $rabItems = dbGetAll("
+        SELECT 
+            ss.volume,
+            ss.unit_price,
+            ss.code as sub_code, ss.name as sub_name, ss.unit,
+            sc.code as cat_code, sc.name as cat_name,
+            hs.code as hs_code, hs.name as hs_name,
+            pa.ahsp_code
+        FROM rab_snapshot_subcategories ss
+        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+        LEFT JOIN rab_head_subs hs ON sc.head_sub_id = hs.id
+        LEFT JOIN project_ahsp pa ON ss.ahsp_id = pa.id
+        WHERE sc.snapshot_id = ?
+        ORDER BY COALESCE(hs.sort_order, 99999), hs.id, sc.sort_order, LENGTH(sc.code), sc.code, ss.sort_order, LENGTH(ss.code), ss.code
+    ", [$snapshotId]);
+} else {
+    // Get RAB data with AHSP codes and Head-Sub info
+    $rabItems = dbGetAll("
+        SELECT 
+            rs.volume,
+            rs.unit_price,
+            rs.code as sub_code, rs.name as sub_name, rs.unit,
+            rc.code as cat_code, rc.name as cat_name,
+            hs.code as hs_code, hs.name as hs_name,
+            pa.ahsp_code
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        LEFT JOIN rab_head_subs hs ON rc.head_sub_id = hs.id
+        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+        WHERE rc.project_id = ?
+        ORDER BY COALESCE(hs.sort_order, 99999), hs.id, rc.sort_order, LENGTH(rc.code), rc.code, rs.sort_order, LENGTH(rs.code), rs.code
+    ", [$projectId]);
+}
 
 if ($format === 'import') {
     // ==========================================

@@ -1,7 +1,7 @@
 <?php
 /**
  * Database Configuration
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 define('DB_HOST', '127.0.0.1');

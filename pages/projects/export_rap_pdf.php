@@ -1,7 +1,7 @@
 <?php
 /**
  * Export RAP to PDF (Print-Ready HTML)
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Standalone HTML page for browser print-to-PDF
  */
 

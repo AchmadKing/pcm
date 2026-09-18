@@ -1,5 +1,5 @@
 -- =====================================================
--- PCM (Project Cost Management) Database Schema
+-- PCC (Project Cost Control) Database Schema
 -- Database: pcm_db
 -- =====================================================
 

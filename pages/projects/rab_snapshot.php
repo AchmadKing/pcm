@@ -64,6 +64,8 @@ if (!$snapshot) {
 $projectId = $snapshot['project_id'];
 
 // Handle POST actions
+$tabName = (stripos($snapshot['name'], 'mc0') !== false) ? 'mc0' : 'cco';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
@@ -78,19 +80,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
                 
             case 'update_snapshot':
-                $name = trim($_POST['name']);
                 $desc = trim($_POST['description'] ?? '');
-                dbExecute("UPDATE rab_snapshots SET name = ?, description = ? WHERE id = ?", [$name, $desc, $snapshotId]);
-                setFlash('success', 'Salinan berhasil diperbarui!');
+                dbExecute("UPDATE rab_snapshots SET description = ? WHERE id = ?", [$desc, $snapshotId]);
+                setFlash('success', 'Info salinan berhasil diperbarui!');
                 break;
         }
     } catch (Exception $e) {
         setFlash('error', 'Error: ' . $e->getMessage());
     }
     
-    header('Location: rab_snapshot.php?id=' . $snapshotId);
+    header('Location: view.php?id=' . $projectId . '&tab=' . $tabName);
     exit;
 }
+
+// Redirect GET directly to tab in project view
+header('Location: view.php?id=' . $projectId . '&tab=' . $tabName);
+exit;
 
 // Function to get AHSP component breakdown from snapshot data
 function getSnapshotAhspComponentBreakdown($snapshotSubcatId) {

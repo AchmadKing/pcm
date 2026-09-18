@@ -1,7 +1,7 @@
 <?php
 /**
  * Export AHSP to CSV
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Format matches import template exactly
  */
 

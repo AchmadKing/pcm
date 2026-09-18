@@ -1,7 +1,7 @@
 <?php
 /**
  * Export RAP to CSV
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * Supports two formats:
  * - report: Full report format with headers and totals
  * - import: Simplified format for re-import (Kategori | Kode AHSP | Volume)

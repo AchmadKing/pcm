@@ -1,6 +1,6 @@
 -- =====================================================
 -- Performance Indexes Migration
--- PCM - Fix Cloudflare 524 Timeout
+-- PCC - Fix Cloudflare 524 Timeout
 -- Run this SQL on your production database (pcm_db)
 -- =====================================================
 

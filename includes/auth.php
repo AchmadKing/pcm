@@ -1,7 +1,7 @@
 <?php
 /**
  * Authentication & Permission Functions
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  * 
  * Permission-Based Access Control (PBAC)
  * Akses ditentukan oleh permission yang dimiliki role, bukan hardcoded role name.

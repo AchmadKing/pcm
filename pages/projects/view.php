@@ -356,10 +356,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// AJAX Handler for RAB/RAP Volume Updates & Category Reordering / Head-Sub Drag-and-Drop
+// AJAX Handler for RAB/RAP/Snapshot Volume Updates & Category Reordering / Head-Sub Drag-and-Drop
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], [
     'ajax_update_rab_volume', 
     'ajax_update_rap_volume', 
+    'ajax_update_snapshot_volume',
     'ajax_move_category_head_sub',
     'ajax_reorder_rab_categories',
     'ajax_move_category_order',
@@ -609,6 +610,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
         } elseif ($action === 'ajax_update_rap_volume') {
             // Update RAP item volume
             dbExecute("UPDATE rap_items SET volume = ? WHERE id = ?", [$value, $id]);
+            die(json_encode(['success' => true, 'message' => 'Volume tersimpan']));
+        } elseif ($action === 'ajax_update_snapshot_volume') {
+            // Update Snapshot subcategory volume
+            dbExecute("UPDATE rab_snapshot_subcategories SET volume = ? WHERE id = ?", [$value, $id]);
             die(json_encode(['success' => true, 'message' => 'Volume tersimpan']));
         }
     } catch (Exception $e) {
@@ -1522,6 +1527,10 @@ $itemCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_items WHERE project_i
 $ahspCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 $docCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
 
+// Load MC0 and CCO snapshots for dynamic tabs
+$mc0Snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'MC0' ORDER BY id DESC LIMIT 1", [$projectId]);
+$ccoSnapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'CCO' ORDER BY id DESC LIMIT 1", [$projectId]);
+
 // RAB Summary - base total (optimized: JOIN instead of correlated subquery)
 $rabBaseTotal = dbGetRow("
     SELECT COALESCE(SUM(
@@ -1760,6 +1769,22 @@ require_once __DIR__ . '/../../includes/header.php';
                     <?php endif; ?>
                 </a>
             </li>
+            <?php if (!empty($mc0Snapshot)): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'mc0' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=mc0">
+                    <i class="mdi mdi-file-document-edit-outline"></i> MC0
+                    <span class="badge bg-info-subtle text-info font-size-10">Salinan</span>
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (!empty($ccoSnapshot)): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'cco' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=cco">
+                    <i class="mdi mdi-file-document-edit-outline"></i> CCO
+                    <span class="badge bg-warning-subtle text-warning font-size-10">Salinan</span>
+                </a>
+            </li>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if (hasPermission('rap.view')): ?>
             <li class="nav-item">
@@ -1813,6 +1838,24 @@ require_once __DIR__ . '/../../includes/header.php';
                     include __DIR__ . '/tabs/rab.php';
                 } else {
                     echo '<div class="alert alert-warning">Anda tidak memiliki akses ke RAB.</div>';
+                }
+                break;
+            case 'mc0':
+                if (hasPermission('rab.view') && !empty($mc0Snapshot)) {
+                    $currentSnapshot = $mc0Snapshot;
+                    $snapshotType = 'MC0';
+                    include __DIR__ . '/tabs/snapshot_view.php';
+                } else {
+                    echo '<div class="alert alert-warning">Salinan MC0 belum dibuat atau Anda tidak memiliki akses.</div>';
+                }
+                break;
+            case 'cco':
+                if (hasPermission('rab.view') && !empty($ccoSnapshot)) {
+                    $currentSnapshot = $ccoSnapshot;
+                    $snapshotType = 'CCO';
+                    include __DIR__ . '/tabs/snapshot_view.php';
+                } else {
+                    echo '<div class="alert alert-warning">Salinan CCO belum dibuat atau Anda tidak memiliki akses.</div>';
                 }
                 break;
             case 'rap':

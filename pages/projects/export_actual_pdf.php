@@ -1,7 +1,7 @@
 <?php
 /**
  * Export Realisasi (Actualization) to PDF (Print-Ready HTML)
- * PCM - Project Cost Management System
+ * PCC - Project Cost Control System
  */
 
 require_once __DIR__ . '/../../includes/auth.php';

@@ -144,41 +144,10 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
             <i class="mdi mdi-unfold-less-horizontal"></i> Tutup Semua
         </button>
 
-        <?php 
-        $snapshots = dbGetAll("SELECT s.*, u.full_name as creator_name FROM rab_snapshots s LEFT JOIN users u ON s.created_by = u.id WHERE s.project_id = ? ORDER BY s.created_at DESC", [$projectId]);
-        ?>
-        <!-- Salinan RAB Dropdown -->
-        <div class="dropdown">
-            <button class="btn btn-info btn-sm dropdown-toggle text-nowrap" type="button" data-bs-toggle="dropdown">
-                <i class="mdi mdi-content-copy"></i> Salinan RAB <?php if (!empty($snapshots)): ?><span class="badge bg-light text-info"><?= count($snapshots) ?></span><?php endif; ?>
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" style="min-width: 320px;">
-                <li><h6 class="dropdown-header">Salinan RAB</h6></li>
-                <?php if (empty($snapshots)): ?>
-                <li><span class="dropdown-item-text text-muted small">Belum ada salinan</span></li>
-                <?php else: ?>
-                <?php foreach ($snapshots as $snap): ?>
-                <li>
-                    <a href="rab_snapshot.php?id=<?= $snap['id'] ?>" class="dropdown-item d-flex justify-content-between align-items-center py-2" style="cursor:pointer;">
-                        <div class="me-2" style="flex: 1;">
-                            <div class="fw-bold small"><?= sanitize($snap['name']) ?></div>
-                            <small class="text-muted"><?= date('d M Y H:i', strtotime($snap['created_at'])) ?></small>
-                        </div>
-                        <button type="button" class="btn btn-danger btn-sm text-nowrap" onclick="event.preventDefault(); event.stopPropagation(); deleteSnapshot(<?= $snap['id'] ?>)" title="Hapus">
-                            <i class="mdi mdi-delete"></i>
-                        </button>
-                    </a>
-                </li>
-                <?php endforeach; ?>
-                <?php endif; ?>
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#createSnapshotModal">
-                        <i class="mdi mdi-plus"></i> Buat Salinan Baru
-                    </a>
-                </li>
-            </ul>
-        </div>
+        <!-- Salin RAB Button -->
+        <button type="button" class="btn btn-info btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#createSnapshotModal">
+            <i class="mdi mdi-content-copy"></i> Salin RAB
+        </button>
         <?php if ($isEditable && !empty($ahspList)): ?>
         <button class="btn btn-outline-success btn-sm text-nowrap" data-bs-toggle="modal" data-bs-target="#importRabModal">
             <i class="mdi mdi-upload"></i> Import CSV
@@ -673,34 +642,64 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
     <?php endif; ?>
 </div>
 
-<!-- Create Snapshot Modal -->
+<!-- Create Snapshot Modal (Salin RAB ke MC0 / CCO) -->
+<?php
+$hasMc0Modal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'MC0'", [$projectId]);
+$hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'CCO'", [$projectId]);
+?>
 <div class="modal fade" id="createSnapshotModal" tabindex="-1">
     <div class="modal-dialog">
         <form method="POST" class="modal-content">
             <input type="hidden" name="action" value="create_snapshot">
             <div class="modal-header">
-                <h5 class="modal-title">Buat Salinan RAB</h5>
+                <h5 class="modal-title"><i class="mdi mdi-content-copy text-info me-2"></i>Salin RAB (MC0 / CCO)</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small">Salinan RAB adalah snapshot dari RAB saat ini yang dapat diedit secara terpisah tanpa mempengaruhi RAB asli. Berguna untuk keperluan MC0 atau CCO.</p>
-                <div class="mb-3">
-                    <label class="form-label required">Jenis Salinan</label>
-                    <select class="form-select" name="snapshot_name" required>
-                        <option value="">-- Pilih Jenis --</option>
-                        <option value="MC0">MC0</option>
-                        <option value="CCO">CCO</option>
-                    </select>
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="mdi mdi-information-outline me-1"></i>
+                    <strong>Fungsi Salin RAB:</strong> Membuat salinan RAB mandiri (MC0 atau CCO) yang dapat diedit volumenya dan AHSP-nya tanpa mempengaruhi RAB asli. Saat dibuat, Tab baru akan otomatis muncul di sebelah kanan tab RAB.
                 </div>
+                
                 <div class="mb-3">
-                    <label class="form-label">Deskripsi (Opsional)</label>
+                    <label class="form-label required fw-bold">Pilih Jenis Salinan</label>
+                    <div class="d-grid gap-2">
+                        <label class="card p-2 border mb-0 cursor-pointer shadow-none" style="cursor:pointer;" for="opt_snap_mc0">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="radio" name="snapshot_name" id="opt_snap_mc0" value="MC0" <?= empty($hasMc0Modal) ? 'checked' : '' ?> required>
+                                <div class="form-check-label ms-1">
+                                    <div class="fw-bold text-dark">MC0 (Mutual Check 0%)</div>
+                                    <div class="text-muted small">Salinan acuan fisik awal proyek (0% progress) untuk verifikasi lapangan.</div>
+                                    <?php if ($hasMc0Modal): ?>
+                                    <div class="badge bg-warning-subtle text-warning mt-1"><i class="mdi mdi-alert-circle-outline"></i> Sudah ada (Dibuat <?= date('d/m/Y H:i', strtotime($hasMc0Modal['created_at'])) ?>). Menyalin ulang akan memperbarui data MC0.</div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </label>
+                        <label class="card p-2 border mb-0 cursor-pointer shadow-none" style="cursor:pointer;" for="opt_snap_cco">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="radio" name="snapshot_name" id="opt_snap_cco" value="CCO" <?= (!empty($hasMc0Modal) && empty($hasCcoModal)) ? 'checked' : '' ?> required>
+                                <div class="form-check-label ms-1">
+                                    <div class="fw-bold text-dark">CCO (Contract Change Order)</div>
+                                    <div class="text-muted small">Salinan untuk addendum / perubahan kontrak selama pelaksanaan proyek.</div>
+                                    <?php if ($hasCcoModal): ?>
+                                    <div class="badge bg-warning-subtle text-warning mt-1"><i class="mdi mdi-alert-circle-outline"></i> Sudah ada (Dibuat <?= date('d/m/Y H:i', strtotime($hasCcoModal['created_at'])) ?>). Menyalin ulang akan memperbarui data CCO.</div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Catatan / Deskripsi (Opsional)</label>
                     <textarea class="form-control" name="snapshot_description" rows="2" 
-                              placeholder="Catatan tambahan tentang salinan ini"></textarea>
+                              placeholder="Catatan tambahan mengenai salinan ini..."></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                <button type="submit" class="btn btn-primary">Buat Salinan</button>
+                <button type="submit" class="btn btn-primary"><i class="mdi mdi-content-copy"></i> Salin Sekarang</button>
             </div>
         </form>
     </div>

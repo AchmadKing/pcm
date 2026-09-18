@@ -1,6 +1,6 @@
 -- =====================================================
 -- Migration: Add view_mode to role_permissions
--- PCM - Project Cost Management System
+-- PCC - Project Cost Control System
 -- Purpose: Support 3-level project access (none/assigned/all)
 -- =====================================================
 

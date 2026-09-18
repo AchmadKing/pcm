@@ -1,6 +1,6 @@
 <?php
 /**
- * Tab Dokumentasi Proyek - Project Cost Management (File Manager)
+ * Tab Dokumentasi Proyek - Project Cost Control (File Manager)
  * Sistem manajemen file proyek hierarkis dengan folder, preview, rename, dan upload file antrean.
  */
 
