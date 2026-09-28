@@ -29,24 +29,28 @@ function formatNumber($number, $decimals = 2) {
 }
 
 /**
- * Format volume - up to 4 decimals but trim trailing zeros
- * Examples: 123,4500 → 123,45; 123,0040 → 123,004; 123,4567 → 123,4567
- * @param float $number
+ * Format volume - up to 4 decimals with a minimum of 2 decimals (trim trailing zeros beyond 2 decimals)
+ * Examples: 1,0000 → 1,00; 1,5000 → 1,50; 0,0500 → 0,05; 1,2340 → 1,234; 1,2345 → 1,2345
+ * @param float|string|null $number
+ * @param int $minDecimals
+ * @param int $maxDecimals
  * @return string
  */
-function formatVolume($number) {
-    // Format with 4 decimals first
-    $formatted = number_format($number, 4, ',', '.');
+function formatVolume($number, $minDecimals = 2, $maxDecimals = 4) {
+    if ($number === null || $number === '') {
+        $number = 0;
+    }
+    $number = floatval($number);
     
-    // Remove trailing zeros after decimal point
-    // Split by comma (decimal separator)
+    // Format with max decimals first
+    $formatted = number_format($number, $maxDecimals, ',', '.');
+    
+    // Remove trailing zeros after decimal point, keeping at least $minDecimals
     $parts = explode(',', $formatted);
     if (count($parts) === 2) {
-        // Remove trailing zeros from decimal part
         $decimal = rtrim($parts[1], '0');
-        if (empty($decimal)) {
-            // No decimals left, return integer part only
-            return $parts[0];
+        if (strlen($decimal) < $minDecimals) {
+            $decimal = str_pad($decimal, $minDecimals, '0');
         }
         return $parts[0] . ',' . $decimal;
     }

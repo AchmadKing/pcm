@@ -452,7 +452,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                         <?php endif; ?>
                     </td>
                     <td class="text-center"><?= htmlspecialchars($t['unit']) ?></td>
-                    <td class="text-end"><?= number_format(floatval($t['coefficient']), 4, ',', '.') ?></td>
+                    <td class="text-end"><?= formatVolume(floatval($t['coefficient'])) ?></td>
                     <td class="text-end"><?= number_format(floatval($t['unit_price']), 2, ',', '.') ?></td>
                     <td class="text-end"><strong><?= number_format($nominal, 2, ',', '.') ?></strong></td>
                     <td><?= htmlspecialchars($t['created_by_name'] ?? '-') ?></td>

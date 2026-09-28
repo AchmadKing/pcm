@@ -350,7 +350,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     }
                 }
                 
-                $typeNameDisplay = ($snapshotName === 'MC0') ? 'MC0 (Mutual Check 0%)' : (($snapshotName === 'CCO') ? 'CCO (Contract Change Order)' : $snapshotName);
+                $typeNameDisplay = $snapshotName;
                 setFlash('success', "Salinan RAB ($typeNameDisplay) berhasil dibuat!");
                 $redirectTab = strtolower($snapshotName);
                 break;

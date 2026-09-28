@@ -395,7 +395,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($item['unit']) ?></td>
-                                <td class="text-end"><?= formatNumber($item['coefficient'], 4) ?></td>
+                                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><strong><?= formatRupiah($item['total_price'], false) ?></strong></td>
                             </tr>

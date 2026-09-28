@@ -126,6 +126,20 @@
             return formatted.replace('.', ',');
         }
         
+        // Format volume with minimum 2 decimals and up to 4 decimals
+        function formatVolume(num) {
+            if (num === '' || num === null || isNaN(num)) return '0,00';
+            num = parseFloat(num);
+            var str = num.toFixed(4);
+            var parts = str.split('.');
+            var intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            var decPart = (parts[1] || '').replace(/0+$/, '');
+            if (decPart.length < 2) {
+                decPart = (decPart + '00').substring(0, 2);
+            }
+            return intPart + ',' + decPart;
+        }
+        
         // Parse formatted number (Indonesian format to float)
         function parseFormattedNumber(str) {
             if (!str) return 0;

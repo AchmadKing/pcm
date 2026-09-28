@@ -597,7 +597,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end"><?= formatNumber($item['coefficient'], 4) ?></td>
+                                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><?= formatRupiah($hargaLapangan, false) ?></td>
                                 <td class="text-end">
@@ -612,13 +612,13 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <td>
                                     <?php if ($qtyRap > 0): ?>
                                         <?php if ($isOverQty): ?>
-                                        <span class="badge bg-danger">⚠️ OVER QTY</span>
-                                        <br><small class="text-danger">Proyeksi sisa: <?= formatNumber($afterApproval, 4) ?></small>
+                                         <span class="badge bg-danger">⚠️ OVER QTY</span>
+                                        <br><small class="text-danger">Proyeksi sisa: <?= formatVolume($afterApproval) ?></small>
                                         <?php else: ?>
                                         <span class="badge bg-success">OK</span>
-                                        <br><small class="text-success">Proyeksi sisa: <?= formatNumber($afterApproval, 4) ?></small>
+                                        <br><small class="text-success">Proyeksi sisa: <?= formatVolume($afterApproval) ?></small>
                                         <?php endif; ?>
-                                        <br><small class="text-muted">RAP: <?= formatNumber($qtyRap, 4) ?> | Diajukan: <?= formatNumber($item['coefficient'], 4) ?></small>
+                                        <br><small class="text-muted">RAP: <?= formatVolume($qtyRap) ?> | Diajukan: <?= formatVolume($item['coefficient']) ?></small>
                                     <?php else: ?>
                                         <span class="badge bg-secondary">-</span>
                                         <br><small class="text-muted">Tidak ada data RAP</small>

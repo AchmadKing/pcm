@@ -407,7 +407,7 @@ $baseUrl = getBaseUrl();
                     <?php endif; ?>
                 </td>
                 <td class="text-center"><?= htmlspecialchars($item['unit']) ?></td>
-                <td class="text-end"><?= number_format($item['coefficient'], 4, ',', '.') ?></td>
+                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
                 <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?></td>
                 <td class="text-end"><?= number_format($item['total_price'], 2, ',', '.') ?></td>
             </tr>

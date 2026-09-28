@@ -245,7 +245,7 @@ if ($format === 'csv') {
                 $t['item_code'] ?? '-',
                 $t['item_name'],
                 $t['unit'],
-                number_format(floatval($t['coefficient']), 4, ',', '.'),
+                formatVolume(floatval($t['coefficient'])),
                 number_format(floatval($t['unit_price']), 2, ',', '.'),
                 number_format($nominal, 2, ',', '.'),
                 $t['created_by_name'] ?? '-',

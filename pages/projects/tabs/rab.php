@@ -668,8 +668,7 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
                             <div class="form-check mb-0">
                                 <input class="form-check-input" type="radio" name="snapshot_name" id="opt_snap_mc0" value="MC0" <?= empty($hasMc0Modal) ? 'checked' : '' ?> required>
                                 <div class="form-check-label ms-1">
-                                    <div class="fw-bold text-dark">MC0 (Mutual Check 0%)</div>
-                                    <div class="text-muted small">Salinan acuan fisik awal proyek (0% progress) untuk verifikasi lapangan.</div>
+                                    <div class="fw-bold text-dark">MC0</div>
                                     <?php if ($hasMc0Modal): ?>
                                     <div class="badge bg-warning-subtle text-warning mt-1"><i class="mdi mdi-alert-circle-outline"></i> Sudah ada (Dibuat <?= date('d/m/Y H:i', strtotime($hasMc0Modal['created_at'])) ?>). Menyalin ulang akan memperbarui data MC0.</div>
                                     <?php endif; ?>
@@ -680,8 +679,7 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
                             <div class="form-check mb-0">
                                 <input class="form-check-input" type="radio" name="snapshot_name" id="opt_snap_cco" value="CCO" <?= (!empty($hasMc0Modal) && empty($hasCcoModal)) ? 'checked' : '' ?> required>
                                 <div class="form-check-label ms-1">
-                                    <div class="fw-bold text-dark">CCO (Contract Change Order)</div>
-                                    <div class="text-muted small">Salinan untuk addendum / perubahan kontrak selama pelaksanaan proyek.</div>
+                                    <div class="fw-bold text-dark">CCO</div>
                                     <?php if ($hasCcoModal): ?>
                                     <div class="badge bg-warning-subtle text-warning mt-1"><i class="mdi mdi-alert-circle-outline"></i> Sudah ada (Dibuat <?= date('d/m/Y H:i', strtotime($hasCcoModal['created_at'])) ?>). Menyalin ulang akan memperbarui data CCO.</div>
                                     <?php endif; ?>
