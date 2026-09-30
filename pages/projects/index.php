@@ -127,7 +127,7 @@ if ($viewMode === 'all') {
 // Calculate total_rab with overhead, PPN, and rounding for each project
 foreach ($projects as &$proj) {
     $baseRab = $proj['base_rab'];
-    $overheadPct = getProjectOverheadProfitPct($proj);
+    $overheadPct = getProjectOverheadProfitPct($proj, 'rab');
     $ppnPct = $proj['ppn_percentage'] ?? 11;
     $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
     $rabPpn = $rabWithOverhead * ($ppnPct / 100);

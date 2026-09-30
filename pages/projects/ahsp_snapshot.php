@@ -60,7 +60,7 @@ if (!$subcategoryId) {
 // Get snapshot subcategory with related data
 $subcategory = dbGetRow("
     SELECT ss.*, sc.snapshot_id, sc.name as category_name, sc.code as category_code,
-           s.name as snapshot_name, s.project_id, s.overhead_percentage, s.profit_percentage, s.ppn_percentage,
+           s.name as snapshot_name, s.project_id, s.overhead_percentage, s.profit_percentage, s.overhead_apply_ahsp, s.overhead_apply_rab, s.overhead_apply_rap, s.ppn_percentage,
            p.name as project_name
     FROM rab_snapshot_subcategories ss
     JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
@@ -188,7 +188,8 @@ foreach ($details as $detail) {
 }
 $grandTotal = array_sum($totals);
 
-$overheadPct = getProjectOverheadProfitPct($subcategory);
+$overheadPct = getProjectOverheadProfitPct($subcategory, 'ahsp');
+$overheadLabel = formatOverheadProfitLabel($subcategory, 'ahsp');
 $overheadAmount = $grandTotal * ($overheadPct / 100);
 $totalWithOverhead = $grandTotal + $overheadAmount;
 
@@ -433,7 +434,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <td class="text-end"><strong><?= formatRupiah($grandTotal) ?></strong></td>
                     </tr>
                     <tr class="table-light">
-                        <td colspan="5" class="text-end"><strong>E. OVERHEAD & PROFIT (<?= $overheadPct ?>%)</strong></td>
+                        <td colspan="5" class="text-end"><strong>E. <?= strtoupper($overheadLabel) ?></strong></td>
                         <td class="text-end"><strong><?= formatRupiah($overheadAmount) ?></strong></td>
                     </tr>
                     <tr class="table-primary">

@@ -17,7 +17,7 @@ $isEditable = hasPermission('rab.edit');
 $creatorName = dbGetRow("SELECT full_name FROM users WHERE id = ?", [$currentSnapshot['created_by']])['full_name'] ?? '-';
 
 // Overhead & PPN for snapshot
-$overheadPct = getProjectOverheadProfitPct($currentSnapshot);
+$overheadPct = getProjectOverheadProfitPct($currentSnapshot, 'rab');
 $ppnPercentage = floatval($currentSnapshot['ppn_percentage'] ?? $project['ppn_percentage'] ?? 11);
 
 // Head-subs

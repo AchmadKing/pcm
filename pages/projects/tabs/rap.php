@@ -15,7 +15,7 @@ $rabSourceName = 'RAB Asli';
 $usingSnapshot = false;
 
 if ($rabSourceId > 0) {
-    $selectedSnapshot = dbGetRow("SELECT id, name FROM rab_snapshots WHERE id = ? AND project_id = ?", [$rabSourceId, $projectId]);
+    $selectedSnapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE id = ? AND project_id = ?", [$rabSourceId, $projectId]);
     if ($selectedSnapshot) {
         $rabSourceName = $selectedSnapshot['name'];
         $usingSnapshot = true;
@@ -55,7 +55,8 @@ $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
 $grandRabTotal = 0;
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
+$rabOverheadPct = ($usingSnapshot && $selectedSnapshot) ? getProjectOverheadProfitPct($selectedSnapshot, 'rab') : getProjectOverheadProfitPct($project, 'rab');
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
@@ -118,7 +119,7 @@ foreach ($categories as $cat) {
             }
         }
         
-        $rabUnitPriceWithOverhead = $rabPrice * (1 + ($overheadPct / 100));
+        $rabUnitPriceWithOverhead = $rabPrice * (1 + ($rabOverheadPct / 100));
         $rabTotal = $rabVolume * $rabUnitPriceWithOverhead;
         $sub['rab_total'] = $rabTotal;
         $sub['selisih'] = $rabTotal - $subTotal;

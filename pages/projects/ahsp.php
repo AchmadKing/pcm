@@ -176,7 +176,8 @@ foreach ($details as $detail) {
 $grandTotal = array_sum($totals);
 
 // Calculate overhead for header display
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'ahsp');
+$overheadLabel = formatOverheadProfitLabel($project, 'ahsp');
 $overheadAmount = $grandTotal * ($overheadPct / 100);
 $totalWithOverhead = $grandTotal + $overheadAmount;
 
@@ -436,7 +437,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <td class="text-end"><strong><?= formatRupiah($grandTotal) ?></strong></td>
                     </tr>
                     <tr>
-                        <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $overheadPct ?>%)</strong></td>
+                        <td colspan="5" class="text-end"><strong>E. <?= $overheadLabel ?></strong></td>
                         <td class="text-end"><?= formatRupiah($overheadAmount) ?></td>
                     </tr>
                     <tr class="table-dark">

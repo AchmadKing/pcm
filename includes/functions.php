@@ -500,22 +500,17 @@ function calculatePriceDiff($fieldPrice, $rapPrice) {
  * Get price comparison label
  * @param float $fieldPrice
  * @param float $rapPrice
- * @param bool $small
  * @return string
  */
-function getPriceComparisonLabel($fieldPrice, $rapPrice, $small = false) {
-    if ($rapPrice <= 0) {
-        return '<span class="badge bg-secondary"' . ($small ? ' style="font-size: 0.68rem; font-weight: 500;"' : '') . '>-</span>';
-    }
+function getPriceComparisonLabel($fieldPrice, $rapPrice) {
     list($diff, $isOver) = calculatePriceDiff($fieldPrice, $rapPrice);
-    $style = $small ? ' style="font-size: 0.68rem; font-weight: 500;"' : '';
     
     if ($isOver) {
-        return '<span class="badge bg-danger"' . $style . '>LEBIH MAHAL ' . abs($diff) . '%</span>';
+        return '<span class="badge bg-danger">LEBIH MAHAL ' . abs($diff) . '%</span>';
     } else if ($diff < 0) {
-        return '<span class="badge bg-success"' . $style . '>HEMAT ' . abs($diff) . '%</span>';
+        return '<span class="badge bg-success">HEMAT ' . abs($diff) . '%</span>';
     }
-    return '<span class="badge bg-success"' . $style . '>AMAN</span>';
+    return '<span class="badge bg-success">AMAN</span>';
 }
 
 /**
@@ -1567,6 +1562,7 @@ function ensureRabHeadSubsTableExists() {
     $checked = true;
 
     ensureProfitPercentageColumnExists();
+    ensureOverheadApplyColumnsExist();
 
     try {
         dbExecute("
@@ -1665,28 +1661,116 @@ function ensureProfitPercentageColumnExists() {
 }
 
 /**
- * Get combined Overhead + Profit percentage for a project
- * e.g. Overhead 5% + Profit 10% = 15%
+ * Auto Migration: Ensure overhead_apply_ahsp, overhead_apply_rab, overhead_apply_rap exist in projects and rab_snapshots
+ */
+function ensureOverheadApplyColumnsExist() {
+    static $columnsChecked = false;
+    if ($columnsChecked) return;
+    $columnsChecked = true;
+
+    ensureProfitPercentageColumnExists();
+
+    try {
+        $cols = ['overhead_apply_ahsp', 'overhead_apply_rab', 'overhead_apply_rap'];
+        foreach ($cols as $col) {
+            $colCheck = dbGetRow("
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'projects'
+                  AND COLUMN_NAME = ?
+            ", [$col]);
+
+            if (empty($colCheck['cnt'])) {
+                dbExecute("
+                    ALTER TABLE `projects` 
+                    ADD COLUMN `{$col}` TINYINT(1) NOT NULL DEFAULT 1
+                ");
+            }
+        }
+
+        // Also ensure rab_snapshots has these columns if rab_snapshots exists
+        $snapCheck = dbGetRow("
+            SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'rab_snapshots'
+        ");
+        if (!empty($snapCheck['cnt'])) {
+            foreach ($cols as $col) {
+                $snapColCheck = dbGetRow("
+                    SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'rab_snapshots'
+                      AND COLUMN_NAME = ?
+                ", [$col]);
+                if (empty($snapColCheck['cnt'])) {
+                    dbExecute("
+                        ALTER TABLE `rab_snapshots` 
+                        ADD COLUMN `{$col}` TINYINT(1) NOT NULL DEFAULT 1
+                    ");
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // Ignore if already exists or schema error
+    }
+}
+
+/**
+ * Check if Overhead & Profit is enabled for a specific scope ('ahsp', 'rab', 'rap')
  *
  * @param array|null $project
+ * @param string $scope 'ahsp', 'rab', or 'rap'
+ * @return bool
+ */
+function isProjectOverheadEnabled($project, $scope) {
+    if (!$project) return true;
+    $scopeKey = 'overhead_apply_' . strtolower(trim($scope));
+    if (!array_key_exists($scopeKey, $project) || $project[$scopeKey] === null) {
+        return true; // Default ON for backward compatibility
+    }
+    return intval($project[$scopeKey]) === 1;
+}
+
+/**
+ * Get combined Overhead + Profit percentage for a project
+ * Optionally specify scope: 'ahsp', 'rab', 'rap', or null for total configured percentage
+ *
+ * @param array|null $project
+ * @param string|null $scope 'ahsp', 'rab', 'rap', or null
  * @return float
  */
-function getProjectOverheadProfitPct($project) {
+function getProjectOverheadProfitPct($project, $scope = null) {
     if (!$project) return 10.0;
+    
     $overhead = isset($project['overhead_percentage']) ? floatval($project['overhead_percentage']) : 10.0;
     $profit = isset($project['profit_percentage']) ? floatval($project['profit_percentage']) : 0.0;
-    return $overhead + $profit;
+    $total = $overhead + $profit;
+
+    if ($scope !== null) {
+        if (!isProjectOverheadEnabled($project, $scope)) {
+            return 0.0;
+        }
+    }
+
+    return $total;
 }
 
 /**
  * Get formatted label for Overhead & Profit
  * e.g. "Overhead & Profit 15% (Overhead 5% + Profit 10%)" or "Overhead & Profit 10%"
+ * Or "Overhead & Profit: Non-aktif (0%)" if scope is disabled.
  *
  * @param array|null $project
+ * @param string|null $scope 'ahsp', 'rab', 'rap', or null
  * @return string
  */
-function formatOverheadProfitLabel($project) {
+function formatOverheadProfitLabel($project, $scope = null) {
     if (!$project) return "Overhead & Profit 10%";
+    
+    if ($scope !== null && !isProjectOverheadEnabled($project, $scope)) {
+        return "Overhead & Profit: Non-aktif (0%)";
+    }
+
     $overhead = isset($project['overhead_percentage']) ? floatval($project['overhead_percentage']) : 10.0;
     $profit = isset($project['profit_percentage']) ? floatval($project['profit_percentage']) : 0.0;
     $total = $overhead + $profit;
@@ -1707,7 +1791,8 @@ function calculateProjectRealtimeStats($projectId) {
     $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
     if (!$project) return null;
 
-    $overheadPct = getProjectOverheadProfitPct($project);
+    $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
+    $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
     $ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
     // Pre-calculate RAB AHSP component totals
@@ -1809,7 +1894,7 @@ function calculateProjectRealtimeStats($projectId) {
         foreach ($subcats as $sub) {
             // RAB calculation
             $rabBasePrice = isset($ahspPrices[$sub['ahsp_id']]) ? $ahspPrices[$sub['ahsp_id']] : floatval($sub['rab_unit_price']);
-            $rabUnitPrice = $rabBasePrice * (1 + ($overheadPct / 100));
+            $rabUnitPrice = $rabBasePrice * (1 + ($rabOverheadPct / 100));
             $subRab = floatval($sub['rab_volume']) * $rabUnitPrice;
             $catRab += $subRab;
 
@@ -1823,7 +1908,7 @@ function calculateProjectRealtimeStats($projectId) {
             if ($rapBasePrice <= 0) {
                 $rapBasePrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
             }
-            $rapUnitPrice = $rapBasePrice * (1 + ($overheadPct / 100));
+            $rapUnitPrice = $rapBasePrice * (1 + ($rapOverheadPct / 100));
             $subRap = $rapVol * $rapUnitPrice;
             $catRap += $subRap;
 

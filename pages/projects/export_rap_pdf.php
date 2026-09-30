@@ -23,7 +23,7 @@ if (!$project) {
     die('Proyek tidak ditemukan');
 }
 
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
 $regionName = $project['region_name'] ?? '-';
 
 // Function to get RAP AHSP component breakdown from Master Data RAP

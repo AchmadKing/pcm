@@ -33,7 +33,7 @@ if (!$project) {
 }
 
 // Get overhead percentage for calculation
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
 
 // Region is now stored directly in project
 $regionName = $project['region_name'] ?? '-';

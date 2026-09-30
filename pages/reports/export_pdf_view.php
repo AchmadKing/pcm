@@ -545,7 +545,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
         <!-- DETAIL RAB PROYEK TABLE -->
         <!-- ========================================================================= -->
         <?php 
-        $overheadPct = getProjectOverheadProfitPct($selectedProject);
+        $overheadPct = getProjectOverheadProfitPct($selectedProject, 'rab');
         $ppnPct = floatval($selectedProject['ppn_percentage'] ?? 11);
         $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$selectedProject['id']]);
         $subtotalRab = 0;

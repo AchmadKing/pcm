@@ -497,7 +497,8 @@ switch ($ahspSort) {
 $ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
 
 // Get overhead percentage for price display
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'ahsp');
+$overheadPctRap = getProjectOverheadProfitPct($project, 'rap');
 
 // Group items by category
 $itemsByCategory = ['upah' => [], 'material' => [], 'alat' => []];

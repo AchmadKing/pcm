@@ -39,7 +39,7 @@ $grandTotal = 0;
 $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rab');
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
@@ -966,8 +966,8 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
                     <select class="form-select select2-ahsp" name="ahsp_id" id="select_ahsp_id" required>
                         <option value="">-- Ketik untuk mencari AHSP --</option>
                         <?php 
-                        $overheadPct = getProjectOverheadProfitPct($project);
-                        $overheadLabel = formatOverheadProfitLabel($project);
+                        $overheadPct = getProjectOverheadProfitPct($project, 'rab');
+                        $overheadLabel = formatOverheadProfitLabel($project, 'rab');
                         foreach ($ahspList as $ahsp): 
                             $priceWithOverhead = $ahsp['unit_price'] * (1 + ($overheadPct / 100));
                         ?>
@@ -996,6 +996,7 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
     <div class="modal-dialog">
         <form method="POST" class="modal-content">
             <input type="hidden" name="action" value="update_ppn">
+            <input type="hidden" name="has_overhead_scope_inputs" value="1">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="mdi mdi-calculator"></i> Edit Pengaturan Anggaran & PPN</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -1016,7 +1017,27 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
                 <div class="alert alert-info py-2 mb-3">
                     <small>
                         <i class="mdi mdi-information-outline"></i>
-                        Total Overhead & Profit pada AHSP: <strong><span id="modal_preview_total_oh"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                        Total Overhead & Profit: <strong><span id="modal_preview_total_oh"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                    </small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label d-block mb-2"><strong>Cakupan Penerapan Overhead & Profit:</strong></label>
+                    <div class="d-flex flex-wrap gap-3 p-2 bg-light rounded border">
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="modal_apply_ahsp" name="overhead_apply_ahsp" value="1" <?= (!isset($project['overhead_apply_ahsp']) || intval($project['overhead_apply_ahsp']) === 1) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="modal_apply_ahsp">AHSP</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="modal_apply_rab" name="overhead_apply_rab" value="1" <?= (!isset($project['overhead_apply_rab']) || intval($project['overhead_apply_rab']) === 1) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="modal_apply_rab">RAB</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="modal_apply_rap" name="overhead_apply_rap" value="1" <?= (!isset($project['overhead_apply_rap']) || intval($project['overhead_apply_rap']) === 1) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="modal_apply_rap">RAP</label>
+                        </div>
+                    </div>
+                    <small class="text-muted mt-1 d-block">
+                        <i class="mdi mdi-information-outline"></i> Jika salah satu di-uncheck (OFF), perhitungan modul tersebut tidak menggunakan Overhead & Profit (0%).
                     </small>
                 </div>
                 <div class="mb-3">

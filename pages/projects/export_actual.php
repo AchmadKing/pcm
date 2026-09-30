@@ -28,7 +28,7 @@ if (!$project) {
     exit;
 }
 
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
 $regionName = $project['region_name'] ?? '-';
 
 // Weekly progress setup

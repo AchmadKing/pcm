@@ -47,6 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $startDate = $_POST['start_date'] ?: null;
     $overheadPercentage = floatval($_POST['overhead_percentage'] ?? 10);
     $profitPercentage = floatval($_POST['profit_percentage'] ?? 0);
+    $overheadApplyAhsp = isset($_POST['overhead_apply_ahsp']) ? (intval($_POST['overhead_apply_ahsp']) === 1 ? 1 : 0) : 0;
+    $overheadApplyRab = isset($_POST['overhead_apply_rab']) ? (intval($_POST['overhead_apply_rab']) === 1 ? 1 : 0) : 0;
+    $overheadApplyRap = isset($_POST['overhead_apply_rap']) ? (intval($_POST['overhead_apply_rap']) === 1 ? 1 : 0) : 0;
     $ppnPercentage = floatval($_POST['ppn_percentage'] ?? 11);
     
     if (empty($name)) {
@@ -54,18 +57,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             ensureProfitPercentageColumnExists();
+            ensureOverheadApplyColumnsExist();
             dbExecute("
                 UPDATE projects SET
                     name = ?, project_code = ?, region_name = ?, description = ?, activity_name = ?, work_description = ?,
                     funding_source = ?, budget_year = ?, contract_number = ?, contract_date = ?,
                     service_provider = ?, supervisor_consultant = ?, duration_days = ?, start_date = ?,
-                    overhead_percentage = ?, profit_percentage = ?, ppn_percentage = ?, updated_at = NOW()
+                    overhead_percentage = ?, profit_percentage = ?, overhead_apply_ahsp = ?, overhead_apply_rab = ?, overhead_apply_rap = ?, ppn_percentage = ?, updated_at = NOW()
                 WHERE id = ?
             ", [
                 $name, $projectCode, $regionName, $description, $activityName, $workDescription,
                 $fundingSource, $budgetYear, $contractNumber, $contractDate,
                 $serviceProvider, $supervisorConsultant, $durationDays, $startDate,
-                $overheadPercentage, $profitPercentage, $ppnPercentage, $projectId
+                $overheadPercentage, $profitPercentage, $overheadApplyAhsp, $overheadApplyRab, $overheadApplyRap, $ppnPercentage, $projectId
             ]);
             
             setFlash('success', 'Proyek berhasil diperbarui!');
@@ -222,10 +226,31 @@ require_once __DIR__ . '/../../includes/header.php';
                                            value="<?= $project['ppn_percentage'] ?? 11 ?>" min="0" max="100" step="0.01">
                                 </div>
                             </div>
-                            <div class="alert alert-info py-2 mb-0">
+                            <div class="alert alert-info py-2 mb-3">
                                 <small>
                                     <i class="mdi mdi-information-outline"></i> 
-                                    Total Overhead & Profit pada AHSP: <strong><span id="preview_total_oh_profit"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                                    Total Overhead & Profit: <strong><span id="preview_total_oh_profit"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                                </small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label d-block mb-2"><strong>Cakupan Penerapan Overhead & Profit:</strong></label>
+                                <div class="d-flex flex-wrap gap-4 p-2 bg-light rounded border">
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="overhead_apply_ahsp" name="overhead_apply_ahsp" value="1" <?= (!isset($project['overhead_apply_ahsp']) || intval($project['overhead_apply_ahsp']) === 1) ? 'checked' : '' ?>>
+                                        <label class="form-check-label" for="overhead_apply_ahsp">Terapkan pada <strong>AHSP</strong></label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="overhead_apply_rab" name="overhead_apply_rab" value="1" <?= (!isset($project['overhead_apply_rab']) || intval($project['overhead_apply_rab']) === 1) ? 'checked' : '' ?>>
+                                        <label class="form-check-label" for="overhead_apply_rab">Terapkan pada <strong>RAB</strong></label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="overhead_apply_rap" name="overhead_apply_rap" value="1" <?= (!isset($project['overhead_apply_rap']) || intval($project['overhead_apply_rap']) === 1) ? 'checked' : '' ?>>
+                                        <label class="form-check-label" for="overhead_apply_rap">Terapkan pada <strong>RAP</strong></label>
+                                    </div>
+                                </div>
+                                <small class="text-muted mt-1 d-block">
+                                    <i class="mdi mdi-information-outline"></i> Jika salah satu di-uncheck (OFF), perhitungan pada modul tersebut tidak akan menyertakan Overhead & Profit (0%).
                                 </small>
                             </div>
                         </div>

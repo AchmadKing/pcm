@@ -16,7 +16,7 @@ if (!in_array($categoryFilter, $validFilters)) {
 
 // Get project settings
 $ppnPercentage = $project['ppn_percentage'] ?? 11;
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
 
 // Generate weekly ranges if project is started (not draft) OR has weekly history
 $weeklyRanges = [];
@@ -881,7 +881,7 @@ $lastStickyRight = 1220; // Total width of sticky area
         <span class="badge bg-primary me-2">Upah</span> Biaya tenaga kerja |
         <span class="badge bg-success me-2 ms-2">Material</span> Biaya bahan/material |
         <span class="badge bg-warning me-2 ms-2">Alat</span> Biaya peralatan |
-        <em class="ms-2">RAP sudah termasuk <?= formatOverheadProfitLabel($project) ?></em>
+        <em class="ms-2">RAP sudah termasuk <?= formatOverheadProfitLabel($project, 'rap') ?></em>
     </small>
 </div>
 

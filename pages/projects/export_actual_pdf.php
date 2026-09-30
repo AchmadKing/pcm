@@ -22,7 +22,7 @@ if (!$project) {
     die('Proyek tidak ditemukan');
 }
 
-$overheadPct = getProjectOverheadProfitPct($project);
+$overheadPct = getProjectOverheadProfitPct($project, 'rap');
 $regionName = $project['region_name'] ?? '-';
 
 // Weekly progress setup

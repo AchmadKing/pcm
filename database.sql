@@ -101,6 +101,9 @@ CREATE TABLE projects (
     
     overhead_percentage DECIMAL(5,2) DEFAULT 10.00,
     profit_percentage DECIMAL(5,2) DEFAULT 0.00,
+    overhead_apply_ahsp TINYINT(1) NOT NULL DEFAULT 1,
+    overhead_apply_rab TINYINT(1) NOT NULL DEFAULT 1,
+    overhead_apply_rap TINYINT(1) NOT NULL DEFAULT 1,
     rab_submitted TINYINT(1) NOT NULL DEFAULT 0,
     rap_submitted TINYINT(1) NOT NULL DEFAULT 0,
     ppn_percentage DECIMAL(5,2) NOT NULL DEFAULT 11.00,
@@ -261,6 +264,53 @@ CREATE TABLE IF NOT EXISTS project_images (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_project (project_id)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 14. RAB SNAPSHOTS (MC0, CCO, etc.)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS rab_snapshots (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    project_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    overhead_percentage DECIMAL(5,2) DEFAULT 10.00,
+    profit_percentage DECIMAL(5,2) DEFAULT 0.00,
+    overhead_apply_ahsp TINYINT(1) NOT NULL DEFAULT 1,
+    overhead_apply_rab TINYINT(1) NOT NULL DEFAULT 1,
+    overhead_apply_rap TINYINT(1) NOT NULL DEFAULT 1,
+    ppn_percentage DECIMAL(5,2) NOT NULL DEFAULT 11.00,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_project (project_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS rab_snapshot_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    snapshot_id INT NOT NULL,
+    original_category_id INT DEFAULT NULL,
+    head_sub_id INT DEFAULT NULL,
+    code VARCHAR(10) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    sort_order INT DEFAULT 0,
+    FOREIGN KEY (snapshot_id) REFERENCES rab_snapshots(id) ON DELETE CASCADE,
+    INDEX idx_snapshot (snapshot_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS rab_snapshot_subcategories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_id INT NOT NULL,
+    original_subcategory_id INT DEFAULT NULL,
+    code VARCHAR(20) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    unit VARCHAR(20) NOT NULL DEFAULT 'm2',
+    volume DECIMAL(15,4) NOT NULL DEFAULT 0,
+    unit_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+    sort_order INT DEFAULT 0,
+    FOREIGN KEY (category_id) REFERENCES rab_snapshot_categories(id) ON DELETE CASCADE,
+    INDEX idx_category (category_id)
 ) ENGINE=InnoDB;
 
 -- =====================================================

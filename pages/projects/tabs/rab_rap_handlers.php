@@ -198,6 +198,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 
             case 'update_ppn':
                 ensureProfitPercentageColumnExists();
+                ensureOverheadApplyColumnsExist();
                 $ppnRaw = $_POST['ppn_percentage'] ?? 11;
                 $ppn = floatval(str_replace(',', '.', $ppnRaw));
                 
@@ -213,6 +214,17 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     $pf = floatval(str_replace(',', '.', $_POST['profit_percentage']));
                     $updates[] = "profit_percentage = ?";
                     $params[] = $pf;
+                }
+                if (isset($_POST['has_overhead_scope_inputs'])) {
+                    $applyAhsp = (isset($_POST['overhead_apply_ahsp']) && $_POST['overhead_apply_ahsp'] == '1') ? 1 : 0;
+                    $applyRab  = (isset($_POST['overhead_apply_rab']) && $_POST['overhead_apply_rab'] == '1') ? 1 : 0;
+                    $applyRap  = (isset($_POST['overhead_apply_rap']) && $_POST['overhead_apply_rap'] == '1') ? 1 : 0;
+                    $updates[] = "overhead_apply_ahsp = ?";
+                    $params[] = $applyAhsp;
+                    $updates[] = "overhead_apply_rab = ?";
+                    $params[] = $applyRab;
+                    $updates[] = "overhead_apply_rap = ?";
+                    $params[] = $applyRap;
                 }
                 
                 $params[] = $projectId;
@@ -310,11 +322,14 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 $overheadPct = floatval($project['overhead_percentage'] ?? 0);
                 $profitPct = floatval($project['profit_percentage'] ?? 0);
                 $ppnPct = floatval($project['ppn_percentage'] ?? 11);
+                $applyAhsp = (!isset($project['overhead_apply_ahsp']) || intval($project['overhead_apply_ahsp']) === 1) ? 1 : 0;
+                $applyRab  = (!isset($project['overhead_apply_rab'])  || intval($project['overhead_apply_rab']) === 1) ? 1 : 0;
+                $applyRap  = (!isset($project['overhead_apply_rap'])  || intval($project['overhead_apply_rap']) === 1) ? 1 : 0;
 
                 $snapshotId = dbInsert("
-                    INSERT INTO rab_snapshots (project_id, name, description, overhead_percentage, profit_percentage, ppn_percentage, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ", [$projectId, $snapshotName, $snapshotDesc, $overheadPct, $profitPct, $ppnPct, $_SESSION['user_id']]);
+                    INSERT INTO rab_snapshots (project_id, name, description, overhead_percentage, profit_percentage, overhead_apply_ahsp, overhead_apply_rab, overhead_apply_rap, ppn_percentage, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ", [$projectId, $snapshotName, $snapshotDesc, $overheadPct, $profitPct, $applyAhsp, $applyRab, $applyRap, $ppnPct, $_SESSION['user_id']]);
                 
                 $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
                 $ahspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);

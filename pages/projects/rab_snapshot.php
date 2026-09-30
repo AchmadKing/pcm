@@ -128,7 +128,7 @@ $grandTotalTenaga = 0;
 $grandTotalBahan = 0;
 $grandTotalAlat = 0;
 
-$overheadPct = getProjectOverheadProfitPct($snapshot);
+$overheadPct = getProjectOverheadProfitPct($snapshot, 'rab');
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("SELECT * FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);

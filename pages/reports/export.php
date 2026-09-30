@@ -328,7 +328,7 @@ if ($format === 'csv') {
 
         fputcsv($output, ['Kode', 'Uraian Pekerjaan', 'Satuan', 'Volume', 'Harga Satuan (Rp)', 'Jumlah Harga (Rp)'], $delimiter);
 
-        $overheadPct = getProjectOverheadProfitPct($selectedProject);
+        $overheadPct = getProjectOverheadProfitPct($selectedProject, 'rab');
         $ppnPct = floatval($selectedProject['ppn_percentage'] ?? 11);
         $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$selectedProject['id']]);
         
@@ -645,7 +645,8 @@ function fetchProjectComparisonData($projectId, $startDate = null, $endDate = nu
     $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
     if (!$project) return ['items' => []];
 
-    $overheadPct = getProjectOverheadProfitPct($project);
+    $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
+    $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
 
     // Pre-calculate RAB AHSP prices
     $ahspPrices = [];
@@ -692,7 +693,7 @@ function fetchProjectComparisonData($projectId, $startDate = null, $endDate = nu
     $outItems = [];
     foreach ($items as $item) {
         $rabBasePrice = isset($ahspPrices[$item['ahsp_id']]) ? $ahspPrices[$item['ahsp_id']] : floatval($item['rab_price']);
-        $rabPriceWithOverhead = $rabBasePrice * (1 + ($overheadPct / 100));
+        $rabPriceWithOverhead = $rabBasePrice * (1 + ($rabOverheadPct / 100));
         $rabVol = floatval($item['rab_vol']);
         $rabTotal = $rabVol * $rabPriceWithOverhead;
 
@@ -705,7 +706,7 @@ function fetchProjectComparisonData($projectId, $startDate = null, $endDate = nu
         if ($rapBasePrice <= 0) {
             $rapBasePrice = (isset($item['rap_price']) && floatval($item['rap_price']) > 0) ? floatval($item['rap_price']) : floatval($item['rab_price']);
         }
-        $rapPriceWithOverhead = $rapBasePrice * (1 + ($overheadPct / 100));
+        $rapPriceWithOverhead = $rapBasePrice * (1 + ($rapOverheadPct / 100));
         $rapTotal = $rapVol * $rapPriceWithOverhead;
 
         // Actual with optional period

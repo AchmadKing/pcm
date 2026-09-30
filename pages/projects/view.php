@@ -286,7 +286,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_ahsp_rap_html') {
     if (!$project) { die('Project not found'); }
     
     // Prepare variables for partial
-    $overheadPct = getProjectOverheadProfitPct($project);
+    $overheadPct = getProjectOverheadProfitPct($project, 'rap');
+    $overheadPctRap = $overheadPct;
     $isEditable = ($project['status'] === 'draft'); // Only draft is editable
     
     // AHSP sorting (match default logic)
@@ -676,9 +677,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
     }
     
     // Get project overhead
-    $project = dbGetRow("SELECT overhead_percentage, profit_percentage FROM projects WHERE id = ?", [$pId]);
-    $overheadPct = getProjectOverheadProfitPct($project);
-    $overheadLabel = formatOverheadProfitLabel($project);
+    $project = dbGetRow("SELECT overhead_percentage, profit_percentage, overhead_apply_ahsp, overhead_apply_rab, overhead_apply_rap FROM projects WHERE id = ?", [$pId]);
+    $overheadPct = getProjectOverheadProfitPct($project, 'ahsp');
+    $overheadLabel = formatOverheadProfitLabel($project, 'ahsp');
     
     // Get AHSP details
     $details = dbGetAll("
@@ -767,7 +768,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_detail') {
                     <td class="text-end"><strong><?= formatRupiah($grandTotal) ?></strong></td>
                 </tr>
                 <tr>
-                    <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $overheadPct ?>%)</strong></td>
+                    <td colspan="5" class="text-end"><strong>E. <?= $overheadLabel ?></strong></td>
                     <td class="text-end"><?= formatRupiah($overheadAmount) ?></td>
                 </tr>
                 <tr class="table-dark">
@@ -800,9 +801,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
     }
     
     // Get project overhead
-    $project = dbGetRow("SELECT overhead_percentage, profit_percentage FROM projects WHERE id = ?", [$pId]);
-    $overheadPct = getProjectOverheadProfitPct($project);
-    $overheadLabel = formatOverheadProfitLabel($project);
+    $project = dbGetRow("SELECT overhead_percentage, profit_percentage, overhead_apply_ahsp, overhead_apply_rab, overhead_apply_rap FROM projects WHERE id = ?", [$pId]);
+    $overheadPct = getProjectOverheadProfitPct($project, 'rap');
+    $overheadLabel = formatOverheadProfitLabel($project, 'rap');
     
     // Find AHSP RAP by code
     $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$pId, $ahspCode]);
@@ -897,7 +898,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
                     <td class="text-end"><strong><?= formatRupiah($grandTotal) ?></strong></td>
                 </tr>
                 <tr>
-                    <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $overheadPct ?>%)</strong></td>
+                    <td colspan="5" class="text-end"><strong>E. <?= $overheadLabel ?></strong></td>
                     <td class="text-end"><?= formatRupiah($overheadAmount) ?></td>
                 </tr>
                 <tr class="table-dark">
@@ -1548,10 +1549,10 @@ $rabBaseTotal = dbGetRow("
 ", [$projectId])['total'] ?? 0;
 
 // Apply overhead and PPN to get rounded total
-$overheadPct = getProjectOverheadProfitPct($project);
+$rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
 $ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
-$rabWithOverhead = $rabBaseTotal * (1 + ($overheadPct / 100));
+$rabWithOverhead = $rabBaseTotal * (1 + ($rabOverheadPct / 100));
 $rabPpn = $rabWithOverhead * ($ppnPct / 100);
 $rabTotal = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
 
@@ -1576,7 +1577,8 @@ $rapBaseTotal = dbGetRow("
 ", [$projectId])['total'] ?? 0;
 
 // RAP total with overhead and PPN
-$rapWithOverhead = $rapBaseTotal * (1 + ($overheadPct / 100));
+$rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
+$rapWithOverhead = $rapBaseTotal * (1 + ($rapOverheadPct / 100));
 $rapPpn = $rapWithOverhead * ($ppnPct / 100);
 $rapTotal = ceil(($rapWithOverhead + $rapPpn) / 10) * 10;
 

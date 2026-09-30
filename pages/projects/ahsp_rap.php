@@ -279,11 +279,13 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
     <div class="card-body p-0">
         <?php 
-        $overheadPct = getProjectOverheadProfitPct($project);
+        $overheadPct = getProjectOverheadProfitPct($project, 'rap');
+        $overheadLabel = formatOverheadProfitLabel($project, 'rap');
         $overheadAmount = $grandTotal * ($overheadPct / 100);
         $totalWithOverhead = $grandTotal + $overheadAmount;
         
-        $rabOverheadAmount = $rabGrandTotal * ($overheadPct / 100);
+        $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
+        $rabOverheadAmount = $rabGrandTotal * ($rabOverheadPct / 100);
         $rabTotalWithOverhead = $rabGrandTotal + $rabOverheadAmount;
         
         $totalSelisih = $rabTotalWithOverhead - $totalWithOverhead;
@@ -563,7 +565,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </td>
                     </tr>
                     <tr>
-                        <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $overheadPct ?>%)</strong></td>
+                        <td colspan="5" class="text-end"><strong>E. <?= $overheadLabel ?></strong></td>
                         <td class="text-end"><?= formatRupiah($overheadAmount) ?></td>
                         <td class="text-end <?= $eSelisih > 0 ? 'text-success' : ($eSelisih < 0 ? 'text-danger' : 'text-warning') ?>"
                             data-bs-toggle="tooltip" 

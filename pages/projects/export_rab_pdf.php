@@ -30,7 +30,7 @@ if ($snapshotId) {
     $snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE id = ? AND project_id = ?", [$snapshotId, $projectId]);
 }
 
-$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot) : getProjectOverheadProfitPct($project);
+$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot, 'rab') : getProjectOverheadProfitPct($project, 'rab');
 $regionName = $project['region_name'] ?? '-';
 $ppnPercentage = $snapshot ? floatval($snapshot['ppn_percentage'] ?? 11) : floatval($project['ppn_percentage'] ?? 11);
 

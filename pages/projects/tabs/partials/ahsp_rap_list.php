@@ -1,6 +1,7 @@
 <?php
 // Partial: AHSP RAP List
-// Requires: $ahspListRap, $overheadPct, $isEditable, $projectId
+// Requires: $ahspListRap, $isEditable, $projectId
+$rapOverheadPct = isset($overheadPctRap) ? $overheadPctRap : (isset($project) ? getProjectOverheadProfitPct($project, 'rap') : ($overheadPct ?? 0));
 
 foreach ($ahspListRap as $idx => $ahsp): 
     // Get details for this AHSP RAP
@@ -33,7 +34,7 @@ foreach ($ahspListRap as $idx => $ahsp):
         $totalByCategory[$detail['category']] += $detail['total_price'];
     }
     $subtotal = array_sum($totalByCategory);
-    $overheadAmount = $subtotal * ($overheadPct / 100);
+    $overheadAmount = $subtotal * ($rapOverheadPct / 100);
     $grandTotal = $subtotal + $overheadAmount;
     
     // Check if this AHSP should be opened
@@ -195,7 +196,7 @@ foreach ($ahspListRap as $idx => $ahsp):
                             <?php if ($isEditable): ?><td></td><?php endif; ?>
                         </tr>
                         <tr>
-                            <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $overheadPct ?>%)</strong></td>
+                            <td colspan="5" class="text-end"><strong>E. Overhead & Profit (<?= $rapOverheadPct ?>%)</strong></td>
                             <td class="text-end"><?= formatRupiah($overheadAmount) ?></td>
                             <?php if ($isEditable): ?><td></td><?php endif; ?>
                         </tr>

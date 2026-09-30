@@ -58,6 +58,36 @@ $projectImages = dbGetAll("
                 <td><strong class="text-primary"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?>%</strong></td>
             </tr>
             <tr>
+                <td class="text-muted">Cakupan OH & Profit</td>
+                <td>
+                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                        <?php if (isProjectOverheadEnabled($project, 'ahsp')): ?>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="mdi mdi-check"></i> AHSP: ON</span>
+                        <?php else: ?>
+                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"><i class="mdi mdi-close"></i> AHSP: OFF</span>
+                        <?php endif; ?>
+                        
+                        <?php if (isProjectOverheadEnabled($project, 'rab')): ?>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="mdi mdi-check"></i> RAB: ON</span>
+                        <?php else: ?>
+                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"><i class="mdi mdi-close"></i> RAB: OFF</span>
+                        <?php endif; ?>
+                        
+                        <?php if (isProjectOverheadEnabled($project, 'rap')): ?>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="mdi mdi-check"></i> RAP: ON</span>
+                        <?php else: ?>
+                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"><i class="mdi mdi-close"></i> RAP: OFF</span>
+                        <?php endif; ?>
+                        
+                        <?php if (hasPermission('projects.edit') && $project['status'] === 'draft'): ?>
+                            <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1" data-bs-toggle="modal" data-bs-target="#editDetailBudgetModal" title="Ubah Pengaturan Anggaran & Overhead">
+                                <i class="mdi mdi-pencil-outline"></i> Ubah
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </td>
+            </tr>
+            <tr>
                 <td class="text-muted">PPN</td>
                 <td><?= $project['ppn_percentage'] ?? 11 ?>%</td>
             </tr>
@@ -542,3 +572,77 @@ function openDeletePhotoModal(id) {
 }
 <?php endif; ?>
 </script>
+
+<?php if (hasPermission('projects.edit') && $project['status'] === 'draft'): ?>
+<!-- Edit Budget & Overhead Modal in Detail Tab -->
+<div class="modal fade" id="editDetailBudgetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="view.php?id=<?= $projectId ?>" class="modal-content">
+            <input type="hidden" name="action" value="update_ppn">
+            <input type="hidden" name="has_overhead_scope_inputs" value="1">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="mdi mdi-calculator"></i> Pengaturan Anggaran & Overhead</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Overhead (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="overhead_percentage" id="detail_oh_pct"
+                               value="<?= $project['overhead_percentage'] ?? 10 ?>" min="0" max="100" required oninput="calcDetailTotalOh()">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Profit (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="profit_percentage" id="detail_pf_pct"
+                               value="<?= $project['profit_percentage'] ?? 0 ?>" min="0" max="100" required oninput="calcDetailTotalOh()">
+                    </div>
+                </div>
+                <div class="alert alert-info py-2 mb-3">
+                    <small>
+                        <i class="mdi mdi-information-outline"></i>
+                        Total Overhead & Profit: <strong><span id="detail_preview_total_oh"><?= (floatval($project['overhead_percentage'] ?? 10) + floatval($project['profit_percentage'] ?? 0)) ?></span>%</strong>
+                    </small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label d-block mb-2"><strong>Cakupan Penerapan Overhead & Profit:</strong></label>
+                    <div class="d-flex flex-wrap gap-3 p-2 bg-light rounded border">
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="detail_apply_ahsp" name="overhead_apply_ahsp" value="1" <?= isProjectOverheadEnabled($project, 'ahsp') ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="detail_apply_ahsp">AHSP</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="detail_apply_rab" name="overhead_apply_rab" value="1" <?= isProjectOverheadEnabled($project, 'rab') ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="detail_apply_rab">RAB</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input type="checkbox" class="form-check-input" id="detail_apply_rap" name="overhead_apply_rap" value="1" <?= isProjectOverheadEnabled($project, 'rap') ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="detail_apply_rap">RAP</label>
+                        </div>
+                    </div>
+                    <small class="text-muted mt-1 d-block">
+                        <i class="mdi mdi-information-outline"></i> Jika uncheck (OFF), modul terkait tidak akan menyertakan Overhead & Profit (0%).
+                    </small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Persentase PPN (%)</label>
+                    <input type="number" step="0.01" class="form-control" name="ppn_percentage" 
+                           value="<?= $project['ppn_percentage'] ?? 11 ?>" min="0" max="100" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="submit" class="btn btn-primary"><i class="mdi mdi-content-save"></i> Simpan Perubahan</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+function calcDetailTotalOh() {
+    var oh = parseFloat(document.getElementById('detail_oh_pct').value) || 0;
+    var pf = parseFloat(document.getElementById('detail_pf_pct').value) || 0;
+    var total = (oh + pf).toFixed(1).replace(/\.0$/, '');
+    var elem = document.getElementById('detail_preview_total_oh');
+    if (elem) elem.textContent = total;
+}
+</script>
+<?php endif; ?>

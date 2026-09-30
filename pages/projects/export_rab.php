@@ -40,7 +40,7 @@ if ($snapshotId) {
 }
 
 // Get overhead percentage for calculation
-$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot) : getProjectOverheadProfitPct($project);
+$overheadPct = $snapshot ? getProjectOverheadProfitPct($snapshot, 'rab') : getProjectOverheadProfitPct($project, 'rab');
 
 // Region is now stored directly in project
 $regionName = $project['region_name'] ?? '-';
