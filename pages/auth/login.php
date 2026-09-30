@@ -109,21 +109,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         </div>
 
                                         <div class="mt-5 text-center">
-                                            <p class="text-muted mb-1">
-                                                <small>Demo Login:</small>
-                                            </p>
-                                            <p class="text-muted mb-0">
-                                                <small><strong>Super Admin:</strong> superadmin / password</small>
-                                            </p>
-                                            <p class="text-muted mb-0">
-                                                <small><strong>Admin:</strong> admin / password</small>
-                                            </p>
-                                            <p class="text-muted mb-0">
-                                                <small><strong>Project Manager:</strong> project_manager / password</small>
-                                            </p>
-                                            <p class="text-muted mb-3">
-                                                <small><strong>Tim Lapangan:</strong> field_team / password</small>
-                                            </p>
                                             <p>© <script>document.write(new Date().getFullYear())</script> PCC. 
                                                Project Cost Control System</p>
                                         </div>
