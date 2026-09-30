@@ -500,17 +500,22 @@ function calculatePriceDiff($fieldPrice, $rapPrice) {
  * Get price comparison label
  * @param float $fieldPrice
  * @param float $rapPrice
+ * @param bool $small
  * @return string
  */
-function getPriceComparisonLabel($fieldPrice, $rapPrice) {
+function getPriceComparisonLabel($fieldPrice, $rapPrice, $small = false) {
+    if ($rapPrice <= 0) {
+        return '<span class="badge bg-secondary"' . ($small ? ' style="font-size: 0.68rem; font-weight: 500;"' : '') . '>-</span>';
+    }
     list($diff, $isOver) = calculatePriceDiff($fieldPrice, $rapPrice);
+    $style = $small ? ' style="font-size: 0.68rem; font-weight: 500;"' : '';
     
     if ($isOver) {
-        return '<span class="badge bg-danger">LEBIH MAHAL ' . abs($diff) . '%</span>';
+        return '<span class="badge bg-danger"' . $style . '>LEBIH MAHAL ' . abs($diff) . '%</span>';
     } else if ($diff < 0) {
-        return '<span class="badge bg-success">HEMAT ' . abs($diff) . '%</span>';
+        return '<span class="badge bg-success"' . $style . '>HEMAT ' . abs($diff) . '%</span>';
     }
-    return '<span class="badge bg-success">AMAN</span>';
+    return '<span class="badge bg-success"' . $style . '>AMAN</span>';
 }
 
 /**

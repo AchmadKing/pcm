@@ -556,7 +556,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <th class="text-end">Harga Satuan</th>
                                 <th class="text-end">Total Lapangan</th>
                                 <th class="text-end">Harga RAP</th>
-                                <th>Status Harga</th>
+                                <th class="text-end">Selisih Harga</th>
                                 <th>Status Qty</th>
                             </tr>
                         </thead>
@@ -606,8 +606,23 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <br><small class="text-muted">@<?= formatRupiah($item['rap_unit_price'], false) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td>
-                                    <?= getPriceComparisonLabel($hargaLapangan, $hargaRap) ?>
+                                <td class="text-end">
+                                    <?php 
+                                    $rapUnitPrice = floatval($item['rap_unit_price'] ?? 0);
+                                    if ($rapUnitPrice > 0): 
+                                        $selisihItem = $hargaLapangan - $hargaRap;
+                                        if ($hargaLapangan > $hargaRap): ?>
+                                            <div class="text-danger fw-bold">+<?= formatRupiah($selisihItem, false) ?></div>
+                                        <?php elseif ($hargaLapangan < $hargaRap): ?>
+                                            <div class="text-success fw-bold">-<?= formatRupiah(abs($selisihItem), false) ?></div>
+                                        <?php else: ?>
+                                            <div class="text-muted fw-semibold">0,00</div>
+                                        <?php endif; ?>
+                                        <?= getPriceComparisonLabel($hargaLapangan, $hargaRap, true) ?>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary" style="font-size: 0.68rem;">-</span>
+                                        <br><small class="text-muted" style="font-size: 0.75rem;">Tidak ada RAP</small>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <?php if ($qtyRap > 0): ?>
