@@ -1578,21 +1578,35 @@ $docCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_documents WHERE projec
 $mc0Snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'MC0' ORDER BY id DESC LIMIT 1", [$projectId]);
 $ccoSnapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'CCO' ORDER BY id DESC LIMIT 1", [$projectId]);
 
-// RAB Summary - base total (optimized: JOIN instead of correlated subquery)
-$rabBaseTotal = dbGetRow("
-    SELECT COALESCE(SUM(
-        rs.volume * COALESCE(ahsp_totals.unit_price, 0)
-    ), 0) as total
+// RAB Summary - base total
+$ahspPrices = [];
+$ahspRows = dbGetAll("
+    SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
+    FROM project_ahsp_details pad
+    JOIN project_items pi ON pad.item_id = pi.id
+    JOIN project_ahsp pa ON pad.ahsp_id = pa.id
+    WHERE pa.project_id = ?
+    GROUP BY pad.ahsp_id
+", [$projectId]);
+foreach ($ahspRows as $r) {
+    $ahspPrices[$r['ahsp_id']] = floatval($r['unit_price']);
+}
+
+$subcatRows = dbGetAll("
+    SELECT rs.volume, rs.unit_price, rs.ahsp_id
     FROM rab_subcategories rs
     JOIN rab_categories rc ON rs.category_id = rc.id
-    LEFT JOIN (
-        SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
-        FROM project_ahsp_details pad
-        JOIN project_items pi ON pad.item_id = pi.id
-        GROUP BY pad.ahsp_id
-    ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
     WHERE rc.project_id = ?
-", [$projectId])['total'] ?? 0;
+", [$projectId]);
+
+$rabBaseTotal = 0;
+foreach ($subcatRows as $s) {
+    $vol = floatval($s['volume']);
+    $unitPrice = ($s['ahsp_id'] && isset($ahspPrices[$s['ahsp_id']])) 
+        ? $ahspPrices[$s['ahsp_id']] 
+        : floatval($s['unit_price']);
+    $rabBaseTotal += ($vol * $unitPrice);
+}
 
 // Apply overhead and PPN to get rounded total
 $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
@@ -1602,25 +1616,38 @@ $rabWithOverhead = $rabBaseTotal * (1 + ($rabOverheadPct / 100));
 $rabPpn = $rabWithOverhead * ($ppnPct / 100);
 $rabTotal = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
 
-// RAP Summary - base total (optimized: JOIN instead of correlated subquery)
-$rapBaseTotal = dbGetRow("
-    SELECT COALESCE(SUM(
-        rap.volume * 
-        COALESCE(rap_ahsp_totals.unit_price, rap.unit_price)
-    ), 0) as total
+// RAP Summary - base total
+$ahspRapPrices = [];
+$ahspRapRows = dbGetAll("
+    SELECT par.ahsp_code, SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as unit_price
+    FROM project_ahsp_details_rap d
+    JOIN project_ahsp_rap par ON d.ahsp_id = par.id
+    JOIN project_items_rap pir ON d.item_id = pir.id
+    WHERE par.project_id = ?
+    GROUP BY par.ahsp_code
+", [$projectId]);
+foreach ($ahspRapRows as $r) {
+    $ahspRapPrices[$r['ahsp_code']] = floatval($r['unit_price']);
+}
+
+$rapItemsRows = dbGetAll("
+    SELECT rap.volume, rap.unit_price, pa.ahsp_code
     FROM rap_items rap
     JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
     JOIN rab_categories rc ON rs.category_id = rc.id
     LEFT JOIN project_ahsp pa ON pa.id = rs.ahsp_id
-    LEFT JOIN (
-        SELECT par.ahsp_code, par.project_id, SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as unit_price
-        FROM project_ahsp_rap par
-        JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
-        JOIN project_items_rap pir ON d.item_id = pir.id
-        GROUP BY par.ahsp_code, par.project_id
-    ) rap_ahsp_totals ON rap_ahsp_totals.ahsp_code = pa.ahsp_code AND rap_ahsp_totals.project_id = rc.project_id
     WHERE rc.project_id = ?
-", [$projectId])['total'] ?? 0;
+", [$projectId]);
+
+$rapBaseTotal = 0;
+foreach ($rapItemsRows as $r) {
+    $vol = floatval($r['volume']);
+    $ahspCode = $r['ahsp_code'] ?? null;
+    $unitPrice = ($ahspCode && isset($ahspRapPrices[$ahspCode])) 
+        ? $ahspRapPrices[$ahspCode] 
+        : floatval($r['unit_price']);
+    $rapBaseTotal += ($vol * $unitPrice);
+}
 
 // RAP total with overhead and PPN
 $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');

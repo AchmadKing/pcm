@@ -99,19 +99,7 @@ if ($viewMode === 'all') {
     // Users with 'all' access: see all projects
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
-            (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
-            (SELECT COALESCE(SUM(
-                rs.volume * COALESCE(ahsp_totals.unit_price, 0)
-            ), 0)
-            FROM rab_subcategories rs
-            JOIN rab_categories rc ON rs.category_id = rc.id
-            LEFT JOIN (
-                SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
-                FROM project_ahsp_details pad
-                JOIN project_items pi ON pad.item_id = pi.id
-                GROUP BY pad.ahsp_id
-            ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
-            WHERE rc.project_id = p.id) as base_rab
+            (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count
         FROM projects p 
         LEFT JOIN users u ON p.created_by = u.id
         ORDER BY p.created_at DESC
@@ -120,18 +108,7 @@ if ($viewMode === 'all') {
     // Users with 'assigned' access: only see assigned projects
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
-            (SELECT COALESCE(SUM(
-                rs.volume * COALESCE(ahsp_totals.unit_price, 0)
-            ), 0)
-            FROM rab_subcategories rs
-            JOIN rab_categories rc ON rs.category_id = rc.id
-            LEFT JOIN (
-                SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
-                FROM project_ahsp_details pad
-                JOIN project_items pi ON pad.item_id = pi.id
-                GROUP BY pad.ahsp_id
-            ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
-            WHERE rc.project_id = p.id) as base_rab
+            (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count
         FROM projects p 
         LEFT JOIN users u ON p.created_by = u.id
         INNER JOIN project_assignments pa ON pa.project_id = p.id
@@ -140,16 +117,53 @@ if ($viewMode === 'all') {
     ", [getCurrentUserId()]);
 }
 
-// Calculate total_rab with overhead, PPN, and rounding for each project
-foreach ($projects as &$proj) {
-    $baseRab = $proj['base_rab'];
-    $overheadPct = getProjectOverheadProfitPct($proj, 'rab');
-    $ppnPct = $proj['ppn_percentage'] ?? 11;
-    $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
-    $rabPpn = $rabWithOverhead * ($ppnPct / 100);
-    $proj['total_rab'] = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
+// Calculate total_rab with dynamic AHSP component prices, overhead, PPN, and rounding in fast batch
+if (!empty($projects)) {
+    $projectIds = array_column($projects, 'id');
+    $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
+
+    // Batch load AHSP component unit prices
+    $ahspPrices = [];
+    $ahspRows = dbGetAll("
+        SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
+        FROM project_ahsp_details pad
+        JOIN project_items pi ON pad.item_id = pi.id
+        JOIN project_ahsp pa ON pad.ahsp_id = pa.id
+        WHERE pa.project_id IN ($placeholders)
+        GROUP BY pad.ahsp_id
+    ", $projectIds);
+    foreach ($ahspRows as $r) {
+        $ahspPrices[$r['ahsp_id']] = floatval($r['unit_price']);
+    }
+
+    // Batch load subcategories
+    $subcatRows = dbGetAll("
+        SELECT rc.project_id, rs.volume, rs.unit_price, rs.ahsp_id
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rc.project_id IN ($placeholders)
+    ", $projectIds);
+
+    $projectBaseRab = [];
+    foreach ($subcatRows as $s) {
+        $pid = $s['project_id'];
+        $vol = floatval($s['volume']);
+        $unitPrice = ($s['ahsp_id'] && isset($ahspPrices[$s['ahsp_id']])) 
+            ? $ahspPrices[$s['ahsp_id']] 
+            : floatval($s['unit_price']);
+        $projectBaseRab[$pid] = ($projectBaseRab[$pid] ?? 0) + ($vol * $unitPrice);
+    }
+
+    foreach ($projects as &$proj) {
+        $baseRab = $projectBaseRab[$proj['id']] ?? 0;
+        $overheadPct = getProjectOverheadProfitPct($proj, 'rab');
+        $ppnPct = floatval($proj['ppn_percentage'] ?? 11);
+        $rabWithOverhead = $baseRab * (1 + ($overheadPct / 100));
+        $rabPpn = $rabWithOverhead * ($ppnPct / 100);
+        $proj['total_rab'] = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
+    }
+    unset($proj);
 }
-unset($proj);
 
 // NOW include header (after all possible redirects)
 $pageTitle = 'Daftar Proyek';

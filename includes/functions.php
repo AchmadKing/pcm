@@ -1862,6 +1862,9 @@ function calculateProjectRealtimeStats($projectId) {
         }
     }
 
+    // Pre-load actual spending per subcategory
+    $actualSpendingMap = batchGetActualSpendingBySubcategory($projectId);
+
     // Fetch categories and subcategories
     $categories = dbGetAll("
         SELECT rc.id, rc.code, rc.name, rc.sort_order
@@ -1913,13 +1916,7 @@ function calculateProjectRealtimeStats($projectId) {
             $catRap += $subRap;
 
             // Actual calculation
-            $actRow = dbGetRow("
-                SELECT COALESCE(SUM(reqi.total_price), 0) as total
-                FROM request_items reqi
-                JOIN requests req ON reqi.request_id = req.id
-                WHERE reqi.subcategory_id = ? AND req.status = 'approved' AND req.project_id = ?
-            ", [$sub['id'], $projectId]);
-            $subAct = floatval($actRow['total'] ?? 0);
+            $subAct = floatval($actualSpendingMap[$sub['id']] ?? 0);
             $adj = $actualizationAdjustments[$sub['id']] ?? 0;
             $subAct -= $adj;
             if ($subAct < 0) $subAct = 0;
