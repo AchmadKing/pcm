@@ -1798,12 +1798,12 @@ function calculateProjectRealtimeStats($projectId) {
     // Pre-calculate RAB AHSP component totals
     $ahspPrices = [];
     $ahspRows = dbGetAll("
-        SELECT d.ahsp_id, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details d 
-        JOIN project_items i ON d.item_id = i.id 
-        JOIN project_ahsp pa ON d.ahsp_id = pa.id
+        SELECT pa.id as ahsp_id, COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total 
+        FROM project_ahsp pa
+        LEFT JOIN project_ahsp_details d ON d.ahsp_id = pa.id
+        LEFT JOIN project_items i ON d.item_id = i.id 
         WHERE pa.project_id = ?
-        GROUP BY d.ahsp_id
+        GROUP BY pa.id
     ", [$projectId]);
     foreach ($ahspRows as $r) {
         $ahspPrices[$r['ahsp_id']] = floatval($r['total']);
@@ -1812,10 +1812,10 @@ function calculateProjectRealtimeStats($projectId) {
     // Pre-calculate RAP AHSP component totals
     $ahspRapPrices = [];
     $ahspRapRows = dbGetAll("
-        SELECT pa.ahsp_code, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details_rap d 
-        JOIN project_items_rap i ON d.item_id = i.id 
-        JOIN project_ahsp_rap pa ON d.ahsp_id = pa.id
+        SELECT pa.ahsp_code, COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total 
+        FROM project_ahsp_rap pa
+        LEFT JOIN project_ahsp_details_rap d ON d.ahsp_id = pa.id
+        LEFT JOIN project_items_rap i ON d.item_id = i.id 
         WHERE pa.project_id = ?
         GROUP BY pa.ahsp_code
     ", [$projectId]);

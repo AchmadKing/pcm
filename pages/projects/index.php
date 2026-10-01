@@ -100,10 +100,18 @@ if ($viewMode === 'all') {
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
             (SELECT COUNT(*) FROM rab_categories WHERE project_id = p.id) as category_count,
-            (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
-             FROM rab_subcategories rs 
-             JOIN rab_categories rc ON rs.category_id = rc.id 
-             WHERE rc.project_id = p.id) as base_rab
+            (SELECT COALESCE(SUM(
+                rs.volume * COALESCE(ahsp_totals.unit_price, 0)
+            ), 0)
+            FROM rab_subcategories rs
+            JOIN rab_categories rc ON rs.category_id = rc.id
+            LEFT JOIN (
+                SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
+                FROM project_ahsp_details pad
+                JOIN project_items pi ON pad.item_id = pi.id
+                GROUP BY pad.ahsp_id
+            ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
+            WHERE rc.project_id = p.id) as base_rab
         FROM projects p 
         LEFT JOIN users u ON p.created_by = u.id
         ORDER BY p.created_at DESC
@@ -112,10 +120,18 @@ if ($viewMode === 'all') {
     // Users with 'assigned' access: only see assigned projects
     $projects = dbGetAll("
         SELECT p.*, u.full_name as created_by_name,
-            (SELECT COALESCE(SUM(rs.volume * rs.unit_price), 0) 
-             FROM rab_subcategories rs 
-             JOIN rab_categories rc ON rs.category_id = rc.id 
-             WHERE rc.project_id = p.id) as base_rab
+            (SELECT COALESCE(SUM(
+                rs.volume * COALESCE(ahsp_totals.unit_price, 0)
+            ), 0)
+            FROM rab_subcategories rs
+            JOIN rab_categories rc ON rs.category_id = rc.id
+            LEFT JOIN (
+                SELECT pad.ahsp_id, SUM(pad.coefficient * COALESCE(pad.unit_price, pi.price)) as unit_price
+                FROM project_ahsp_details pad
+                JOIN project_items pi ON pad.item_id = pi.id
+                GROUP BY pad.ahsp_id
+            ) ahsp_totals ON ahsp_totals.ahsp_id = rs.ahsp_id
+            WHERE rc.project_id = p.id) as base_rab
         FROM projects p 
         LEFT JOIN users u ON p.created_by = u.id
         INNER JOIN project_assignments pa ON pa.project_id = p.id
