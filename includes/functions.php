@@ -2264,4 +2264,713 @@ function resequenceRabCategoriesAndSubcategories($projectId) {
     }
 }
 
+/**
+ * Check if a project code is available (not already used by another project)
+ * 
+ * @param string|null $code
+ * @param int|null $excludeProjectId
+ * @return bool
+ */
+function isProjectCodeAvailable($code, $excludeProjectId = null) {
+    $code = trim($code ?? '');
+    if ($code === '') {
+        return true;
+    }
+    $sql = "SELECT id FROM projects WHERE project_code = ?";
+    $params = [$code];
+    if (!empty($excludeProjectId)) {
+        $sql .= " AND id != ?";
+        $params[] = intval($excludeProjectId);
+    }
+    $existing = dbGetRow($sql, $params);
+    return empty($existing);
+}
+
+/**
+ * Generate a unique project name with - Copy / - Copy (N) suffix
+ * 
+ * @param string $baseName
+ * @return string
+ */
+function generateUniqueProjectName($baseName) {
+    $baseName = trim($baseName ?? '');
+    if (empty($baseName)) {
+        $baseName = 'Proyek Baru';
+    }
+    
+    // Clean existing '- Copy' or '- Copy (N)' from baseName to avoid stacking '- Copy - Copy'
+    $cleanedName = preg_replace('/\s*-\s*Copy(?:\s*\(\d+\))?$/i', '', $baseName);
+    
+    $candidate = $cleanedName . ' - Copy';
+    if (!dbGetRow("SELECT id FROM projects WHERE name = ?", [$candidate])) {
+        return $candidate;
+    }
+    
+    $counter = 2;
+    while ($counter <= 999) {
+        $candidate = $cleanedName . ' - Copy (' . $counter . ')';
+        if (!dbGetRow("SELECT id FROM projects WHERE name = ?", [$candidate])) {
+            return $candidate;
+        }
+        $counter++;
+    }
+    
+    return $cleanedName . ' - Copy (' . uniqid() . ')';
+}
+
+/**
+ * Generate a unique project code with -COPY / -COPY-02 suffix or PRJ-YYYYMM-XXX
+ * 
+ * @param string $baseCode
+ * @return string
+ */
+function generateUniqueProjectCode($baseCode = '') {
+    $baseCode = trim($baseCode ?? '');
+    
+    if (empty($baseCode)) {
+        $yearMonth = date('Ym');
+        $counter = 1;
+        while ($counter <= 999) {
+            $candidate = 'PRJ-' . $yearMonth . '-' . sprintf('%03d', $counter);
+            if (isProjectCodeAvailable($candidate)) {
+                return $candidate;
+            }
+            $counter++;
+        }
+        return 'PRJ-' . $yearMonth . '-' . uniqid();
+    }
+    
+    // Clean existing '-COPY' or '-COPY-XX' suffixes
+    $cleanedCode = preg_replace('/-COPY(?:-\d+)?$/i', '', $baseCode);
+    
+    $candidate = $cleanedCode . '-COPY';
+    if (isProjectCodeAvailable($candidate)) {
+        return $candidate;
+    }
+    
+    $counter = 2;
+    while ($counter <= 999) {
+        $candidate = $cleanedCode . '-COPY-' . sprintf('%02d', $counter);
+        if (isProjectCodeAvailable($candidate)) {
+            return $candidate;
+        }
+        $counter++;
+    }
+    
+    return $cleanedCode . '-COPY-' . uniqid();
+}
+
+/**
+ * Deep copy an entire project and all project-scoped children and files.
+ * 
+ * @param int $sourceProjectId
+ * @param string $newName
+ * @param string|null $newCode
+ * @param int $userId
+ * @return int $newProjectId
+ * @throws RuntimeException|Throwable
+ */
+function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
+    $sourceProjectId = intval($sourceProjectId);
+    $userId = intval($userId);
+    
+    if ($sourceProjectId <= 0) {
+        throw new RuntimeException("ID proyek sumber tidak valid.");
+    }
+    
+    $sourceProject = dbGetRow("SELECT * FROM projects WHERE id = ?", [$sourceProjectId]);
+    if (!$sourceProject) {
+        throw new RuntimeException("Proyek sumber (ID: $sourceProjectId) tidak ditemukan.");
+    }
+    
+    $newName = trim($newName ?? '');
+    if (empty($newName)) {
+        throw new RuntimeException("Nama proyek baru tidak boleh kosong.");
+    }
+    
+    $newCode = trim($newCode ?? '');
+    if ($newCode !== '' && !isProjectCodeAvailable($newCode)) {
+        throw new RuntimeException("Kode proyek '$newCode' sudah digunakan oleh proyek lain.");
+    }
+    $projectCodeValue = ($newCode === '') ? null : $newCode;
+    
+    $userId = $userId ?: (function_exists('getCurrentUserId') ? getCurrentUserId() : null);
+    $userId = $userId ?: ($sourceProject['created_by'] ?? null);
+    
+    $createdFiles = [];
+    $db = getDB();
+    
+    try {
+        $db->beginTransaction();
+        
+        // 1. Dynamic projects table column copy
+        $projectCols = dbGetAll("SHOW COLUMNS FROM projects");
+        $excludedCols = ['id', 'created_at', 'updated_at'];
+        $colsToInsert = [];
+        $placeholders = [];
+        $values = [];
+        
+        foreach ($projectCols as $col) {
+            $fName = $col['Field'];
+            if (in_array($fName, $excludedCols, true) || (!empty($col['Extra']) && strpos($col['Extra'], 'auto_increment') !== false)) {
+                continue;
+            }
+            
+            $colsToInsert[] = "`$fName`";
+            $placeholders[] = "?";
+            
+            if ($fName === 'name') {
+                $values[] = $newName;
+            } elseif ($fName === 'project_code') {
+                $values[] = $projectCodeValue;
+            } elseif ($fName === 'created_by') {
+                $values[] = $userId;
+            } elseif ($fName === 'rap_source_id') {
+                $values[] = 0; // Temporarily 0, will update after snapshot cloning if applicable
+            } else {
+                $values[] = $sourceProject[$fName] ?? null;
+            }
+        }
+        
+        $sqlInsertProj = "INSERT INTO projects (" . implode(', ', $colsToInsert) . ") VALUES (" . implode(', ', $placeholders) . ")";
+        $stmtProj = $db->prepare($sqlInsertProj);
+        $stmtProj->execute($values);
+        $newProjectId = intval($db->lastInsertId());
+        
+        if ($newProjectId <= 0) {
+            throw new RuntimeException("Gagal membuat record proyek baru di database.");
+        }
+        
+        // Mapping dictionaries
+        $maps = [
+            'project_items' => [],
+            'project_items_rap' => [],
+            'project_ahsp' => [],
+            'project_ahsp_details' => [],
+            'project_ahsp_rap' => [],
+            'project_ahsp_details_rap' => [],
+            'rab_head_subs' => [],
+            'rab_categories' => [],
+            'rab_subcategories' => [],
+            'rap_items' => [],
+            'rab_snapshots' => [],
+            'rab_snapshot_categories' => [],
+            'rab_snapshot_subcategories' => [],
+            'rab_snapshot_ahsp_details' => [],
+            'requests' => [],
+            'request_items' => [],
+            'request_actuals' => [],
+            'weekly_progress' => [],
+            'project_images' => [],
+            'project_document_folders' => [],
+            'project_documents' => []
+        ];
+        
+        // 2. Clone active project assignments
+        $assignments = dbGetAll("SELECT * FROM project_assignments WHERE project_id = ? AND is_active = 1", [$sourceProjectId]);
+        foreach ($assignments as $a) {
+            dbInsert("
+                INSERT INTO project_assignments (project_id, user_id, assigned_by, assigned_at, notes, is_active)
+                VALUES (?, ?, ?, NOW(), ?, 1)
+            ", [$newProjectId, $a['user_id'], $userId, 'Diwariskan dari duplikasi proyek #' . $sourceProjectId]);
+        }
+        
+        // 3. Clone Master Data RAB (project_items)
+        $items = dbGetAll("SELECT * FROM project_items WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($items as $item) {
+            $newItemId = dbInsert("
+                INSERT INTO project_items (project_id, item_code, name, brand, category, unit, price, actual_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$newProjectId, $item['item_code'], $item['name'], $item['brand'], $item['category'], $item['unit'], $item['price'], $item['actual_price']]);
+            $maps['project_items'][$item['id']] = intval($newItemId);
+        }
+        
+        // 4. Clone Master Data RAP (project_items_rap)
+        $rapItems = dbGetAll("SELECT * FROM project_items_rap WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($rapItems as $item) {
+            $newRabItemId = null;
+            if ($item['rab_item_id'] !== null) {
+                if (!isset($maps['project_items'][$item['rab_item_id']])) {
+                    throw new RuntimeException("Missing mapping for project_items_rap rab_item_id: " . $item['rab_item_id']);
+                }
+                $newRabItemId = $maps['project_items'][$item['rab_item_id']];
+            }
+            $newRapItemId = dbInsert("
+                INSERT INTO project_items_rap (project_id, item_code, name, brand, category, unit, price, actual_price, rab_item_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$newProjectId, $item['item_code'], $item['name'], $item['brand'], $item['category'], $item['unit'], $item['price'], $item['actual_price'], $newRabItemId]);
+            $maps['project_items_rap'][$item['id']] = intval($newRapItemId);
+        }
+        
+        // 5. Clone AHSP Master RAB (project_ahsp & project_ahsp_details)
+        $ahsps = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($ahsps as $ahsp) {
+            $newAhspId = dbInsert("
+                INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price)
+                VALUES (?, ?, ?, ?, ?)
+            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price']]);
+            $maps['project_ahsp'][$ahsp['id']] = intval($newAhspId);
+            
+            $details = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ? ORDER BY id ASC", [$ahsp['id']]);
+            foreach ($details as $d) {
+                if (!isset($maps['project_items'][$d['item_id']])) {
+                    throw new RuntimeException("Missing mapping for project_ahsp_details item_id: " . $d['item_id']);
+                }
+                $newItemId = $maps['project_items'][$d['item_id']];
+                $newDetailId = dbInsert("
+                    INSERT INTO project_ahsp_details (ahsp_id, item_id, coefficient, unit_price)
+                    VALUES (?, ?, ?, ?)
+                ", [$newAhspId, $newItemId, $d['coefficient'], $d['unit_price']]);
+                $maps['project_ahsp_details'][$d['id']] = intval($newDetailId);
+            }
+        }
+        
+        // 6. Clone AHSP Master RAP (project_ahsp_rap & project_ahsp_details_rap)
+        $rapAhsps = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($rapAhsps as $ahsp) {
+            $newRabAhspId = null;
+            if ($ahsp['rab_ahsp_id'] !== null) {
+                if (!isset($maps['project_ahsp'][$ahsp['rab_ahsp_id']])) {
+                    throw new RuntimeException("Missing mapping for project_ahsp_rap rab_ahsp_id: " . $ahsp['rab_ahsp_id']);
+                }
+                $newRabAhspId = $maps['project_ahsp'][$ahsp['rab_ahsp_id']];
+            }
+            $newRapAhspId = dbInsert("
+                INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $newRabAhspId]);
+            $maps['project_ahsp_rap'][$ahsp['id']] = intval($newRapAhspId);
+            
+            $details = dbGetAll("SELECT * FROM project_ahsp_details_rap WHERE ahsp_id = ? ORDER BY id ASC", [$ahsp['id']]);
+            foreach ($details as $d) {
+                if (!isset($maps['project_items_rap'][$d['item_id']])) {
+                    throw new RuntimeException("Missing mapping for project_ahsp_details_rap item_id: " . $d['item_id']);
+                }
+                $newItemId = $maps['project_items_rap'][$d['item_id']];
+                $newDetailId = dbInsert("
+                    INSERT INTO project_ahsp_details_rap (ahsp_id, item_id, coefficient, unit_price)
+                    VALUES (?, ?, ?, ?)
+                ", [$newRapAhspId, $newItemId, $d['coefficient'], $d['unit_price']]);
+                $maps['project_ahsp_details_rap'][$d['id']] = intval($newDetailId);
+            }
+        }
+        
+        // 7. Clone RAB Hierarchy (rab_head_subs -> rab_categories -> rab_subcategories)
+        $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$sourceProjectId]);
+        foreach ($headSubs as $hs) {
+            $newHsId = dbInsert("
+                INSERT INTO rab_head_subs (project_id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+            ", [$newProjectId, $hs['code'], $hs['name'], $hs['sort_order']]);
+            $maps['rab_head_subs'][$hs['id']] = intval($newHsId);
+        }
+        
+        $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order ASC, id ASC", [$sourceProjectId]);
+        foreach ($categories as $cat) {
+            $newHeadSubId = null;
+            if ($cat['head_sub_id'] !== null) {
+                if (!isset($maps['rab_head_subs'][$cat['head_sub_id']])) {
+                    throw new RuntimeException("Missing mapping for rab_categories head_sub_id: " . $cat['head_sub_id']);
+                }
+                $newHeadSubId = $maps['rab_head_subs'][$cat['head_sub_id']];
+            }
+            $newCatId = dbInsert("
+                INSERT INTO rab_categories (project_id, head_sub_id, code, name, sort_order)
+                VALUES (?, ?, ?, ?, ?)
+            ", [$newProjectId, $newHeadSubId, $cat['code'], $cat['name'], $cat['sort_order']]);
+            $maps['rab_categories'][$cat['id']] = intval($newCatId);
+            
+            $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order ASC, id ASC", [$cat['id']]);
+            foreach ($subcats as $sub) {
+                $newAhspId = null;
+                if ($sub['ahsp_id'] !== null && intval($sub['ahsp_id']) !== 0) {
+                    if (!isset($maps['project_ahsp'][$sub['ahsp_id']])) {
+                        throw new RuntimeException("Missing mapping for rab_subcategories ahsp_id: " . $sub['ahsp_id']);
+                    }
+                    $newAhspId = $maps['project_ahsp'][$sub['ahsp_id']];
+                } else {
+                    $newAhspId = ($sub['ahsp_id'] === null) ? null : 0;
+                }
+                $newSubId = dbInsert("
+                    INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ", [$newCatId, $newAhspId, $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $sub['unit_price'], $sub['sort_order']]);
+                $maps['rab_subcategories'][$sub['id']] = intval($newSubId);
+            }
+        }
+        
+        // 8. Clone RAP Items & Details (rap_items -> rap_ahsp_details)
+        $oldSubcatIds = array_keys($maps['rab_subcategories']);
+        $sourceRapItems = [];
+        if (!empty($oldSubcatIds)) {
+            $inPlaceholders = implode(',', array_fill(0, count($oldSubcatIds), '?'));
+            $sourceRapItems = dbGetAll("SELECT * FROM rap_items WHERE subcategory_id IN ($inPlaceholders) ORDER BY id ASC", $oldSubcatIds);
+            foreach ($sourceRapItems as $ri) {
+                if (!isset($maps['rab_subcategories'][$ri['subcategory_id']])) {
+                    throw new RuntimeException("Missing mapping for rap_items subcategory_id: " . $ri['subcategory_id']);
+                }
+                $newSubcatId = $maps['rab_subcategories'][$ri['subcategory_id']];
+                
+                $newRapItemRecordId = dbInsert("
+                    INSERT INTO rap_items (subcategory_id, volume, unit_price, notes, rab_source_type, rab_snapshot_id, is_locked)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ", [$newSubcatId, $ri['volume'], $ri['unit_price'], $ri['notes'], $ri['rab_source_type'], null, $ri['is_locked']]);
+                $maps['rap_items'][$ri['id']] = intval($newRapItemRecordId);
+                
+                $rapDetails = dbGetAll("SELECT * FROM rap_ahsp_details WHERE rap_item_id = ? ORDER BY id ASC", [$ri['id']]);
+                foreach ($rapDetails as $rd) {
+                    if (!isset($maps['project_items'][$rd['item_id']])) {
+                        throw new RuntimeException("Missing mapping for rap_ahsp_details item_id: " . $rd['item_id']);
+                    }
+                    $newItemId = $maps['project_items'][$rd['item_id']];
+                    dbInsert("
+                        INSERT INTO rap_ahsp_details (rap_item_id, item_id, category, coefficient, unit_price)
+                        VALUES (?, ?, ?, ?, ?)
+                    ", [$newRapItemRecordId, $newItemId, $rd['category'], $rd['coefficient'], $rd['unit_price']]);
+                }
+            }
+        }
+        
+        // 9. Clone Snapshots Hierarchy (rab_snapshots -> categories -> subcategories -> ahsp_details)
+        $snapshots = dbGetAll("SELECT * FROM rab_snapshots WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($snapshots as $snap) {
+            $newSnapId = dbInsert("
+                INSERT INTO rab_snapshots (
+                    project_id, created_by, name, description, overhead_percentage, profit_percentage,
+                    ppn_percentage, overhead_apply_ahsp, overhead_apply_rab, overhead_apply_rap
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [
+                $newProjectId, $userId, $snap['name'], $snap['description'], $snap['overhead_percentage'], $snap['profit_percentage'],
+                $snap['ppn_percentage'], $snap['overhead_apply_ahsp'], $snap['overhead_apply_rab'], $snap['overhead_apply_rap']
+            ]);
+            $maps['rab_snapshots'][$snap['id']] = intval($newSnapId);
+            
+            $snapCats = dbGetAll("SELECT * FROM rab_snapshot_categories WHERE snapshot_id = ? ORDER BY sort_order ASC, id ASC", [$snap['id']]);
+            foreach ($snapCats as $sc) {
+                $newOrigCatId = null;
+                if ($sc['original_category_id'] !== null) {
+                    if (!isset($maps['rab_categories'][$sc['original_category_id']])) {
+                        throw new RuntimeException("Missing mapping for snapshot category original_category_id: " . $sc['original_category_id']);
+                    }
+                    $newOrigCatId = $maps['rab_categories'][$sc['original_category_id']];
+                }
+                $newHeadSubId = null;
+                if ($sc['head_sub_id'] !== null) {
+                    if (!isset($maps['rab_head_subs'][$sc['head_sub_id']])) {
+                        throw new RuntimeException("Missing mapping for snapshot category head_sub_id: " . $sc['head_sub_id']);
+                    }
+                    $newHeadSubId = $maps['rab_head_subs'][$sc['head_sub_id']];
+                }
+                $newSnapCatId = dbInsert("
+                    INSERT INTO rab_snapshot_categories (snapshot_id, original_category_id, head_sub_id, code, name, sort_order)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ", [$newSnapId, $newOrigCatId, $newHeadSubId, $sc['code'], $sc['name'], $sc['sort_order']]);
+                $maps['rab_snapshot_categories'][$sc['id']] = intval($newSnapCatId);
+                
+                $snapSubs = dbGetAll("SELECT * FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order ASC, id ASC", [$sc['id']]);
+                foreach ($snapSubs as $ss) {
+                    $newOrigSubId = null;
+                    if ($ss['original_subcategory_id'] !== null) {
+                        if (!isset($maps['rab_subcategories'][$ss['original_subcategory_id']])) {
+                            throw new RuntimeException("Missing mapping for snapshot subcategory original_subcategory_id: " . $ss['original_subcategory_id']);
+                        }
+                        $newOrigSubId = $maps['rab_subcategories'][$ss['original_subcategory_id']];
+                    }
+                    $newAhspId = null;
+                    if ($ss['ahsp_id'] !== null) {
+                        if (!isset($maps['project_ahsp'][$ss['ahsp_id']])) {
+                            throw new RuntimeException("Missing mapping for snapshot subcategory ahsp_id: " . $ss['ahsp_id']);
+                        }
+                        $newAhspId = $maps['project_ahsp'][$ss['ahsp_id']];
+                    }
+                    $newSnapSubId = dbInsert("
+                        INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, code, name, unit, volume, unit_price, ahsp_id, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ", [$newSnapCatId, $newOrigSubId, $ss['code'], $ss['name'], $ss['unit'], $ss['volume'], $ss['unit_price'], $newAhspId, $ss['sort_order']]);
+                    $maps['rab_snapshot_subcategories'][$ss['id']] = intval($newSnapSubId);
+                    
+                    $snapAhspDetails = dbGetAll("SELECT * FROM rab_snapshot_ahsp_details WHERE snapshot_subcategory_id = ? ORDER BY sort_order ASC, id ASC", [$ss['id']]);
+                    foreach ($snapAhspDetails as $sad) {
+                        if (!isset($maps['project_items'][$sad['item_id']])) {
+                            throw new RuntimeException("Missing mapping for snapshot ahsp detail item_id: " . $sad['item_id']);
+                        }
+                        $newItemId = $maps['project_items'][$sad['item_id']];
+                        $newSadId = dbInsert("
+                            INSERT INTO rab_snapshot_ahsp_details (snapshot_subcategory_id, item_id, category, coefficient, unit_price, sort_order)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        ", [$newSnapSubId, $newItemId, $sad['category'], $sad['coefficient'], $sad['unit_price'], $sad['sort_order']]);
+                        $maps['rab_snapshot_ahsp_details'][$sad['id']] = intval($newSadId);
+                    }
+                }
+            }
+        }
+        
+        // Remap rap_items.rab_snapshot_id
+        if (!empty($sourceRapItems)) {
+            foreach ($sourceRapItems as $ri) {
+                if ($ri['rab_snapshot_id'] !== null && intval($ri['rab_snapshot_id']) > 0) {
+                    if (!isset($maps['rab_snapshots'][$ri['rab_snapshot_id']])) {
+                        throw new RuntimeException("Missing mapping for rap_items rab_snapshot_id: " . $ri['rab_snapshot_id']);
+                    }
+                    $newSnapId = $maps['rab_snapshots'][$ri['rab_snapshot_id']];
+                    $newRapItemRecordId = $maps['rap_items'][$ri['id']];
+                    dbExecute("UPDATE rap_items SET rab_snapshot_id = ? WHERE id = ?", [$newSnapId, $newRapItemRecordId]);
+                }
+            }
+        }
+        
+        // Remap projects.rap_source_id (Section 20)
+        if ($sourceProject['rap_source_id'] !== null && intval($sourceProject['rap_source_id']) > 0) {
+            if (!isset($maps['rab_snapshots'][$sourceProject['rap_source_id']])) {
+                throw new RuntimeException("Missing mapping for projects rap_source_id: " . $sourceProject['rap_source_id']);
+            }
+            $newRapSourceId = $maps['rab_snapshots'][$sourceProject['rap_source_id']];
+            dbExecute("UPDATE projects SET rap_source_id = ? WHERE id = ?", [$newRapSourceId, $newProjectId]);
+        } elseif ($sourceProject['rap_source_id'] === null) {
+            dbExecute("UPDATE projects SET rap_source_id = NULL WHERE id = ?", [$newProjectId]);
+        } else {
+            dbExecute("UPDATE projects SET rap_source_id = 0 WHERE id = ?", [$newProjectId]);
+        }
+        
+        // 10. Clone Requests (requests -> items, attachments, actuals, actual attachments)
+        $reqUploadDir = __DIR__ . '/../uploads/requests/';
+        $actUploadDir = __DIR__ . '/../uploads/actuals/';
+        if (!is_dir($reqUploadDir)) mkdir($reqUploadDir, 0755, true);
+        if (!is_dir($actUploadDir)) mkdir($actUploadDir, 0755, true);
+        
+        $requests = dbGetAll("SELECT * FROM requests WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($requests as $req) {
+            $newReqId = dbInsert("
+                INSERT INTO requests (
+                    project_id, request_number, request_date, week_number, description, status,
+                    total_amount, approved_amount, approved_by, approved_at, admin_notes, target_week,
+                    rejection_reason, created_by, is_actualized, pm_approved_by, pm_approved_at, pm_notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [
+                $newProjectId, $req['request_number'], $req['request_date'], $req['week_number'], $req['description'], $req['status'],
+                $req['total_amount'], $req['approved_amount'], $req['approved_by'], $req['approved_at'], $req['admin_notes'], $req['target_week'],
+                $req['rejection_reason'], $req['created_by'], $req['is_actualized'], $req['pm_approved_by'], $req['pm_approved_at'], $req['pm_notes']
+            ]);
+            $maps['requests'][$req['id']] = intval($newReqId);
+            
+            $reqItems = dbGetAll("SELECT * FROM request_items WHERE request_id = ? ORDER BY id ASC", [$req['id']]);
+            foreach ($reqItems as $ri) {
+                $newSubcatId = null;
+                if ($ri['subcategory_id'] !== null) {
+                    if (!isset($maps['rab_subcategories'][$ri['subcategory_id']])) {
+                        throw new RuntimeException("Missing mapping for request_items subcategory_id: " . $ri['subcategory_id']);
+                    }
+                    $newSubcatId = $maps['rab_subcategories'][$ri['subcategory_id']];
+                }
+                $newCatId = null;
+                if ($ri['category_id'] !== null) {
+                    if (!isset($maps['rab_categories'][$ri['category_id']])) {
+                        throw new RuntimeException("Missing mapping for request_items category_id: " . $ri['category_id']);
+                    }
+                    $newCatId = $maps['rab_categories'][$ri['category_id']];
+                }
+                $newReqItemId = dbInsert("
+                    INSERT INTO request_items (
+                        request_id, subcategory_id, subcat_details, category_id, item_name,
+                        item_code, item_type, unit, quantity, coefficient, unit_price, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ", [
+                    $newReqId, $newSubcatId, $ri['subcat_details'], $newCatId, $ri['item_name'],
+                    $ri['item_code'], $ri['item_type'], $ri['unit'], $ri['quantity'], $ri['coefficient'], $ri['unit_price'], $ri['notes']
+                ]);
+                $maps['request_items'][$ri['id']] = intval($newReqItemId);
+            }
+            
+            $reqAtts = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY id ASC", [$req['id']]);
+            foreach ($reqAtts as $att) {
+                $srcFile = $reqUploadDir . $att['filename'];
+                if (!file_exists($srcFile)) {
+                    throw new RuntimeException("Source request attachment file not found: " . $att['filename']);
+                }
+                $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
+                $newFilename = 'req_' . $newReqId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                $destFile = $reqUploadDir . $newFilename;
+                if (!copy($srcFile, $destFile)) {
+                    throw new RuntimeException("Failed to copy request attachment from $srcFile to $destFile");
+                }
+                $createdFiles[] = $destFile;
+                
+                dbInsert("
+                    INSERT INTO request_attachments (request_id, filename, original_name, file_type, file_size)
+                    VALUES (?, ?, ?, ?, ?)
+                ", [$newReqId, $newFilename, $att['original_name'], $att['file_type'], $att['file_size']]);
+            }
+            
+            $actual = dbGetRow("SELECT * FROM request_actuals WHERE request_id = ?", [$req['id']]);
+            if ($actual) {
+                $newActId = dbInsert("
+                    INSERT INTO request_actuals (
+                        request_id, remaining_upah, remaining_material, remaining_alat,
+                        consumed_upah, consumed_material, consumed_alat,
+                        notes_upah, notes_material, notes_alat, created_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ", [
+                    $newReqId, $actual['remaining_upah'], $actual['remaining_material'], $actual['remaining_alat'],
+                    $actual['consumed_upah'], $actual['consumed_material'], $actual['consumed_alat'],
+                    $actual['notes_upah'], $actual['notes_material'], $actual['notes_alat'], $actual['created_by']
+                ]);
+                $maps['request_actuals'][$actual['id']] = intval($newActId);
+                
+                $actAtts = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY id ASC", [$actual['id']]);
+                foreach ($actAtts as $att) {
+                    $srcFile = $actUploadDir . $att['filename'];
+                    if (!file_exists($srcFile)) {
+                        throw new RuntimeException("Source actual attachment file not found: " . $att['filename']);
+                    }
+                    $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
+                    $newFilename = 'act_' . $newActId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                    $destFile = $actUploadDir . $newFilename;
+                    if (!copy($srcFile, $destFile)) {
+                        throw new RuntimeException("Failed to copy actual attachment from $srcFile to $destFile");
+                    }
+                    $createdFiles[] = $destFile;
+                    
+                    dbInsert("
+                        INSERT INTO request_actual_attachments (request_actual_id, filename, original_name, file_type, file_size)
+                        VALUES (?, ?, ?, ?, ?)
+                    ", [$newActId, $newFilename, $att['original_name'], $att['file_type'], $att['file_size']]);
+                }
+            }
+        }
+        
+        // 11. Clone Weekly Progress (weekly_progress)
+        $progressList = dbGetAll("SELECT * FROM weekly_progress WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($progressList as $prog) {
+            if (!isset($maps['rab_subcategories'][$prog['subcategory_id']])) {
+                throw new RuntimeException("Missing mapping for weekly_progress subcategory_id: " . $prog['subcategory_id']);
+            }
+            $newSubcatId = $maps['rab_subcategories'][$prog['subcategory_id']];
+            $newProgId = dbInsert("
+                INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, notes, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$newProjectId, $newSubcatId, $prog['week_number'], $prog['week_start'], $prog['week_end'], $prog['realization_amount'], $prog['notes'], $prog['created_by']]);
+            $maps['weekly_progress'][$prog['id']] = intval($newProgId);
+        }
+        
+        // 12. Clone Project Images (project_images)
+        $imgUploadDir = __DIR__ . '/../uploads/project_images/';
+        if (!is_dir($imgUploadDir)) mkdir($imgUploadDir, 0755, true);
+        
+        $images = dbGetAll("SELECT * FROM project_images WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($images as $img) {
+            $srcFile = $imgUploadDir . $img['filename'];
+            if (!file_exists($srcFile)) {
+                throw new RuntimeException("Source project image file not found: " . $img['filename']);
+            }
+            $ext = pathinfo($img['filename'], PATHINFO_EXTENSION);
+            $newFilename = 'proj_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+            $destFile = $imgUploadDir . $newFilename;
+            if (!copy($srcFile, $destFile)) {
+                throw new RuntimeException("Failed to copy project image from $srcFile to $destFile");
+            }
+            $createdFiles[] = $destFile;
+            
+            $newImgId = dbInsert("
+                INSERT INTO project_images (project_id, filename, original_name, description, uploaded_by)
+                VALUES (?, ?, ?, ?, ?)
+            ", [$newProjectId, $newFilename, $img['original_name'], $img['description'], $img['uploaded_by']]);
+            $maps['project_images'][$img['id']] = intval($newImgId);
+        }
+        
+        // 13. Clone Document Folders (project_document_folders) & Documents (project_documents)
+        $docUploadDir = __DIR__ . '/../uploads/project_documents/';
+        if (!is_dir($docUploadDir)) mkdir($docUploadDir, 0755, true);
+        
+        $allFolders = dbGetAll("SELECT * FROM project_document_folders WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        $foldersByParent = [];
+        foreach ($allFolders as $f) {
+            $pId = ($f['parent_id'] !== null) ? intval($f['parent_id']) : 0;
+            $foldersByParent[$pId][] = $f;
+        }
+        
+        $cloneFoldersRecursively = function($parentSourceId, $parentNewId) use (&$cloneFoldersRecursively, &$foldersByParent, $newProjectId, &$maps) {
+            if (empty($foldersByParent[$parentSourceId])) return;
+            foreach ($foldersByParent[$parentSourceId] as $folder) {
+                $newFolderId = dbInsert("
+                    INSERT INTO project_document_folders (project_id, parent_id, name, created_by)
+                    VALUES (?, ?, ?, ?)
+                ", [$newProjectId, $parentNewId, $folder['name'], $folder['created_by']]);
+                $maps['project_document_folders'][$folder['id']] = intval($newFolderId);
+                $cloneFoldersRecursively(intval($folder['id']), intval($newFolderId));
+            }
+        };
+        $cloneFoldersRecursively(0, null);
+        
+        $docs = dbGetAll("SELECT * FROM project_documents WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        foreach ($docs as $doc) {
+            $newFolderId = null;
+            if ($doc['folder_id'] !== null) {
+                if (!isset($maps['project_document_folders'][$doc['folder_id']])) {
+                    throw new RuntimeException("Missing mapping for project_documents folder_id: " . $doc['folder_id']);
+                }
+                $newFolderId = $maps['project_document_folders'][$doc['folder_id']];
+            }
+            
+            $srcFile = $docUploadDir . $doc['filename'];
+            if (!file_exists($srcFile)) {
+                throw new RuntimeException("Source project document file not found: " . $doc['filename']);
+            }
+            $ext = pathinfo($doc['filename'], PATHINFO_EXTENSION);
+            $newFilename = 'doc_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+            $destFile = $docUploadDir . $newFilename;
+            if (!copy($srcFile, $destFile)) {
+                throw new RuntimeException("Failed to copy project document from $srcFile to $destFile");
+            }
+            $createdFiles[] = $destFile;
+            
+            $newDocId = dbInsert("
+                INSERT INTO project_documents (
+                    project_id, folder_id, title, filename, original_name,
+                    file_type, file_size, category, description, uploaded_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [
+                $newProjectId, $newFolderId, $doc['title'], $newFilename, $doc['original_name'],
+                $doc['file_type'], $doc['file_size'], $doc['category'], $doc['description'], $doc['uploaded_by']
+            ]);
+            $maps['project_documents'][$doc['id']] = intval($newDocId);
+        }
+        
+        // 14. Integrity Verification before commit
+        $checks = [
+            ['table' => 'project_items', 'sourceCount' => count($items), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?"],
+            ['table' => 'project_ahsp', 'sourceCount' => count($ahsps), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?"],
+            ['table' => 'rab_categories', 'sourceCount' => count($categories), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_categories WHERE project_id = ?"],
+            ['table' => 'rab_snapshots', 'sourceCount' => count($snapshots), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_snapshots WHERE project_id = ?"],
+            ['table' => 'requests', 'sourceCount' => count($requests), 'newQuery' => "SELECT COUNT(*) as cnt FROM requests WHERE project_id = ?"],
+            ['table' => 'weekly_progress', 'sourceCount' => count($progressList), 'newQuery' => "SELECT COUNT(*) as cnt FROM weekly_progress WHERE project_id = ?"],
+            ['table' => 'project_images', 'sourceCount' => count($images), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_images WHERE project_id = ?"],
+            ['table' => 'project_documents', 'sourceCount' => count($docs), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?"],
+        ];
+        foreach ($checks as $chk) {
+            $newCnt = intval(dbGetRow($chk['newQuery'], [$newProjectId])['cnt'] ?? 0);
+            if ($newCnt !== $chk['sourceCount']) {
+                throw new RuntimeException("Verification failed for {$chk['table']}: expected {$chk['sourceCount']}, got {$newCnt}");
+            }
+        }
+        
+        $db->commit();
+        return $newProjectId;
+        
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        
+        foreach ($createdFiles as $filePath) {
+            if (is_file($filePath)) {
+                @unlink($filePath);
+            }
+        }
+        
+        error_log("Duplicate Project Error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+        throw $e;
+    }
+}
+
+
 

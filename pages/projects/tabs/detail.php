@@ -139,17 +139,30 @@ $projectImages = dbGetAll("
 <p class="text-muted"><?= nl2br(sanitize($project['description'])) ?></p>
 <?php endif; ?>
 
-<?php if (hasPermission('projects.edit') && $project['status'] === 'draft'): ?>
+<?php 
+$canEditProject = hasPermission('projects.edit');
+$canCreateProject = hasPermission('projects.create');
+?>
+<?php if (($canEditProject && $project['status'] === 'draft') || $canCreateProject): ?>
 <hr>
-<div class="d-flex gap-2 flex-wrap">
-    <a href="edit.php?id=<?= $projectId ?>" class="btn btn-outline-primary">
-        <i class="mdi mdi-pencil"></i> Edit Proyek
-    </a>
-    <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#startProjectModal">
-        <i class="mdi mdi-play-circle"></i> Mulai Proyek
-    </button>
+<div class="d-flex gap-2 flex-wrap align-items-center">
+    <?php if ($canEditProject && $project['status'] === 'draft'): ?>
+        <a href="edit.php?id=<?= $projectId ?>" class="btn btn-outline-primary">
+            <i class="mdi mdi-pencil"></i> Edit Proyek
+        </a>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#startProjectModal">
+            <i class="mdi mdi-play-circle"></i> Mulai Proyek
+        </button>
+    <?php endif; ?>
+    
+    <?php if ($canCreateProject): ?>
+        <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#duplicateProjectModal">
+            <i class="mdi mdi-content-copy"></i> Duplikasi Proyek
+        </button>
+    <?php endif; ?>
 </div>
 
+<?php if ($canEditProject && $project['status'] === 'draft'): ?>
 <!-- Modal Konfirmasi Mulai Proyek -->
 <div class="modal fade" id="startProjectModal" tabindex="-1">
     <div class="modal-dialog">
@@ -188,6 +201,83 @@ $projectImages = dbGetAll("
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($canCreateProject): ?>
+<!-- Modal Duplikasi Proyek -->
+<div class="modal fade" id="duplicateProjectModal" tabindex="-1" aria-labelledby="duplicateProjectModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-info bg-opacity-10">
+                <h5 class="modal-title text-info" id="duplicateProjectModalLabel">
+                    <i class="mdi mdi-content-copy me-1"></i> Duplikasi Proyek
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="view.php?id=<?= $projectId ?>" id="formDuplicateProject" onsubmit="handleDuplicateSubmit(event)">
+                <input type="hidden" name="action" value="duplicate_project">
+                <div class="modal-body">
+                    <div class="card border border-info border-opacity-25 bg-light mb-3">
+                        <div class="card-body p-2">
+                            <small class="text-muted d-block font-size-11 text-uppercase fw-semibold">Proyek Sumber:</small>
+                            <div class="d-flex justify-content-between align-items-center mt-1">
+                                <span class="fw-bold text-dark text-truncate me-2" title="<?= sanitize($project['name']) ?>"><?= sanitize($project['name']) ?></span>
+                                <span class="badge bg-secondary"><?= sanitize($project['project_code'] ?: 'Tanpa Kode') ?></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="dup_project_name" class="form-label required">Nama Proyek Baru</label>
+                        <input type="text" class="form-control" id="dup_project_name" name="new_project_name" 
+                               value="<?= sanitize(generateUniqueProjectName($project['name'])) ?>" required maxlength="200">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="dup_project_code" class="form-label">Kode Proyek Baru</label>
+                        <input type="text" class="form-control font-monospace" id="dup_project_code" name="new_project_code" 
+                               value="<?= sanitize(generateUniqueProjectCode($project['project_code'] ?? '')) ?>" placeholder="Contoh: PRJ-2026-001" maxlength="100">
+                        <div class="form-text font-size-12">
+                            <i class="mdi mdi-information-outline"></i> Kode proyek harus unik di sistem. Kode di atas ter-generate secara otomatis.
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-warning py-2 px-3 mb-0 font-size-12">
+                        <i class="mdi mdi-alert-circle-outline me-1"></i>
+                        <strong>Informasi:</strong> Seluruh data proyek saat ini (Master Data, AHSP, RAB, RAP, Snapshots, Pengajuan Dana, Realisasi/Aktual, Progres, Foto Dokumentasi, dan Dokumen) akan diduplikasi secara penuh. Proyek sumber <strong>tidak akan diubah</strong>.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="btnCancelDuplicate">Batal</button>
+                    <button type="submit" class="btn btn-info" id="btnSubmitDuplicate">
+                        <span class="spinner-border spinner-border-sm me-1 d-none" id="spinnerDuplicate" role="status" aria-hidden="true"></span>
+                        <span id="btnSubmitDuplicateText"><i class="mdi mdi-content-copy me-1"></i> Mulai Duplikasi</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function handleDuplicateSubmit(e) {
+    const btn = document.getElementById('btnSubmitDuplicate');
+    const btnCancel = document.getElementById('btnCancelDuplicate');
+    const spinner = document.getElementById('spinnerDuplicate');
+    const text = document.getElementById('btnSubmitDuplicateText');
+    
+    if (btn.disabled) {
+        e.preventDefault();
+        return false;
+    }
+    
+    btn.disabled = true;
+    btnCancel.classList.add('disabled');
+    spinner.classList.remove('d-none');
+    text.textContent = 'Menduplikasi...';
+}
+</script>
+<?php endif; ?>
 <?php endif; ?>
 
 <!-- =====================================================

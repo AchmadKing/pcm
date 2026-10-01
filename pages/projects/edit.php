@@ -54,10 +54,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (empty($name)) {
         $error = 'Nama proyek harus diisi!';
+    } elseif ($projectCode !== '' && !isProjectCodeAvailable($projectCode, $projectId)) {
+        $error = "Kode proyek '$projectCode' sudah digunakan oleh proyek lain!";
     } else {
         try {
             ensureProfitPercentageColumnExists();
             ensureOverheadApplyColumnsExist();
+            $projectCodeVal = $projectCode !== '' ? $projectCode : null;
             dbExecute("
                 UPDATE projects SET
                     name = ?, project_code = ?, region_name = ?, description = ?, activity_name = ?, work_description = ?,
@@ -66,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     overhead_percentage = ?, profit_percentage = ?, overhead_apply_ahsp = ?, overhead_apply_rab = ?, overhead_apply_rap = ?, ppn_percentage = ?, updated_at = NOW()
                 WHERE id = ?
             ", [
-                $name, $projectCode, $regionName, $description, $activityName, $workDescription,
+                $name, $projectCodeVal, $regionName, $description, $activityName, $workDescription,
                 $fundingSource, $budgetYear, $contractNumber, $contractDate,
                 $serviceProvider, $supervisorConsultant, $durationDays, $startDate,
                 $overheadPercentage, $profitPercentage, $overheadApplyAhsp, $overheadApplyRab, $overheadApplyRap, $ppnPercentage, $projectId

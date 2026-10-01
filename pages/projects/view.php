@@ -977,6 +977,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// Handle duplicate project
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'duplicate_project') {
+    $sourceProjectId = intval($_GET['id'] ?? $_POST['project_id'] ?? 0);
+    
+    if (!hasPermission('projects.create')) {
+        setFlash('error', 'Anda tidak memiliki hak akses untuk membuat atau menduplikasi proyek!');
+        header('Location: view.php?id=' . $sourceProjectId . '&tab=detail');
+        exit;
+    }
+    
+    if (!canAccessProject($sourceProjectId)) {
+        setFlash('error', 'Anda tidak memiliki akses ke proyek ini!');
+        header('Location: index.php');
+        exit;
+    }
+    
+    $newName = trim($_POST['new_project_name'] ?? '');
+    $newCode = trim($_POST['new_project_code'] ?? '');
+    
+    if (empty($newName)) {
+        setFlash('error', 'Nama proyek baru tidak boleh kosong!');
+        header('Location: view.php?id=' . $sourceProjectId . '&tab=detail');
+        exit;
+    }
+    
+    // Check if new code is available (if provided)
+    if (!empty($newCode) && !isProjectCodeAvailable($newCode)) {
+        setFlash('error', "Kode proyek \"$newCode\" sudah digunakan! Silakan gunakan kode lain.");
+        header('Location: view.php?id=' . $sourceProjectId . '&tab=detail');
+        exit;
+    }
+    
+    try {
+        $userId = getCurrentUserId();
+        $newProjectId = duplicateProject($sourceProjectId, $newName, $newCode, $userId);
+        
+        setFlash('success', 'Proyek berhasil diduplikasi menjadi "' . sanitize($newName) . '"!');
+        header('Location: view.php?id=' . $newProjectId . '&tab=detail');
+        exit;
+    } catch (Throwable $e) {
+        setFlash('error', 'Duplikasi proyek gagal: ' . $e->getMessage());
+        header('Location: view.php?id=' . $sourceProjectId . '&tab=detail');
+        exit;
+    }
+}
+
 
 // Handle upload project images
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_project_images') {

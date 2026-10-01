@@ -41,10 +41,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (empty($name)) {
         $error = 'Nama proyek harus diisi!';
+    } elseif ($projectCode !== '' && !isProjectCodeAvailable($projectCode)) {
+        $error = "Kode proyek '$projectCode' sudah digunakan oleh proyek lain!";
     } else {
         try {
             ensureProfitPercentageColumnExists();
             ensureOverheadApplyColumnsExist();
+            $projectCodeVal = $projectCode !== '' ? $projectCode : null;
             $projectId = dbInsert("
                 INSERT INTO projects (
                     name, project_code, region_name, description, activity_name, work_description,
@@ -54,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ppn_percentage, created_by, status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
             ", [
-                $name, $projectCode, $regionName, $description, $activityName, $workDescription,
+                $name, $projectCodeVal, $regionName, $description, $activityName, $workDescription,
                 $fundingSource, $budgetYear, $contractNumber, $contractDate,
                 $serviceProvider, $supervisorConsultant, $durationDays, $startDate,
                 $overheadPercentage, $profitPercentage, $overheadApplyAhsp, $overheadApplyRab, $overheadApplyRap,

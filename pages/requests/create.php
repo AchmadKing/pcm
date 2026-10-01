@@ -180,8 +180,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
                d.coefficient as ahsp_coefficient, COALESCE(d.unit_price, pir.price) as unit_price, pir.actual_price,
                rs.id as subcategory_id, rs.code as subcat_code, rs.name as subcat_name, rs.unit as subcat_unit,
                rs.category_id,
-               ri.volume as rap_volume,
-               (d.coefficient * COALESCE(ri.volume, 0)) as rap_qty,
+               COALESCE(ri.volume, rs.volume, 0) as rap_volume,
+               (d.coefficient * COALESCE(ri.volume, rs.volume, 0)) as rap_qty,
                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
                 FROM request_items reqi2 
                 JOIN requests r ON reqi2.request_id = r.id 
@@ -206,6 +206,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
         $rapQty = floatval($item['rap_qty']);
         $usedQty = floatval($item['used_qty']);
         $sisaQty = $rapQty - $usedQty;
+        $ahspCoef = floatval($item['ahsp_coefficient']);
+        $rapVolume = floatval($item['rap_volume']);
+        $sisaVolume = $ahspCoef > 0 ? ($sisaQty / $ahspCoef) : 0;
         
         $itemsBySubcat[$subId][] = [
             'id' => $item['id'],
@@ -219,10 +222,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
             'item_type' => $item['item_type'],
             'unit_price' => floatval($item['unit_price']),
             'actual_price' => floatval($item['actual_price']),
-            'ahsp_coefficient' => floatval($item['ahsp_coefficient']),
+            'ahsp_coefficient' => $ahspCoef,
             'rap_qty' => $rapQty,
             'used_qty' => $usedQty,
-            'sisa_qty' => $sisaQty
+            'sisa_qty' => $sisaQty,
+            'rap_volume' => $rapVolume,
+            'sisa_volume' => $sisaVolume
         ];
     }
     
@@ -1358,7 +1363,7 @@ $(document).ready(function() {
     // Render item checkboxes table grouped by selected pekerjaan
     function renderItemCheckboxes(pekerjaanList, itemType) {
         const isUpah = itemType === 'upah';
-        const colCount = isUpah ? 8 : 7;
+        const colCount = isUpah ? 9 : 7;
         
         let html = '<table class="table table-sm table-hover mb-0" id="itemSelectionTable">';
         html += '<thead class="table-secondary">';
@@ -1369,6 +1374,7 @@ $(document).ready(function() {
         html += '<th width="60">Satuan</th>';
         
         if (isUpah) {
+            html += '<th width="85" class="text-center">Sisa Vol.</th>';
             html += '<th width="85" class="text-center">Koef. AHSP</th>';
             html += '<th width="110" class="text-center">Rencana Kerja <span class="text-danger">*</span></th>';
             html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
@@ -1414,7 +1420,9 @@ $(document).ready(function() {
                     const sisaQty = parseFloat(item.sisa_qty) || 0;
                     const rapQty = parseFloat(item.rap_qty) || 0;
                     const usedQty = parseFloat(item.used_qty) || 0;
+                    const sisaVol = item.sisa_volume !== undefined ? parseFloat(item.sisa_volume) : (ahspCoef > 0 ? (sisaQty / ahspCoef) : 0);
                     const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+                    const sisaVolText = sisaVol > 0 ? sisaVol.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
                     const idx = globalItemIdx++;
                     
                     html += '<tr class="item-check-row" data-subcat-id="' + pek.subcategory_id + '">';
@@ -1430,6 +1438,7 @@ $(document).ready(function() {
                     html += 'data-price="' + price + '" ';
                     html += 'data-ahsp-coef="' + ahspCoef + '" ';
                     html += 'data-sisa-qty="' + sisaQty + '" ';
+                    html += 'data-sisa-volume="' + sisaVol + '" ';
                     html += 'data-rap-qty="' + rapQty + '" ';
                     html += 'data-used-qty="' + usedQty + '" ';
                     html += 'data-item-type="' + item.item_type + '">';
@@ -1439,6 +1448,7 @@ $(document).ready(function() {
                     html += '<td><small>' + escapeHtml(item.unit) + '</small></td>';
                     
                     if (isUpah) {
+                        html += '<td class="text-center"><small class="' + (sisaVol > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaVolText + '</small></td>';
                         html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
                         html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
                         html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
