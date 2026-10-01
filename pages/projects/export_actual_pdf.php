@@ -22,7 +22,14 @@ if (!$project) {
     die('Proyek tidak ditemukan');
 }
 
-$overheadPct = getProjectOverheadProfitPct($project, 'rap');
+$targetType = $_GET['target'] ?? 'rap';
+if (!in_array($targetType, ['rap', 'rab'])) {
+    $targetType = 'rap';
+}
+$isRabTarget = ($targetType === 'rab');
+$targetLabel = $isRabTarget ? 'RAB' : 'RAP';
+
+$overheadPct = getProjectOverheadProfitPct($project, $targetType);
 $regionName = $project['region_name'] ?? '-';
 
 // Weekly progress setup
@@ -55,6 +62,7 @@ $actualizationAdjustments = batchGetActualizationAdjustments($projectId);
 
 // Batch-load all data needed (instead of per-subcategory queries)
 $rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 $batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
 $batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
 
@@ -68,6 +76,7 @@ $categories = dbGetAll("
 
 // Build hierarchical view
 $actualData = [];
+$grandTargetTotal = 0;
 $grandRapTotal = 0;
 $grandActualUpah = 0;
 $grandActualMaterial = 0;
@@ -81,6 +90,7 @@ foreach ($categories as $cat) {
     
     $subcats = dbGetAll("
         SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
+               rs.ahsp_id,
                rap.volume as rap_volume, rap.unit_price as rap_unit_price,
                pa.ahsp_code
         FROM rab_subcategories rs
@@ -93,7 +103,7 @@ foreach ($categories as $cat) {
     if (empty($subcats)) continue;
     
     $enrichedSubcats = [];
-    $catRapTotal = 0;
+    $catTargetTotal = 0;
     $catActualUpah = 0;
     $catActualMaterial = 0;
     $catActualAlat = 0;
@@ -102,19 +112,34 @@ foreach ($categories as $cat) {
     $catWeeklyTotals = [];
     
     foreach ($subcats as $sub) {
-        $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
-        
-        // Use pre-loaded batch map instead of per-subcategory query
-        $ahspCode = $sub['ahsp_code'] ?? null;
-        $rapComponents = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-        
-        $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
-        if ($baseUnitPrice <= 0) {
-            $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+        if ($isRabTarget) {
+            $volume = floatval($sub['rab_volume']);
+            $rabComponents = ($sub['ahsp_id'] && isset($rabAhspBreakdownMap[$sub['ahsp_id']])) 
+                ? $rabAhspBreakdownMap[$sub['ahsp_id']] 
+                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+            
+            $baseUnitPrice = $rabComponents['total'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rab_unit_price']) && floatval($sub['rab_unit_price']) > 0) 
+                    ? floatval($sub['rab_unit_price']) 
+                    : 0.0;
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
+        } else {
+            $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
+            $ahspCode = $sub['ahsp_code'] ?? null;
+            $rapComponents = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+            
+            $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
         }
-        
-        $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
-        $subRapTotal = $volume * $unitPriceWithOverhead;
         
         // Use pre-loaded actual spending
         $subActualTotal = $batchActualSpending[$sub['id']] ?? 0.0;
@@ -137,18 +162,19 @@ foreach ($categories as $cat) {
             $subActualTotal -= $adjTotal;
         }
         
-        $subProgress = $subRapTotal > 0 ? ($subActualTotal / $subRapTotal) * 100 : 0;
-        $subSelisih = $subRapTotal - $subActualTotal;
+        $subProgress = $subTargetTotal > 0 ? ($subActualTotal / $subTargetTotal) * 100 : 0;
+        $subSelisih = $subTargetTotal - $subActualTotal;
         
         // Accumulate cat totals
-        $catRapTotal += $subRapTotal;
+        $catTargetTotal += $subTargetTotal;
         $catActualUpah += $subActualUpah;
         $catActualMaterial += $subActualMaterial;
         $catActualAlat += $subActualAlat;
         $catActualTotal += $subActualTotal;
         $catSelisih += $subSelisih;
         
-        $sub['display_rap_total'] = $subRapTotal;
+        $sub['display_target_total'] = $subTargetTotal;
+        $sub['display_rap_total'] = $subTargetTotal;
         $sub['display_actual_upah'] = $subActualUpah;
         $sub['display_actual_material'] = $subActualMaterial;
         $sub['display_actual_alat'] = $subActualAlat;
@@ -175,7 +201,8 @@ foreach ($categories as $cat) {
     }
     
     // Accumulate grand totals
-    $grandRapTotal += $catRapTotal;
+    $grandTargetTotal += $catTargetTotal;
+    $grandRapTotal += $catTargetTotal;
     $grandActualUpah += $catActualUpah;
     $grandActualMaterial += $catActualMaterial;
     $grandActualAlat += $catActualAlat;
@@ -196,7 +223,8 @@ foreach ($categories as $cat) {
     $actualData[$cat['id']] = [
         'category' => $cat,
         'subcategories' => $enrichedSubcats,
-        'total_rap' => $catRapTotal,
+        'total_target' => $catTargetTotal,
+        'total_rap' => $catTargetTotal,
         'total_upah' => $catActualUpah,
         'total_material' => $catActualMaterial,
         'total_alat' => $catActualAlat,
@@ -404,7 +432,7 @@ foreach ($categories as $cat) {
                 <th rowspan="2" width="40">NO.</th>
                 <th rowspan="2">URAIAN PEKERJAAN</th>
                 <th rowspan="2" width="40">SAT</th>
-                <th rowspan="2" width="100">TARGET RAP<br>(Rp)</th>
+                <th rowspan="2" width="100">TARGET <?= $targetLabel ?><br>(Rp)</th>
                 <th colspan="4">REALISASI ANGGARAN (Rp)</th>
                 <th rowspan="2" width="100">SELISIH<br>(Rp)</th>
                 <th rowspan="2" width="60">PROG<br>(%)</th>

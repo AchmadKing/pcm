@@ -14,9 +14,17 @@ if (!in_array($categoryFilter, $validFilters)) {
     $categoryFilter = 'all';
 }
 
+// Get target type (rap, rab) - default is rap
+$targetType = $_GET['target'] ?? 'rap';
+if (!in_array($targetType, ['rap', 'rab'])) {
+    $targetType = 'rap';
+}
+$isRabTarget = ($targetType === 'rab');
+$targetLabel = $isRabTarget ? 'RAB' : 'RAP';
+
 // Get project settings
 $ppnPercentage = $project['ppn_percentage'] ?? 11;
-$overheadPct = getProjectOverheadProfitPct($project, 'rap');
+$overheadPct = getProjectOverheadProfitPct($project, $targetType);
 
 // Generate weekly ranges if project is started (not draft) OR has weekly history
 $weeklyRanges = [];
@@ -49,6 +57,7 @@ if ($showWeeklyColumns) {
 
 // Batch-load ALL data needed for subcategory calculations (instead of N queries per subcategory)
 $rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 $actualizationAdjustments = batchGetActualizationAdjustments($projectId);
 $batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
 $batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
@@ -67,9 +76,10 @@ $actualData = [];
 foreach ($categories as $cat) {
     $catId = $cat['id'];
     
-    // Get subcategories with RAP data and AHSP code
+    // Get subcategories with RAP data, AHSP code, and AHSP id
     $subcats = dbGetAll("
         SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
+               rs.ahsp_id,
                rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
                pa.ahsp_code
         FROM rab_subcategories rs
@@ -80,11 +90,11 @@ foreach ($categories as $cat) {
     ", [$catId]);
     
     $subcatData = [];
-    $catRapTotal = 0;
+    $catTargetTotal = 0;
     $catActualTotal = 0;
-    $catRapUpah = 0;
-    $catRapMaterial = 0;
-    $catRapAlat = 0;
+    $catTargetUpah = 0;
+    $catTargetMaterial = 0;
+    $catTargetAlat = 0;
     $catActualUpah = 0;
     $catActualMaterial = 0;
     $catActualAlat = 0;
@@ -93,29 +103,51 @@ foreach ($categories as $cat) {
     $catWeeklyTotals = [];
     
     foreach ($subcats as $sub) {
-        // Use RAP volume if available, otherwise use RAB volume
-        $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
-        
-        // Use pre-loaded batch map instead of per-subcategory query (was 2 queries per subcategory)
-        $ahspCode = $sub['ahsp_code'] ?? null;
-        $rapComponents = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-        
-        // Derive base unit price directly from RAP AHSP component totals (D = A+B+C)
-        $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
-        
-        // Fallback to stored RAP unit price or RAB unit price if no AHSP RAP breakdown exists
-        if ($baseUnitPrice <= 0) {
-            $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+        if ($isRabTarget) {
+            // Target RAB Mode
+            $volume = floatval($sub['rab_volume']);
+            $rabComponents = ($sub['ahsp_id'] && isset($rabAhspBreakdownMap[$sub['ahsp_id']])) 
+                ? $rabAhspBreakdownMap[$sub['ahsp_id']] 
+                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+            
+            $baseUnitPrice = $rabComponents['total'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rab_unit_price']) && floatval($sub['rab_unit_price']) > 0) 
+                    ? floatval($sub['rab_unit_price']) 
+                    : 0.0;
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
+            
+            $subTargetUpah = $rabComponents['upah'] * (1 + ($overheadPct / 100)) * $volume;
+            $subTargetMaterial = $rabComponents['material'] * (1 + ($overheadPct / 100)) * $volume;
+            $subTargetAlat = $rabComponents['alat'] * (1 + ($overheadPct / 100)) * $volume;
+        } else {
+            // Target RAP Mode
+            $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) 
+                ? floatval($sub['rap_volume']) 
+                : floatval($sub['rab_volume']);
+            
+            $ahspCode = $sub['ahsp_code'] ?? null;
+            $rapComponents = $ahspCode 
+                ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) 
+                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+            
+            $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) 
+                    ? floatval($sub['rap_unit_price']) 
+                    : floatval($sub['rab_unit_price']);
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
+            
+            $subTargetUpah = $rapComponents['upah'] * (1 + ($overheadPct / 100)) * $volume;
+            $subTargetMaterial = $rapComponents['material'] * (1 + ($overheadPct / 100)) * $volume;
+            $subTargetAlat = $rapComponents['alat'] * (1 + ($overheadPct / 100)) * $volume;
         }
-        
-        // Apply overhead & profit to unit price
-        $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
-        $subRapTotal = $volume * $unitPriceWithOverhead;
-        
-        // Apply overhead to components and multiply by volume
-        $subRapUpah = $rapComponents['upah'] * (1 + ($overheadPct / 100)) * $volume;
-        $subRapMaterial = $rapComponents['material'] * (1 + ($overheadPct / 100)) * $volume;
-        $subRapAlat = $rapComponents['alat'] * (1 + ($overheadPct / 100)) * $volume;
         
         // Use pre-loaded actual spending (was 1 query per subcategory)
         $subActualTotal = $batchActualSpending[$sub['id']] ?? 0.0;
@@ -140,10 +172,10 @@ foreach ($categories as $cat) {
         }
         
         // Calculate item progress
-        $subProgress = $subRapTotal > 0 ? ($subActualTotal / $subRapTotal) * 100 : 0;
+        $subProgress = $subTargetTotal > 0 ? ($subActualTotal / $subTargetTotal) * 100 : 0;
         
-        // Selisih = RAP - Aktual (positif = sisa anggaran, negatif = overbudget)
-        $subSelisih = $subRapTotal - $subActualTotal;
+        // Selisih = Target - Aktual (positif = sisa anggaran, negatif = overbudget)
+        $subSelisih = $subTargetTotal - $subActualTotal;
         
         // Get weekly data for this subcategory
         $subWeeklyData = $weeklyData[$sub['id']] ?? [];
@@ -164,10 +196,14 @@ foreach ($categories as $cat) {
             'code' => $sub['code'],
             'name' => $sub['name'],
             'unit' => $sub['unit'],
-            'rap_total' => $subRapTotal,
-            'rap_upah' => $subRapUpah,
-            'rap_material' => $subRapMaterial,
-            'rap_alat' => $subRapAlat,
+            'target_total' => $subTargetTotal,
+            'target_upah' => $subTargetUpah,
+            'target_material' => $subTargetMaterial,
+            'target_alat' => $subTargetAlat,
+            'rap_total' => $subTargetTotal,
+            'rap_upah' => $subTargetUpah,
+            'rap_material' => $subTargetMaterial,
+            'rap_alat' => $subTargetAlat,
             'actual_total' => $subActualTotal,
             'actual_upah' => $subActualUpah,
             'actual_material' => $subActualMaterial,
@@ -178,17 +214,17 @@ foreach ($categories as $cat) {
         ];
         
         // Accumulate category totals
-        $catRapTotal += $subRapTotal;
+        $catTargetTotal += $subTargetTotal;
         $catActualTotal += $subActualTotal;
-        $catRapUpah += $subRapUpah;
-        $catRapMaterial += $subRapMaterial;
-        $catRapAlat += $subRapAlat;
+        $catTargetUpah += $subTargetUpah;
+        $catTargetMaterial += $subTargetMaterial;
+        $catTargetAlat += $subTargetAlat;
         $catActualUpah += $subActualUpah;
         $catActualMaterial += $subActualMaterial;
         $catActualAlat += $subActualAlat;
         
         // For average progress calculation
-        if ($subRapTotal > 0) {
+        if ($subTargetTotal > 0) {
             $subcatProgressSum += $subProgress;
             $subcatCount++;
         }
@@ -196,16 +232,20 @@ foreach ($categories as $cat) {
     
     // Category progress = Average of subcategory progress
     $catProgress = $subcatCount > 0 ? ($subcatProgressSum / $subcatCount) : 0;
-    $catSelisih = $catRapTotal - $catActualTotal;
+    $catSelisih = $catTargetTotal - $catActualTotal;
     
     $actualData[$catId] = [
         'category' => $cat,
         'subcategories' => $subcatData,
-        'rap_total' => $catRapTotal,
+        'target_total' => $catTargetTotal,
+        'target_upah' => $catTargetUpah,
+        'target_material' => $catTargetMaterial,
+        'target_alat' => $catTargetAlat,
+        'rap_total' => $catTargetTotal,
         'actual_total' => $catActualTotal,
-        'rap_upah' => $catRapUpah,
-        'rap_material' => $catRapMaterial,
-        'rap_alat' => $catRapAlat,
+        'rap_upah' => $catTargetUpah,
+        'rap_material' => $catTargetMaterial,
+        'rap_alat' => $catTargetAlat,
         'actual_upah' => $catActualUpah,
         'actual_material' => $catActualMaterial,
         'actual_alat' => $catActualAlat,
@@ -225,30 +265,61 @@ foreach ($categories as $cat) {
 </div>
 <?php else: ?>
 
-<!-- Category Filter Buttons -->
+<!-- Controls: Target Selector & Category Filter -->
 <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <div class="btn-group" role="group" aria-label="Filter Kategori Anggaran">
-        <a href="?id=<?= $projectId ?>&tab=actual&cat=all" 
-           class="btn btn-outline-dark <?= $categoryFilter === 'all' ? 'active' : '' ?>">
-            <i class="mdi mdi-view-list"></i> Semua
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=actual&cat=upah" 
-           class="btn btn-outline-primary <?= $categoryFilter === 'upah' ? 'active' : '' ?>">
-            <i class="mdi mdi-account-hard-hat"></i> Upah
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=actual&cat=material" 
-           class="btn btn-outline-success <?= $categoryFilter === 'material' ? 'active' : '' ?>">
-            <i class="mdi mdi-package-variant"></i> Material
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=actual&cat=alat" 
-           class="btn btn-outline-warning <?= $categoryFilter === 'alat' ? 'active' : '' ?>">
-            <i class="mdi mdi-tools"></i> Alat
-        </a>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <!-- Target Selector (RAP vs RAB) -->
+        <div class="d-flex align-items-center gap-1">
+            <span class="text-muted small fw-semibold me-1"><i class="mdi mdi-target"></i> Acuan Target:</span>
+            <div class="btn-group" role="group" aria-label="Pilih Acuan Target">
+                <a href="?id=<?= $projectId ?>&tab=actual&target=rap&cat=<?= $categoryFilter ?>" 
+                   class="btn btn-sm <?= $targetType === 'rap' ? 'btn-info text-white fw-bold shadow-sm' : 'btn-outline-info' ?>" 
+                   title="Gunakan RAP sebagai angka target / acuan">
+                    <i class="mdi mdi-bullseye-arrow"></i> RAP (Target)
+                </a>
+                <a href="?id=<?= $projectId ?>&tab=actual&target=rab&cat=<?= $categoryFilter ?>" 
+                   class="btn btn-sm <?= $targetType === 'rab' ? 'btn-info text-white fw-bold shadow-sm' : 'btn-outline-info' ?>"
+                   title="Gunakan RAB sebagai angka target / acuan">
+                    <i class="mdi mdi-file-document-box-check-outline"></i> RAB (Target)
+                </a>
+            </div>
+        </div>
+
+        <div class="vr d-none d-md-block" style="height: 24px;"></div>
+
+        <!-- Category Filter Buttons -->
+        <div class="d-flex align-items-center gap-1">
+            <span class="text-muted small fw-semibold me-1"><i class="mdi mdi-filter-variant"></i> Kategori:</span>
+            <div class="btn-group" role="group" aria-label="Filter Kategori Anggaran">
+                <a href="?id=<?= $projectId ?>&tab=actual&target=<?= $targetType ?>&cat=all" 
+                   class="btn btn-sm <?= $categoryFilter === 'all' ? 'btn-dark' : 'btn-outline-dark' ?>">
+                    <i class="mdi mdi-view-list"></i> Semua
+                </a>
+                <a href="?id=<?= $projectId ?>&tab=actual&target=<?= $targetType ?>&cat=upah" 
+                   class="btn btn-sm <?= $categoryFilter === 'upah' ? 'btn-primary' : 'btn-outline-primary' ?>">
+                    <i class="mdi mdi-account-hard-hat"></i> Upah
+                </a>
+                <a href="?id=<?= $projectId ?>&tab=actual&target=<?= $targetType ?>&cat=material" 
+                   class="btn btn-sm <?= $categoryFilter === 'material' ? 'btn-success' : 'btn-outline-success' ?>">
+                    <i class="mdi mdi-package-variant"></i> Material
+                </a>
+                <a href="?id=<?= $projectId ?>&tab=actual&target=<?= $targetType ?>&cat=alat" 
+                   class="btn btn-sm <?= $categoryFilter === 'alat' ? 'btn-warning' : 'btn-outline-warning' ?>">
+                    <i class="mdi mdi-tools"></i> Alat
+                </a>
+            </div>
+        </div>
     </div>
-    <div class="d-flex align-items-center gap-2">
-        <?php if ($categoryFilter !== 'all'): ?>
-        <div class="alert alert-info py-1 px-3 mb-0 me-2">
-            <small><i class="mdi mdi-filter"></i> Menampilkan anggaran <strong><?= ucfirst($categoryFilter) ?></strong> saja</small>
+
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <?php if ($targetType === 'rab' || $categoryFilter !== 'all'): ?>
+        <div class="alert alert-info py-1 px-3 mb-0">
+            <small>
+                <i class="mdi mdi-information-outline"></i> Acuan: <strong>Target <?= $targetLabel ?></strong>
+                <?php if ($categoryFilter !== 'all'): ?>
+                | Kategori: <strong><?= ucfirst($categoryFilter) ?></strong>
+                <?php endif; ?>
+            </small>
         </div>
         <?php endif; ?>
         
@@ -258,14 +329,14 @@ foreach ($categories as $cat) {
                 <i class="mdi mdi-file-export-outline"></i> Export
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-                <li><h6 class="dropdown-header">Export CSV</h6></li>
+                <li><h6 class="dropdown-header">Export CSV (Target <?= $targetLabel ?>)</h6></li>
                 <li>
-                    <a class="dropdown-item" href="export_actual.php?id=<?= $projectId ?>">
+                    <a class="dropdown-item" href="export_actual.php?id=<?= $projectId ?>&target=<?= $targetType ?>">
                         <i class="mdi mdi-file-document-outline"></i> Export CSV Laporan
                     </a>
                 </li>
                 <li><hr class="dropdown-divider"></li>
-                <li><h6 class="dropdown-header">Export PDF</h6></li>
+                <li><h6 class="dropdown-header">Export PDF (Target <?= $targetLabel ?>)</h6></li>
                 <li>
                     <a class="dropdown-item" href="javascript:void(0);" onclick="openPdfPreviewActual()">
                         <i class="mdi mdi-file-pdf-box text-danger"></i> Export PDF
@@ -482,7 +553,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php if ($categoryFilter === 'all'): ?>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP (Target)</th>
+                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap"><?= $targetLabel ?> (Target)</th>
                 <th rowspan="2" class="align-middle text-end col-upah">Realisasi<br><small>Upah</small></th>
                 <th rowspan="2" class="align-middle text-end col-material">Realisasi<br><small>Material</small></th>
                 <th rowspan="2" class="align-middle text-end col-alat">Realisasi<br><small>Alat</small></th>
@@ -492,7 +563,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php else: ?>
                 <th rowspan="2" class="align-middle text-center sticky-col sticky-col-header col-no">No</th>
                 <th rowspan="2" class="align-middle sticky-col sticky-col-header col-uraian">Uraian Pekerjaan</th>
-                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap">RAP <?= ucfirst($categoryFilter) ?></th>
+                <th rowspan="2" class="align-middle text-end sticky-col sticky-col-header col-rap"><?= $targetLabel ?> <?= ucfirst($categoryFilter) ?></th>
                 <th rowspan="2" class="align-middle text-end col-upah">Realisasi <?= ucfirst($categoryFilter) ?></th>
                 <th rowspan="2" class="align-middle text-end col-selisih">Selisih</th>
                 <th rowspan="2" class="align-middle text-center col-progress">Progress</th>
@@ -519,7 +590,7 @@ $lastStickyRight = 1220; // Total width of sticky area
         </thead>
         <tbody>
             <?php 
-            $grandRap = 0;
+            $grandTarget = 0;
             $grandActualUpah = 0;
             $grandActualMaterial = 0;
             $grandActualAlat = 0;
@@ -535,7 +606,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 $catSelisih = $data['selisih'];
                 
                 // Accumulate grand totals
-                $grandRap += $data['rap_total'];
+                $grandTarget += $data['target_total'];
                 $grandActualUpah += $data['actual_upah'];
                 $grandActualMaterial += $data['actual_material'];
                 $grandActualAlat += $data['actual_alat'];
@@ -552,7 +623,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 }
                 
                 foreach ($subcats as $sub) {
-                    if ($sub['rap_total'] > 0) {
+                    if ($sub['target_total'] > 0) {
                         $grandProgressSum += $sub['progress'];
                         $grandSubcatCount++;
                     }
@@ -585,28 +656,28 @@ $lastStickyRight = 1220; // Total width of sticky area
             <?php foreach ($subcats as $sub): 
                 // Calculate filtered values based on category filter
                 if ($categoryFilter === 'all') {
-                    $displayRap = $sub['rap_total'];
+                    $displayTarget = $sub['target_total'];
                     $displayActual = $sub['actual_total'];
                 } elseif ($categoryFilter === 'upah') {
-                    $displayRap = $sub['rap_upah'];
+                    $displayTarget = $sub['target_upah'];
                     $displayActual = $sub['actual_upah'];
                 } elseif ($categoryFilter === 'material') {
-                    $displayRap = $sub['rap_material'];
+                    $displayTarget = $sub['target_material'];
                     $displayActual = $sub['actual_material'];
                 } else { // alat
-                    $displayRap = $sub['rap_alat'];
+                    $displayTarget = $sub['target_alat'];
                     $displayActual = $sub['actual_alat'];
                 }
                 
-                $displaySelisih = $displayRap - $displayActual;
-                $displayProgress = $displayRap > 0 ? ($displayActual / $displayRap) * 100 : 0;
+                $displaySelisih = $displayTarget - $displayActual;
+                $displayProgress = $displayTarget > 0 ? ($displayActual / $displayTarget) * 100 : 0;
                 $progressClass = $displayProgress > 100 ? 'bg-danger' : ($displayProgress >= 75 ? 'bg-warning' : 'bg-success');
                 $selisihClass = $displaySelisih < 0 ? 'text-danger' : 'text-success';
             ?>
             <tr class="sub-row" data-subcategory-id="<?= $sub['id'] ?>">
                 <td class="sticky-col col-no"><?= sanitize($sub['code']) ?></td>
                 <td class="sticky-col col-uraian"><?= sanitize($sub['name']) ?></td>
-                <td class="sticky-col col-rap text-end"><?= formatNumber($displayRap, 2) ?></td>
+                <td class="sticky-col col-rap text-end"><?= formatNumber($displayTarget, 2) ?></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah text-end text-primary"><?= formatNumber($sub['actual_upah'], 2) ?></td>
                 <td class="col-material text-end text-success"><?= formatNumber($sub['actual_material'], 2) ?></td>
@@ -630,7 +701,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
                     $weekRealization = $sub['weekly'][$weekNum] ?? 0;
-                    $weekBobot = $sub['rap_total'] > 0 ? ($weekRealization / $sub['rap_total']) * 100 : 0;
+                    $weekBobot = $sub['target_total'] > 0 ? ($weekRealization / $sub['target_total']) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <?= $weekRealization > 0 ? formatNumber($weekRealization, 0) : '<span class="text-muted">0</span>' ?>
@@ -659,27 +730,27 @@ $lastStickyRight = 1220; // Total width of sticky area
             <?php 
                 // Calculate filtered category totals
                 if ($categoryFilter === 'all') {
-                    $catDisplayRap = $data['rap_total'];
+                    $catDisplayTarget = $data['target_total'];
                     $catDisplayActual = $data['actual_total'];
                 } elseif ($categoryFilter === 'upah') {
-                    $catDisplayRap = $data['rap_upah'];
+                    $catDisplayTarget = $data['target_upah'];
                     $catDisplayActual = $data['actual_upah'];
                 } elseif ($categoryFilter === 'material') {
-                    $catDisplayRap = $data['rap_material'];
+                    $catDisplayTarget = $data['target_material'];
                     $catDisplayActual = $data['actual_material'];
                 } else { // alat
-                    $catDisplayRap = $data['rap_alat'];
+                    $catDisplayTarget = $data['target_alat'];
                     $catDisplayActual = $data['actual_alat'];
                 }
                 
-                $catDisplaySelisih = $catDisplayRap - $catDisplayActual;
-                $catDisplayProgress = $catDisplayRap > 0 ? ($catDisplayActual / $catDisplayRap) * 100 : 0;
+                $catDisplaySelisih = $catDisplayTarget - $catDisplayActual;
+                $catDisplayProgress = $catDisplayTarget > 0 ? ($catDisplayActual / $catDisplayTarget) * 100 : 0;
                 $catProgressClass = $catDisplayProgress > 100 ? 'bg-danger' : ($catDisplayProgress >= 75 ? 'bg-warning' : 'bg-success');
                 $catSelisihClass = $catDisplaySelisih < 0 ? 'text-danger' : 'text-success';
             ?>
             <tr class="table-secondary">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($catDisplayRap, 2) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($catDisplayTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary col-upah"><strong><?= formatNumber($data['actual_upah'], 2) ?></strong></td>
                 <td class="text-end text-success col-material"><strong><?= formatNumber($data['actual_material'], 2) ?></strong></td>
@@ -705,7 +776,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
                     $catWeekRealization = $data['weekly_totals'][$weekNum] ?? 0;
-                    $catWeekBobot = $data['rap_total'] > 0 ? ($catWeekRealization / $data['rap_total']) * 100 : 0;
+                    $catWeekBobot = $data['target_total'] > 0 ? ($catWeekRealization / $data['target_total']) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <strong><?= $catWeekRealization > 0 ? formatNumber($catWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
@@ -725,48 +796,48 @@ $lastStickyRight = 1220; // Total width of sticky area
             <?php 
             // Calculate filtered grand totals
             if ($categoryFilter === 'all') {
-                $grandDisplayRap = $grandRap;
+                $grandDisplayTarget = $grandTarget;
                 $grandDisplayActual = $grandActualTotal;
             } elseif ($categoryFilter === 'upah') {
-                $grandDisplayRap = 0;
+                $grandDisplayTarget = 0;
                 $grandDisplayActual = $grandActualUpah;
-                // Re-calculate RAP for upah from actual data
+                // Re-calculate Target for upah from actual data
                 foreach ($actualData as $data) {
-                    $grandDisplayRap += $data['rap_upah'];
+                    $grandDisplayTarget += $data['target_upah'];
                 }
             } elseif ($categoryFilter === 'material') {
-                $grandDisplayRap = 0;
+                $grandDisplayTarget = 0;
                 $grandDisplayActual = $grandActualMaterial;
                 foreach ($actualData as $data) {
-                    $grandDisplayRap += $data['rap_material'];
+                    $grandDisplayTarget += $data['target_material'];
                 }
             } else { // alat
-                $grandDisplayRap = 0;
+                $grandDisplayTarget = 0;
                 $grandDisplayActual = $grandActualAlat;
                 foreach ($actualData as $data) {
-                    $grandDisplayRap += $data['rap_alat'];
+                    $grandDisplayTarget += $data['target_alat'];
                 }
             }
             
-            $grandDisplayDiff = $grandDisplayRap - $grandDisplayActual;
-            $overallDisplayProgress = $grandDisplayRap > 0 ? ($grandDisplayActual / $grandDisplayRap) * 100 : 0;
+            $grandDisplayDiff = $grandDisplayTarget - $grandDisplayActual;
+            $overallDisplayProgress = $grandDisplayTarget > 0 ? ($grandDisplayActual / $grandDisplayTarget) * 100 : 0;
             $grandProgressClass = $overallDisplayProgress > 100 ? 'bg-danger' : ($overallDisplayProgress >= 75 ? 'bg-warning' : 'bg-success');
             $grandSelisihClass = $grandDisplayDiff < 0 ? 'text-danger' : 'text-success';
             
             // PPN & Rounding
-            $ppnRap = $grandDisplayRap * ($ppnPercentage / 100);
+            $ppnTarget = $grandDisplayTarget * ($ppnPercentage / 100);
             $ppnActual = $grandDisplayActual * ($ppnPercentage / 100);
-            $totalRapWithPpn = $grandDisplayRap + $ppnRap;
+            $totalTargetWithPpn = $grandDisplayTarget + $ppnTarget;
             $totalActualWithPpn = $grandDisplayActual + $ppnActual;
-            $totalRapRounded = ceil($totalRapWithPpn / 10) * 10;
+            $totalTargetRounded = ceil($totalTargetWithPpn / 10) * 10;
             $totalActualRounded = ceil($totalActualWithPpn / 10) * 10;
-            $diffWithPpn = $totalRapWithPpn - $totalActualWithPpn;
-            $diffRounded = $totalRapRounded - $totalActualRounded;
+            $diffWithPpn = $totalTargetWithPpn - $totalActualWithPpn;
+            $diffRounded = $totalTargetRounded - $totalActualRounded;
             ?>
             <!-- Grand Total Row -->
             <tr class="table-dark">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL<?= $categoryFilter !== 'all' ? ' (' . strtoupper($categoryFilter) . ')' : '' ?></strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandDisplayRap, 2) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandDisplayTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary col-upah"><strong><?= formatNumber($grandActualUpah, 2) ?></strong></td>
                 <td class="text-end text-success col-material"><strong><?= formatNumber($grandActualMaterial, 2) ?></strong></td>
@@ -792,7 +863,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
                     $grandWeekRealization = $grandWeeklyTotals[$weekNum] ?? 0;
-                    $grandWeekBobot = $grandRap > 0 ? ($grandWeekRealization / $grandRap) * 100 : 0;
+                    $grandWeekBobot = $grandTarget > 0 ? ($grandWeekRealization / $grandTarget) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <strong><?= $grandWeekRealization > 0 ? formatNumber($grandWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
@@ -809,7 +880,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             <!-- PPN Row -->
             <tr class="table-light">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>PPN <?= number_format($ppnPercentage, 0) ?>%</strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($ppnRap, 2) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($ppnTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>
                 <td class="col-material"></td>
@@ -818,8 +889,8 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php else: ?>
                 <td class="text-end col-upah"><strong><?= formatNumber($ppnActual, 2) ?></strong></td>
                 <?php endif; ?>
-                <td class="text-end <?= ($ppnRap - $ppnActual) < 0 ? 'text-danger' : 'text-success' ?> col-selisih">
-                    <strong><?= (($ppnRap - $ppnActual) >= 0 ? '+' : '') . formatNumber($ppnRap - $ppnActual, 2) ?></strong>
+                <td class="text-end <?= ($ppnTarget - $ppnActual) < 0 ? 'text-danger' : 'text-success' ?> col-selisih">
+                    <strong><?= (($ppnTarget - $ppnActual) >= 0 ? '+' : '') . formatNumber($ppnTarget - $ppnActual, 2) ?></strong>
                 </td>
                 <td class="col-progress"></td>
                 <?php if ($showWeeklyColumns): ?>
@@ -831,7 +902,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             <!-- Total + PPN Row -->
             <tr class="table-light">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL (TERMASUK PPN)</strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($totalRapWithPpn, 2) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatNumber($totalTargetWithPpn, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>
                 <td class="col-material"></td>
@@ -853,7 +924,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             <!-- Rounded Total Row -->
             <tr class="table-primary">
                 <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL DIBULATKAN</strong></td>
-                <td class="text-end sticky-col col-rap"><strong><?= formatRupiah($totalRapRounded) ?></strong></td>
+                <td class="text-end sticky-col col-rap"><strong><?= formatRupiah($totalTargetRounded) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>
                 <td class="col-material"></td>
@@ -881,7 +952,7 @@ $lastStickyRight = 1220; // Total width of sticky area
         <span class="badge bg-primary me-2">Upah</span> Biaya tenaga kerja |
         <span class="badge bg-success me-2 ms-2">Material</span> Biaya bahan/material |
         <span class="badge bg-warning me-2 ms-2">Alat</span> Biaya peralatan |
-        <em class="ms-2">RAP sudah termasuk <?= formatOverheadProfitLabel($project, 'rap') ?></em>
+        <em class="ms-2"><?= $targetLabel ?> sudah termasuk <?= formatOverheadProfitLabel($project, $targetType) ?></em>
     </small>
 </div>
 
@@ -1291,7 +1362,7 @@ function escapeHtml(str) {
 function openPdfPreviewActual() {
     var modal = new bootstrap.Modal(document.getElementById('pdfPreviewModalActual'));
     var iframe = document.getElementById('pdfPreviewIframeActual');
-    iframe.src = 'export_actual_pdf.php?id=<?= $projectId ?>';
+    iframe.src = 'export_actual_pdf.php?id=<?= $projectId ?>&target=<?= $targetType ?>';
     modal.show();
 }
 
@@ -1444,7 +1515,7 @@ function printPdfPreviewActual() {
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title" id="pdfPreviewModalActualLabel">
-                    <i class="mdi mdi-file-pdf-box text-danger"></i> Preview Laporan Realisasi
+                    <i class="mdi mdi-file-pdf-box text-danger"></i> Preview Laporan Realisasi (Target <?= $targetLabel ?>)
                 </h5>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-success btn-sm" onclick="printPdfPreviewActual()">

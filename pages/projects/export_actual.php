@@ -28,7 +28,14 @@ if (!$project) {
     exit;
 }
 
-$overheadPct = getProjectOverheadProfitPct($project, 'rap');
+$targetType = $_GET['target'] ?? 'rap';
+if (!in_array($targetType, ['rap', 'rab'])) {
+    $targetType = 'rap';
+}
+$isRabTarget = ($targetType === 'rab');
+$targetLabel = $isRabTarget ? 'RAB' : 'RAP';
+
+$overheadPct = getProjectOverheadProfitPct($project, $targetType);
 $regionName = $project['region_name'] ?? '-';
 
 // Weekly progress setup
@@ -61,6 +68,7 @@ $actualizationAdjustments = batchGetActualizationAdjustments($projectId);
 
 // Batch-load all data needed (instead of per-subcategory queries)
 $rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 $batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
 $batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
 
@@ -73,7 +81,7 @@ $categories = dbGetAll("
 ", [$projectId]);
 
 // Set Headers for CSV
-$filename = 'REALISASI_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd') . '.csv';
+$filename = 'REALISASI_' . $targetLabel . '_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $project['name']) . '_' . date('Ymd') . '.csv';
 header('Content-Type: text/csv; charset=utf-8');
 header('Content-Disposition: attachment; filename="' . $filename . '"');
 
@@ -81,7 +89,7 @@ $output = fopen('php://output', 'w');
 fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
 // File headers
-fputcsv($output, ['LAPORAN REALISASI ANGGARAN & FISIK'], ';');
+fputcsv($output, ['LAPORAN REALISASI ANGGARAN & FISIK (TARGET ' . $targetLabel . ')'], ';');
 fputcsv($output, [''], ';');
 fputcsv($output, ['NAMA KEGIATAN', ':', $project['activity_name'] ?? '-'], ';');
 fputcsv($output, ['PEKERJAAN', ':', $project['work_description'] ?? '-'], ';');
@@ -99,7 +107,7 @@ $csvHeaders = [
     'No', 
     'URAIAN PEKERJAAN', 
     'SAT', 
-    'RAP TARGET (Rp)', 
+    $targetLabel . ' TARGET (Rp)', 
     'REALISASI UPAH (Rp)', 
     'REALISASI MATERIAL (Rp)', 
     'REALISASI ALAT (Rp)', 
@@ -118,7 +126,7 @@ if ($showWeeklyColumns) {
 fputcsv($output, $csvHeaders, ';');
 
 // Totals variables
-$grandRapTotal = 0;
+$grandTargetTotal = 0;
 $grandActualUpah = 0;
 $grandActualMaterial = 0;
 $grandActualAlat = 0;
@@ -134,6 +142,7 @@ foreach ($categories as $cat) {
     // Subcategories
     $subcats = dbGetAll("
         SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
+               rs.ahsp_id,
                rap.volume as rap_volume, rap.unit_price as rap_unit_price,
                pa.ahsp_code
         FROM rab_subcategories rs
@@ -155,7 +164,7 @@ foreach ($categories as $cat) {
     }
     fputcsv($output, $catRow, ';');
     
-    $catRapTotal = 0;
+    $catTargetTotal = 0;
     $catActualUpah = 0;
     $catActualMaterial = 0;
     $catActualAlat = 0;
@@ -167,19 +176,41 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         $itemNum++;
         
-        $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
-        
-        // Use pre-loaded batch map instead of per-subcategory query
-        $ahspCode = $sub['ahsp_code'] ?? null;
-        $rapComponents = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-        
-        $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
-        if ($baseUnitPrice <= 0) {
-            $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
+        if ($isRabTarget) {
+            $volume = floatval($sub['rab_volume']);
+            $rabComponents = ($sub['ahsp_id'] && isset($rabAhspBreakdownMap[$sub['ahsp_id']])) 
+                ? $rabAhspBreakdownMap[$sub['ahsp_id']] 
+                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+            
+            $baseUnitPrice = $rabComponents['total'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rab_unit_price']) && floatval($sub['rab_unit_price']) > 0) 
+                    ? floatval($sub['rab_unit_price']) 
+                    : 0.0;
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
+        } else {
+            $volume = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) 
+                ? floatval($sub['rap_volume']) 
+                : floatval($sub['rab_volume']);
+            
+            $ahspCode = $sub['ahsp_code'] ?? null;
+            $rapComponents = $ahspCode 
+                ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) 
+                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+            
+            $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
+            if ($baseUnitPrice <= 0) {
+                $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) 
+                    ? floatval($sub['rap_unit_price']) 
+                    : floatval($sub['rab_unit_price']);
+            }
+            
+            $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
+            $subTargetTotal = $volume * $unitPriceWithOverhead;
         }
-        
-        $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
-        $subRapTotal = $volume * $unitPriceWithOverhead;
         
         // Use pre-loaded actual spending
         $subActualTotal = $batchActualSpending[$sub['id']] ?? 0.0;
@@ -202,11 +233,11 @@ foreach ($categories as $cat) {
             $subActualTotal -= $adjTotal;
         }
         
-        $subProgress = $subRapTotal > 0 ? ($subActualTotal / $subRapTotal) * 100 : 0;
-        $subSelisih = $subRapTotal - $subActualTotal;
+        $subProgress = $subTargetTotal > 0 ? ($subActualTotal / $subTargetTotal) * 100 : 0;
+        $subSelisih = $subTargetTotal - $subActualTotal;
         
         // Accumulate category totals
-        $catRapTotal += $subRapTotal;
+        $catTargetTotal += $subTargetTotal;
         $catActualUpah += $subActualUpah;
         $catActualMaterial += $subActualMaterial;
         $catActualAlat += $subActualAlat;
@@ -218,7 +249,7 @@ foreach ($categories as $cat) {
             $itemNum,
             $sub['name'],
             $sub['unit'],
-            number_format($subRapTotal, 2, ',', '.'),
+            number_format($subTargetTotal, 2, ',', '.'),
             number_format($subActualUpah, 2, ',', '.'),
             number_format($subActualMaterial, 2, ',', '.'),
             number_format($subActualAlat, 2, ',', '.'),
@@ -231,7 +262,7 @@ foreach ($categories as $cat) {
             foreach ($weeklyRanges as $week) {
                 $weekNum = $week['week_number'];
                 $weekRealization = $weeklyData[$sub['id']][$weekNum] ?? 0;
-                $weekBobot = $subRapTotal > 0 ? ($weekRealization / $subRapTotal) * 100 : 0;
+                $weekBobot = $subTargetTotal > 0 ? ($weekRealization / $subTargetTotal) * 100 : 0;
                 
                 $subcatRow[] = number_format($weekRealization, 2, ',', '.');
                 $subcatRow[] = number_format($weekBobot, 2, ',', '.') . '%';
@@ -251,7 +282,7 @@ foreach ($categories as $cat) {
         '',
         'Jumlah Total ' . $cat['code'],
         '',
-        number_format($catRapTotal, 2, ',', '.'),
+        number_format($catTargetTotal, 2, ',', '.'),
         number_format($catActualUpah, 2, ',', '.'),
         number_format($catActualMaterial, 2, ',', '.'),
         number_format($catActualAlat, 2, ',', '.'),
@@ -264,7 +295,7 @@ foreach ($categories as $cat) {
         foreach ($weeklyRanges as $week) {
             $weekNum = $week['week_number'];
             $weekTotal = $catWeeklyTotals[$weekNum] ?? 0;
-            $catWeekBobot = $catRapTotal > 0 ? ($weekTotal / $catRapTotal) * 100 : 0;
+            $catWeekBobot = $catTargetTotal > 0 ? ($weekTotal / $catTargetTotal) * 100 : 0;
             $catTotalRow[] = number_format($weekTotal, 2, ',', '.');
             $catTotalRow[] = $catWeekBobot > 0 ? number_format($catWeekBobot, 2, ',', '.') . '%' : '-';
             
@@ -279,7 +310,7 @@ foreach ($categories as $cat) {
     fputcsv($output, [''], ';'); // empty separator row
     
     // Accumulate grand totals
-    $grandRapTotal += $catRapTotal;
+    $grandTargetTotal += $catTargetTotal;
     $grandActualUpah += $catActualUpah;
     $grandActualMaterial += $catActualMaterial;
     $grandActualAlat += $catActualAlat;
@@ -288,12 +319,12 @@ foreach ($categories as $cat) {
 }
 
 // Grand Totals Row
-$grandProgress = $grandRapTotal > 0 ? ($grandActualTotal / $grandRapTotal) * 100 : 0;
+$grandProgress = $grandTargetTotal > 0 ? ($grandActualTotal / $grandTargetTotal) * 100 : 0;
 $grandTotalRow = [
     '',
     'JUMLAH TOTAL REALISASI',
     '',
-    number_format($grandRapTotal, 2, ',', '.'),
+    number_format($grandTargetTotal, 2, ',', '.'),
     number_format($grandActualUpah, 2, ',', '.'),
     number_format($grandActualMaterial, 2, ',', '.'),
     number_format($grandActualAlat, 2, ',', '.'),
@@ -306,7 +337,7 @@ if ($showWeeklyColumns) {
     foreach ($weeklyRanges as $week) {
         $weekNum = $week['week_number'];
         $weekGrand = $weeklyGrandTotals[$weekNum] ?? 0;
-        $grandWeekBobot = $grandRapTotal > 0 ? ($weekGrand / $grandRapTotal) * 100 : 0;
+        $grandWeekBobot = $grandTargetTotal > 0 ? ($weekGrand / $grandTargetTotal) * 100 : 0;
         $grandTotalRow[] = number_format($weekGrand, 2, ',', '.');
         $grandTotalRow[] = $grandWeekBobot > 0 ? number_format($grandWeekBobot, 2, ',', '.') . '%' : '-';
     }
