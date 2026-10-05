@@ -471,41 +471,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $projectId = intval($_POST['project_id'] ?? 0);
     $description = trim($_POST['description'] ?? '');
     $targetWeek = intval($_POST['target_week'] ?? 0);
-    $items = json_decode($_POST['items'] ?? '[]', true);
+    $directItems = json_decode($_POST['items'] ?? '[]', true);
+    $nonRabItems = json_decode($_POST['non_rab_items'] ?? '[]', true);
+
+    // Fallback if client passed single items array in old non_rab format
+    if (empty($directItems) && empty($nonRabItems) && isset($_POST['request_type']) && $_POST['request_type'] === 'non_rab') {
+        $nonRabItems = json_decode($_POST['items'] ?? '[]', true);
+    }
     
     if (empty($targetWeek)) {
         echo json_encode(['success' => false, 'message' => 'Minggu target wajib dipilih!']);
         exit;
     }
     
-    if (empty($items)) {
-        echo json_encode(['success' => false, 'message' => 'Minimal tambahkan satu item!']);
-        exit;
-    }
-    
-    try {
-        $pdo = getDB();
-        $pdo->beginTransaction();
-        
-        // Double-check lock status before saving
-        $projCheck = dbGetRow("SELECT request_locked FROM projects WHERE id = ?", [$projectId]);
-        if (!empty($projCheck['request_locked'])) {
-            echo json_encode(['success' => false, 'message' => 'Pengajuan dana untuk proyek ini sedang dikunci!']);
-            exit;
-        }
-        
-        // Generate request number
-        $requestNumber = generateRequestNumber($projectId);
-        
-        // Create request header with target_week set by requester
-        $requestId = dbInsert("
-            INSERT INTO requests (project_id, request_number, request_date, week_number, target_week, description, status, created_by)
-            VALUES (?, ?, CURDATE(), ?, ?, ?, 'pending', ?)
-        ", [$projectId, $requestNumber, $targetWeek, $targetWeek, $description, getCurrentUserId()]);
-        
-        // Add items
-        $totalAmount = 0;
-        foreach ($items as $item) {
+    // Process Direct Cost items
+    $validDirectItems = [];
+    $directTotal = 0;
+    if (is_array($directItems)) {
+        foreach ($directItems as $item) {
             $categoryId = intval($item['category_id'] ?? 0);
             $subcategoryId = intval($item['subcategory_id'] ?? 0);
             if ($subcategoryId && !$categoryId) {
@@ -523,35 +506,134 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $notes = trim($item['notes'] ?? '');
             $subcatDetails = trim($item['subcat_details'] ?? '');
             
-            // Validate subcat_details is valid JSON
             if ($subcatDetails && json_decode($subcatDetails) === null) {
                 $subcatDetails = '';
             }
             
-            if ($coefficient > 0 && $unitPrice > 0) {
-                $totalPrice = $unitPrice * $coefficient;
-                
-                dbInsert("
-                    INSERT INTO request_items 
-                    (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ", [
-                    $requestId, 
-                    $categoryId ?: null, 
-                    $subcategoryId ?: null,
-                    $subcatDetails ?: null,
-                    $itemCode ?: null, 
-                    $itemType ?: null,
-                    $itemName, 
-                    $unit, 
-                    $unitPrice,
-                    $coefficient, 
-                    $coefficient,
-                    $notes
-                ]);
-                
-                $totalAmount += $totalPrice;
+            if ($coefficient > 0 && $unitPrice > 0 && !empty($itemName)) {
+                $itemTotal = $unitPrice * $coefficient;
+                $directTotal += $itemTotal;
+                $validDirectItems[] = [
+                    'category_id' => $categoryId ?: null,
+                    'subcategory_id' => $subcategoryId ?: null,
+                    'subcat_details' => $subcatDetails ?: null,
+                    'item_code' => $itemCode ?: null,
+                    'item_type' => $itemType ?: null,
+                    'item_name' => $itemName,
+                    'unit' => $unit,
+                    'unit_price' => $unitPrice,
+                    'quantity' => $coefficient,
+                    'coefficient' => $coefficient,
+                    'total_price' => $itemTotal,
+                    'notes' => $notes
+                ];
             }
+        }
+    }
+
+    // Process Non-RAB items
+    $validNonRabItems = [];
+    $nonRabTotal = 0;
+    if (is_array($nonRabItems)) {
+        foreach ($nonRabItems as $item) {
+            $itemName = trim($item['item_name'] ?? '');
+            $unit = trim($item['unit'] ?? 'ls');
+            $quantity = floatval($item['quantity'] ?? 1);
+            $unitPrice = floatval($item['unit_price'] ?? 0);
+            $notes = trim($item['notes'] ?? '');
+
+            if ($quantity > 0 && $unitPrice > 0 && !empty($itemName)) {
+                $itemTotal = $quantity * $unitPrice;
+                $nonRabTotal += $itemTotal;
+                $validNonRabItems[] = [
+                    'item_name' => $itemName,
+                    'unit' => $unit,
+                    'quantity' => $quantity,
+                    'coefficient' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'total_price' => $itemTotal,
+                    'notes' => $notes
+                ];
+            }
+        }
+    }
+
+    if (empty($validDirectItems) && empty($validNonRabItems)) {
+        echo json_encode(['success' => false, 'message' => 'Minimal tambahkan satu item (RAB atau Non-RAB)!']);
+        exit;
+    }
+    
+    try {
+        $pdo = getDB();
+        $pdo->beginTransaction();
+        
+        // Double-check lock status before saving
+        $projCheck = dbGetRow("SELECT request_locked FROM projects WHERE id = ?", [$projectId]);
+        if (!empty($projCheck['request_locked'])) {
+            echo json_encode(['success' => false, 'message' => 'Pengajuan dana untuk proyek ini sedang dikunci!']);
+            exit;
+        }
+        
+        // Generate request number
+        $requestNumber = generateRequestNumber($projectId);
+
+        // Determine request_type
+        if (!empty($validDirectItems) && !empty($validNonRabItems)) {
+            $requestType = 'mixed';
+        } elseif (!empty($validNonRabItems)) {
+            $requestType = 'non_rab';
+        } else {
+            $requestType = 'rab';
+        }
+
+        $requestDate = !empty($_POST['request_date']) ? trim($_POST['request_date']) : date('Y-m-d');
+        $totalAmount = $directTotal + $nonRabTotal;
+
+        // Insert request header
+        $requestId = dbInsert("
+            INSERT INTO requests (project_id, request_type, non_rab_category, request_number, request_date, week_number, target_week, description, status, total_amount, created_by)
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        ", [$projectId, $requestType, $requestNumber, $requestDate, $targetWeek, $targetWeek, $description, $totalAmount, getCurrentUserId()]);
+
+        // Insert Direct Cost items
+        foreach ($validDirectItems as $vi) {
+            dbInsert("
+                INSERT INTO request_items 
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [
+                $requestId, 
+                $vi['category_id'], 
+                $vi['subcategory_id'],
+                $vi['subcat_details'],
+                $vi['item_code'], 
+                $vi['item_type'],
+                $vi['item_name'], 
+                $vi['unit'], 
+                $vi['unit_price'],
+                $vi['quantity'], 
+                $vi['coefficient'],
+                $vi['total_price'],
+                $vi['notes']
+            ]);
+        }
+
+        // Insert Non-RAB items (subcategory_id = NULL, item_type = 'non_rab')
+        foreach ($validNonRabItems as $vi) {
+            dbInsert("
+                INSERT INTO request_items 
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
+                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', ?, ?, ?, ?, ?, ?, ?)
+            ", [
+                $requestId,
+                $vi['item_name'],
+                $vi['unit'],
+                $vi['unit_price'],
+                $vi['quantity'],
+                $vi['coefficient'],
+                $vi['total_price'],
+                $vi['notes']
+            ]);
         }
         
         // Ensure upload directory exists
@@ -787,7 +869,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <!-- Header Card -->
             <div class="card mb-3">
                 <div class="card-header bg-primary text-white py-2">
-                    <h6 class="mb-0"><i class="mdi mdi-information-outline"></i> Informasi Pengajuan</h6>
+                    <h6 class="mb-0"><i class="mdi mdi-information-outline"></i> Informasi Pengajuan Dana</h6>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -798,7 +880,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </div>
                         <div class="col-md-3 mb-3">
                             <label class="form-label">Minggu Target <span class="text-danger">*</span></label>
-                            <select class="form-select" name="target_week" id="targetWeek" required>
+                            <select class="form-select target-week-select" name="target_week" id="targetWeek" required>
                                 <option value="">-- Pilih Minggu --</option>
                                 <?php 
                                 $selectedWeek = $resubmitReq ? ($resubmitReq['target_week'] ?? $resubmitReq['week_number']) : '';
@@ -842,6 +924,23 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <option value="material">Material</option>
                                 <option value="alat">Alat</option>
                             </select>
+
+                            <!-- Opsi Biaya Non-RAB di Bagian Bawah Jenis Item -->
+                            <div class="card mt-3 border-warning shadow-sm" id="nonRabOptionCard">
+                                <div class="card-body p-3 bg-light rounded">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-0 fw-bold text-dark">
+                                                <i class="mdi mdi-cash-multiple text-warning me-1"></i> Biaya Non-RAB
+                                            </h6>
+                                            <small class="text-muted font-size-11">Biaya operasional / umum / lain-lain di luar RAB</small>
+                                        </div>
+                                        <button type="button" class="btn btn-warning btn-sm fw-semibold shadow-sm text-nowrap" id="btnAddNonRabItemBtn" onclick="addNonRabItemRowAndFocus()">
+                                            <i class="mdi mdi-plus-circle-outline me-1"></i> Tambah Non-RAB
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="col-md-8 mb-3">
                             <label class="form-label">Pilih Item <span class="text-danger">*</span></label>
@@ -861,10 +960,10 @@ require_once __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
             
-            <!-- Items Table Card -->
+            <!-- Items Table Card: Direct Cost (RAB) -->
             <div class="card mb-3">
                 <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0"><i class="mdi mdi-cart"></i> Detail Item Pengajuan</h6>
+                    <h6 class="mb-0"><i class="mdi mdi-cart"></i> Detail Item Pengajuan (Direct Cost / RAB)</h6>
                     <span id="itemCount" class="badge bg-light text-dark">0 item</span>
                 </div>
                 <div class="card-body p-0">
@@ -889,18 +988,89 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <tr id="emptyRow">
                                     <td colspan="11" class="text-center text-muted py-4">
                                         <i class="mdi mdi-cart-outline" style="font-size: 2rem;"></i>
-                                        <p class="mb-0 mt-2">Belum ada item. Pilih kategori & sub-kategori lalu klik "Tambah Item".</p>
+                                        <p class="mb-0 mt-2">Belum ada item RAB. Pilih pekerjaan & jenis item lalu klik "Tambah Semua Terpilih".</p>
                                     </td>
                                 </tr>
                             </tbody>
                             <tfoot class="table-light">
                                 <tr>
-                                    <td colspan="6" class="text-end"><strong>GRAND TOTAL</strong></td>
+                                    <td colspan="6" class="text-end"><strong>SUBTOTAL RAB</strong></td>
                                     <td class="text-end"><strong id="grandTotalDisplay">Rp 0</strong></td>
                                     <td colspan="4"></td>
                                 </tr>
                             </tfoot>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Non-RAB Dynamic Items Table Card -->
+            <div class="card mb-3 shadow-sm border-warning border-opacity-50" id="nonRabItemsCard">
+                <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-dark"><i class="mdi mdi-cash-multiple text-warning me-1"></i> Detail Item Pengajuan (Biaya Non-RAB / Lain-Lain)</h6>
+                    <div class="d-flex align-items-center gap-2">
+                        <span id="nonRabItemCount" class="badge bg-dark text-white">0 item</span>
+                        <button type="button" class="btn btn-warning btn-sm fw-semibold py-1 px-2" onclick="addNonRabItemRowAndFocus()">
+                            <i class="mdi mdi-plus-circle-outline me-1"></i> Tambah Baris
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-sm mb-0 align-middle" id="nonRabItemsTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th width="40" class="text-center">#</th>
+                                    <th>Nama Pengeluaran / Kebutuhan <span class="text-danger">*</span></th>
+                                    <th width="110" class="text-center">Kuantitas <span class="text-danger">*</span></th>
+                                    <th width="100" class="text-center">Satuan</th>
+                                    <th width="180" class="text-end">Harga Satuan (Rp) <span class="text-danger">*</span></th>
+                                    <th width="180" class="text-end">Total Harga (Rp)</th>
+                                    <th>Catatan / Keterangan</th>
+                                    <th width="50" class="text-center">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="nonRabItemsBody">
+                                <tr id="emptyNonRabRow">
+                                    <td colspan="8" class="text-center text-muted py-3">
+                                        <i class="mdi mdi-receipt-text-outline" style="font-size: 1.5rem;"></i>
+                                        <p class="mb-0 mt-1 small">Belum ada item Biaya Non-RAB. Klik tombol <strong>"Tambah Non-RAB"</strong> di atas jika ingin mengajukan biaya non-RAB bersamaan.</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                            <tfoot class="table-light">
+                                <tr>
+                                    <td colspan="5" class="text-end fw-bold font-size-13">SUBTOTAL BIAYA NON-RAB</td>
+                                    <td class="text-end fw-bold font-size-13 text-primary" id="nonRabGrandTotalDisplay">Rp 0</td>
+                                    <td colspan="2"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Combined Grand Total Summary -->
+            <div class="card mb-3 bg-white border-primary border-opacity-50 shadow-sm">
+                <div class="card-body py-3 px-4">
+                    <div class="row align-items-center">
+                        <div class="col-md-6 mb-2 mb-md-0">
+                            <div class="d-flex align-items-center gap-3">
+                                <div>
+                                    <small class="text-muted d-block font-size-12">Subtotal Direct Cost (RAB):</small>
+                                    <strong id="rabSubtotalSummary" class="text-dark fs-6">Rp 0</strong>
+                                </div>
+                                <div class="vr" style="height: 30px;"></div>
+                                <div>
+                                    <small class="text-muted d-block font-size-12">Subtotal Biaya Non-RAB:</small>
+                                    <strong id="nonRabSubtotalSummary" class="text-warning fs-6">Rp 0</strong>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-md-end">
+                            <small class="text-muted d-block font-size-12">TOTAL PENGAJUAN (RAB + NON-RAB):</small>
+                            <h4 class="mb-0 text-primary fw-bold" id="combinedGrandTotalDisplay">Rp 0</h4>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1951,6 +2121,10 @@ $(document).ready(function() {
         
         $('#grandTotalDisplay').text(formatRupiah(grandTotal));
         $('#grandTotalBig').text(formatRupiah(grandTotal));
+        $('#rabSubtotalSummary').text(formatRupiah(grandTotal));
+        if (typeof updateCombinedGrandTotal === 'function') {
+            updateCombinedGrandTotal();
+        }
     }
     
     // =====================================
@@ -2025,16 +2199,161 @@ $(document).ready(function() {
         return warnings;
     }
     
-    // Actually submit the form data via AJAX
-    function doSubmitRequest(items) {
+    // =====================================
+    // NON-RAB / BIAYA LAIN-LAIN HANDLERS
+    // =====================================
+    let nonRabItemIndex = 0;
+
+    window.addNonRabItemRowAndFocus = function(item = null) {
+        $('#emptyNonRabRow').hide();
+        addNonRabItemRow(item);
+        if (!item) {
+            $('html, body').animate({
+                scrollTop: $('#nonRabItemsCard').offset().top - 80
+            }, 300);
+        }
+    };
+
+    window.addNonRabItemRow = function(item = null) {
+        $('#emptyNonRabRow').hide();
+        nonRabItemIndex++;
+        const idx = nonRabItemIndex;
+        const name = item ? item.item_name : '';
+        const qty = item ? (item.quantity !== undefined && item.quantity !== null && item.quantity !== '' ? item.quantity : (item.coefficient !== undefined ? item.coefficient : 1)) : 1;
+        const unit = item ? item.unit : 'ls';
+        const price = item ? item.unit_price : '';
+        const notes = item ? item.notes : '';
+
+        const html = `
+            <tr id="nonRabRow_${idx}" class="non-rab-row">
+                <td class="text-center text-muted fw-bold non-rab-row-num"></td>
+                <td>
+                    <input type="text" class="form-control form-control-sm non-rab-item-name" 
+                           placeholder="Nama pengeluaran/kebutuhan..." value="${escapeHtml(name)}" required>
+                </td>
+                <td>
+                    <input type="number" step="0.0001" min="0.0001" class="form-control form-control-sm text-center non-rab-item-qty" 
+                           value="${qty}" oninput="calcNonRabRow(${idx})" required>
+                </td>
+                <td>
+                    <input type="text" class="form-control form-control-sm text-center non-rab-item-unit" 
+                           value="${escapeHtml(unit)}" placeholder="ls">
+                </td>
+                <td>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Rp</span>
+                        <input type="text" class="form-control form-control-sm text-end non-rab-item-price" 
+                               value="${price ? formatNumberJs(price) : ''}" placeholder="0" 
+                               oninput="formatNonRabPriceInput(this); calcNonRabRow(${idx})" required>
+                    </div>
+                </td>
+                <td class="text-end fw-semibold font-size-13 non-rab-row-total">Rp 0</td>
+                <td>
+                    <input type="text" class="form-control form-control-sm non-rab-item-notes" 
+                           value="${escapeHtml(notes)}" placeholder="Catatan tambahan...">
+                </td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="removeNonRabRow(${idx})" title="Hapus baris">
+                        <i class="mdi mdi-trash-can-outline font-size-14"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+        $('#nonRabItemsBody').append(html);
+        reindexNonRabRows();
+        calcNonRabRow(idx);
+        if (!item) {
+            $(`#nonRabRow_${idx} .non-rab-item-name`).focus();
+        }
+    };
+
+    window.removeNonRabRow = function(idx) {
+        $(`#nonRabRow_${idx}`).remove();
+        reindexNonRabRows();
+        calcNonRabGrandTotal();
+        if ($('#nonRabItemsBody tr.non-rab-row').length === 0) {
+            $('#emptyNonRabRow').show();
+        }
+    };
+
+    function reindexNonRabRows() {
+        const rows = $('#nonRabItemsBody tr.non-rab-row');
+        rows.each(function(i) {
+            $(this).find('.non-rab-row-num').text(i + 1);
+        });
+        $('#nonRabItemCount').text(rows.length + ' item');
+    }
+
+    window.formatNonRabPriceInput = function(elem) {
+        let val = elem.value.replace(/[^0-9]/g, '');
+        elem.value = val ? parseInt(val, 10).toLocaleString('id-ID') : '';
+    };
+
+    function parseFormattedPrice(str) {
+        if (!str) return 0;
+        return parseFloat(String(str).replace(/\./g, '').replace(/,/g, '.')) || 0;
+    }
+
+    function formatRupiahJs(num) {
+        return 'Rp ' + (parseFloat(num) || 0).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    function formatNumberJs(num) {
+        return (parseFloat(num) || 0).toLocaleString('id-ID');
+    }
+
+    window.calcNonRabRow = function(idx) {
+        const row = $(`#nonRabRow_${idx}`);
+        if (!row.length) return;
+        const qty = parseFloat(row.find('.non-rab-item-qty').val()) || 0;
+        const price = parseFormattedPrice(row.find('.non-rab-item-price').val());
+        const total = qty * price;
+        row.find('.non-rab-row-total').text(formatRupiahJs(total));
+        calcNonRabGrandTotal();
+    };
+
+    function calcNonRabGrandTotal() {
+        let grandTotal = 0;
+        $('#nonRabItemsBody tr.non-rab-row').each(function() {
+            const qty = parseFloat($(this).find('.non-rab-item-qty').val()) || 0;
+            const price = parseFormattedPrice($(this).find('.non-rab-item-price').val());
+            grandTotal += (qty * price);
+        });
+
+        $('#nonRabGrandTotalDisplay').text(formatRupiahJs(grandTotal));
+        $('#nonRabSubtotalSummary').text(formatRupiahJs(grandTotal));
+        updateCombinedGrandTotal();
+    }
+
+    window.updateCombinedGrandTotal = function() {
+        let rabTotal = 0;
+        $('#itemsBody tr.item-row').each(function() {
+            const rowTotal = parseNumber($(this).find('.total-price').val());
+            rabTotal += rowTotal;
+        });
+        let nonRabTotal = 0;
+        $('#nonRabItemsBody tr.non-rab-row').each(function() {
+            const qty = parseFloat($(this).find('.non-rab-item-qty').val()) || 0;
+            const price = parseFormattedPrice($(this).find('.non-rab-item-price').val());
+            nonRabTotal += (qty * price);
+        });
+
+        $('#rabSubtotalSummary').text(formatRupiahJs(rabTotal));
+        $('#nonRabSubtotalSummary').text(formatRupiahJs(nonRabTotal));
+        $('#combinedGrandTotalDisplay').text(formatRupiahJs(rabTotal + nonRabTotal));
+    };
+
+    // Submit request via AJAX
+    function doSubmitRequest(directItems, nonRabItems) {
         $('#submitBtn').prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> Menyimpan...');
         
         const formData = new FormData();
         formData.append('action', 'save_request');
         formData.append('project_id', projectId);
-        formData.append('description', $('#description').val());
         formData.append('target_week', $('#targetWeek').val());
-        formData.append('items', JSON.stringify(items));
+        formData.append('description', $('#description').val());
+        formData.append('items', JSON.stringify(directItems));
+        formData.append('non_rab_items', JSON.stringify(nonRabItems));
         
         if (stagedFiles && stagedFiles.length > 0) {
             const existingAtts = [];
@@ -2078,64 +2397,101 @@ $(document).ready(function() {
             }
         });
     }
+
+    function collectNonRabItems() {
+        const nonRabItems = [];
+        let hasError = false;
+
+        $('#nonRabItemsBody tr.non-rab-row').each(function() {
+            const row = $(this);
+            const name = row.find('.non-rab-item-name').val().trim();
+            const qty = parseFloat(row.find('.non-rab-item-qty').val()) || 0;
+            const unit = row.find('.non-rab-item-unit').val().trim() || 'ls';
+            const price = parseFormattedPrice(row.find('.non-rab-item-price').val());
+            const notes = row.find('.non-rab-item-notes').val().trim();
+
+            if (!name || qty <= 0 || price <= 0) {
+                hasError = true;
+                row.addClass('table-danger');
+            } else {
+                row.removeClass('table-danger');
+                nonRabItems.push({
+                    item_name: name,
+                    quantity: qty,
+                    unit: unit,
+                    unit_price: price,
+                    notes: notes
+                });
+            }
+        });
+
+        return { nonRabItems, hasError };
+    }
     
     // Confirm submit button in warning modal
     $('#confirmSubmitBtn').click(function() {
         $('#submitWarningModal').modal('hide');
-        const { items } = collectItemsData();
-        doSubmitRequest(items);
+        const { items: directItems } = collectItemsData();
+        const { nonRabItems } = collectNonRabItems();
+        doSubmitRequest(directItems, nonRabItems);
     });
     
     $('#requestForm').on('submit', function(e) {
         e.preventDefault();
-        
-        const itemRows = $('#itemsBody tr.item-row');
-        if (itemRows.length === 0) {
-            showToast('Tambahkan minimal satu item!', 'error');
-            return;
-        }
-        
+
         // Validate target week
         if (!$('#targetWeek').val()) {
             showToast('Minggu target wajib dipilih!', 'error');
             $('#targetWeek').focus();
             return;
         }
-        
-        const { items, hasError } = collectItemsData();
-        
-        if (hasError) {
-            showToast('Lengkapi semua data item yang ditandai merah!', 'error');
+
+        // Collect direct cost items
+        const { items: directItems, hasError: directHasError } = collectItemsData();
+        if (directHasError) {
+            showToast('Lengkapi semua data item RAB yang ditandai merah!', 'error');
             return;
         }
-        
-        // Check for warnings
-        const warnings = getItemWarnings();
-        if (warnings.length > 0) {
-            // Show warning modal
-            let warningHtml = '<table class="table table-sm table-bordered">';
-            warningHtml += '<thead class="table-warning"><tr><th>Item</th><th>Peringatan</th></tr></thead><tbody>';
-            warnings.forEach(function(w) {
-                warningHtml += '<tr>';
-                warningHtml += '<td>' + escapeHtml(w.name) + '</td>';
-                warningHtml += '<td>';
-                w.issues.forEach(function(issue) {
-                    if (issue === 'LEBIH MAHAL') {
-                        warningHtml += '<span class="badge bg-danger me-1">LEBIH MAHAL</span>';
-                    } else {
-                        warningHtml += '<span class="badge bg-danger me-1">⚠️ OVER QTY</span>';
-                    }
+
+        // Collect non-RAB items
+        const { nonRabItems, hasError: nonRabHasError } = collectNonRabItems();
+        if (nonRabHasError) {
+            showToast('Lengkapi data pengeluaran Biaya Non-RAB yang ditandai merah!', 'error');
+            return;
+        }
+
+        if (directItems.length === 0 && nonRabItems.length === 0) {
+            showToast('Minimal tambahkan satu item pengajuan (RAB atau Non-RAB)!', 'error');
+            return;
+        }
+
+        // Check for warnings on direct items
+        if (directItems.length > 0) {
+            const warnings = getItemWarnings();
+            if (warnings.length > 0) {
+                let warningHtml = '<table class="table table-sm table-bordered">';
+                warningHtml += '<thead class="table-warning"><tr><th>Item</th><th>Peringatan</th></tr></thead><tbody>';
+                warnings.forEach(function(w) {
+                    warningHtml += '<tr>';
+                    warningHtml += '<td>' + escapeHtml(w.name) + '</td>';
+                    warningHtml += '<td>';
+                    w.issues.forEach(function(issue) {
+                        if (issue === 'LEBIH MAHAL') {
+                            warningHtml += '<span class="badge bg-danger me-1">LEBIH MAHAL</span>';
+                        } else {
+                            warningHtml += '<span class="badge bg-danger me-1">⚠️ OVER QTY</span>';
+                        }
+                    });
+                    warningHtml += '</td></tr>';
                 });
-                warningHtml += '</td></tr>';
-            });
-            warningHtml += '</tbody></table>';
-            $('#warningItemsList').html(warningHtml);
-            $('#submitWarningModal').modal('show');
-            return;
+                warningHtml += '</tbody></table>';
+                $('#warningItemsList').html(warningHtml);
+                $('#submitWarningModal').modal('show');
+                return;
+            }
         }
         
-        // No warnings, submit directly
-        doSubmitRequest(items);
+        doSubmitRequest(directItems, nonRabItems);
     });
     
     // =====================================
@@ -2461,7 +2817,11 @@ $(document).ready(function() {
     // Load resubmitted items into table if any
     if (resubmitItems && resubmitItems.length > 0) {
         resubmitItems.forEach(function(item) {
-            addItemRow(item);
+            if (item.subcategory_id) {
+                addItemRow(item);
+            } else {
+                addNonRabItemRow(item);
+            }
         });
     }
 

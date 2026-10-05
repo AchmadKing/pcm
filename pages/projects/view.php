@@ -96,6 +96,69 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'weekly_detail') {
     exit;
 }
 
+// AJAX Handler: Non-RAB Detail Modal - returns requests & items for Non-RAB category
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'non_rab_detail') {
+    require_once __DIR__ . '/../../config/database.php';
+    require_once __DIR__ . '/../../includes/functions.php';
+    
+    header('Content-Type: application/json');
+    $pId = intval($_GET['project_id'] ?? $_GET['id'] ?? 0);
+    $category = trim($_GET['category'] ?? '');
+    
+    if (!$pId) {
+        echo json_encode(['error' => 'Parameter tidak lengkap']);
+        exit;
+    }
+    
+    $where = "req.project_id = ? AND req.request_type = 'non_rab' AND req.status = 'approved'";
+    $params = [$pId];
+    if ($category) {
+        $where .= " AND req.non_rab_category = ?";
+        $params[] = $category;
+    }
+    
+    $requests = dbGetAll("
+        SELECT req.id, req.request_number, req.request_date, req.non_rab_category, req.description, req.status,
+               req.target_week, req.week_number,
+               req.admin_notes, req.approved_at, req.created_at,
+               req.pm_notes, req.pm_approved_at,
+               u.full_name as created_by_name,
+               ua.full_name as approved_by_name,
+               upm.full_name as pm_approved_by_name
+        FROM requests req
+        LEFT JOIN users u ON req.created_by = u.id
+        LEFT JOIN users ua ON req.approved_by = ua.id
+        LEFT JOIN users upm ON req.pm_approved_by = upm.id
+        WHERE $where
+        ORDER BY req.created_at DESC
+    ", $params);
+    
+    $categories = getNonRabCategories();
+    
+    foreach ($requests as &$req) {
+        $req['category_name'] = $categories[$req['non_rab_category']] ?? $req['non_rab_category'];
+        $req['items'] = dbGetAll("
+            SELECT reqi.*
+            FROM request_items reqi
+            WHERE reqi.request_id = ?
+            ORDER BY reqi.id ASC
+        ", [$req['id']]);
+        
+        $reqTotal = 0;
+        foreach ($req['items'] as &$it) {
+            $itTotal = floatval($it['quantity']) * floatval($it['unit_price']);
+            $it['subtotal'] = $itTotal;
+            $reqTotal += $itTotal;
+        }
+        unset($it);
+        $req['total_amount'] = $reqTotal;
+    }
+    unset($req);
+    
+    echo json_encode(['data' => $requests]);
+    exit;
+}
+
 // AJAX Handler - Must be FIRST before any includes to prevent output
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_item_ajax') {
     // Only load what we need for AJAX
@@ -1022,6 +1085,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit;
     }
 }
+
+// Handle update non-rab budgets (Admin only)
 
 
 // Handle upload project images

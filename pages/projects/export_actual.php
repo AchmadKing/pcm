@@ -318,11 +318,102 @@ foreach ($categories as $cat) {
     $grandSelisih += $catSelisih;
 }
 
+// Automatically append "Lain-Lain" category at the bottom if there are approved Non-RAB transactions
+$nonRabTx = getProjectNonRabTransactions($projectId);
+if (!empty($nonRabTx)) {
+    $lastCatCode = !empty($categories) ? trim(end($categories)['code']) : '';
+    if (preg_match('/^[A-Z]$/i', $lastCatCode)) {
+        $nonRabCatCode = chr(ord(strtoupper($lastCatCode)) + 1);
+    } elseif (is_numeric($lastCatCode)) {
+        $nonRabCatCode = (string)(intval($lastCatCode) + 1);
+    } else {
+        $nonRabCatCode = 'L';
+    }
+
+    fputcsv($output, ['', $nonRabCatCode . '. LAIN-LAIN', '', '', '', '', '', '', '', ''], ';');
+
+    $nrItemNum = 0;
+    $nrCatTotal = 0;
+    $nrCatWeeklyTotals = [];
+
+    foreach ($nonRabTx as $tx) {
+        $nrItemNum++;
+        $txAmount = floatval($tx['total_amount'] ?? $tx['total_price'] ?? 0);
+        $txWeek = intval($tx['target_week'] ?: ($tx['week_number'] ?: 1));
+
+        $subcatRow = [
+            $nonRabCatCode . '.' . $nrItemNum,
+            $tx['item_name'] . (!empty($tx['notes']) ? ' (' . $tx['notes'] . ')' : ''),
+            $tx['unit'] ?: 'ls',
+            '0,00',
+            '0,00',
+            '0,00',
+            '0,00',
+            number_format($txAmount, 2, ',', '.'),
+            number_format(-$txAmount, 2, ',', '.'),
+            '-'
+        ];
+
+        if ($showWeeklyColumns) {
+            foreach ($weeklyRanges as $week) {
+                $weekNum = $week['week_number'];
+                $isTargetWeek = ($weekNum === $txWeek);
+                $wAmount = $isTargetWeek ? $txAmount : 0;
+                $subcatRow[] = number_format($wAmount, 2, ',', '.');
+                $subcatRow[] = '-';
+
+                if (!isset($nrCatWeeklyTotals[$weekNum])) {
+                    $nrCatWeeklyTotals[$weekNum] = 0;
+                }
+                if ($isTargetWeek) {
+                    $nrCatWeeklyTotals[$weekNum] += $txAmount;
+                }
+            }
+        }
+
+        fputcsv($output, $subcatRow, ';');
+        $nrCatTotal += $txAmount;
+    }
+
+    $catTotalRow = [
+        '',
+        'Jumlah Total ' . $nonRabCatCode,
+        '',
+        '0,00',
+        '0,00',
+        '0,00',
+        '0,00',
+        number_format($nrCatTotal, 2, ',', '.'),
+        number_format(-$nrCatTotal, 2, ',', '.'),
+        '-'
+    ];
+
+    if ($showWeeklyColumns) {
+        foreach ($weeklyRanges as $week) {
+            $weekNum = $week['week_number'];
+            $wTotal = $nrCatWeeklyTotals[$weekNum] ?? 0;
+            $catTotalRow[] = number_format($wTotal, 2, ',', '.');
+            $catTotalRow[] = '-';
+
+            if (!isset($weeklyGrandTotals[$weekNum])) {
+                $weeklyGrandTotals[$weekNum] = 0;
+            }
+            $weeklyGrandTotals[$weekNum] += $wTotal;
+        }
+    }
+
+    fputcsv($output, $catTotalRow, ';');
+    fputcsv($output, [''], ';');
+
+    $grandActualTotal += $nrCatTotal;
+    $grandSelisih -= $nrCatTotal;
+}
+
 // Grand Totals Row
 $grandProgress = $grandTargetTotal > 0 ? ($grandActualTotal / $grandTargetTotal) * 100 : 0;
 $grandTotalRow = [
     '',
-    'JUMLAH TOTAL REALISASI',
+    'JUMLAH TOTAL (' . $targetLabel . ')',
     '',
     number_format($grandTargetTotal, 2, ',', '.'),
     number_format($grandActualUpah, 2, ',', '.'),
@@ -344,6 +435,18 @@ if ($showWeeklyColumns) {
 }
 
 fputcsv($output, $grandTotalRow, ';');
+
+// PPN & Rounding
+$ppnPct = floatval($project['ppn_percentage'] ?? 11);
+$ppnTarget = $grandTargetTotal * ($ppnPct / 100);
+$ppnActual = $grandActualTotal * ($ppnPct / 100);
+$totalTargetWithPpn = $grandTargetTotal + $ppnTarget;
+$totalActualWithPpn = $grandActualTotal + $ppnActual;
+$totalTargetRounded = ceil($totalTargetWithPpn / 10) * 10;
+$totalActualRounded = ceil($totalActualWithPpn / 10) * 10;
+
+fputcsv($output, ['', 'PPN ' . number_format($ppnPct, 0) . '%', '', number_format($ppnTarget, 2, ',', '.'), '', '', '', number_format($ppnActual, 2, ',', '.'), number_format($ppnTarget - $ppnActual, 2, ',', '.'), ''], ';');
+fputcsv($output, ['', 'JUMLAH TOTAL DIBULATKAN', '', number_format($totalTargetRounded, 2, ',', '.'), '', '', '', number_format($totalActualRounded, 2, ',', '.'), number_format($totalTargetRounded - $totalActualRounded, 2, ',', '.'), ''], ';');
 
 fclose($output);
 exit;

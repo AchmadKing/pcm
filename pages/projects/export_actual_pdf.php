@@ -233,6 +233,97 @@ foreach ($categories as $cat) {
         'weekly_totals' => $catWeeklyTotals
     ];
 }
+
+// Automatically append "Lain-Lain" category at the bottom if there are approved Non-RAB transactions
+$nonRabTx = getProjectNonRabTransactions($projectId);
+if (!empty($nonRabTx)) {
+    $lastCatCode = !empty($categories) ? trim(end($categories)['code']) : '';
+    if (preg_match('/^[A-Z]$/i', $lastCatCode)) {
+        $nonRabCatCode = chr(ord(strtoupper($lastCatCode)) + 1);
+    } elseif (is_numeric($lastCatCode)) {
+        $nonRabCatCode = (string)(intval($lastCatCode) + 1);
+    } else {
+        $nonRabCatCode = 'L';
+    }
+
+    $nonRabCatName = 'LAIN-LAIN';
+    $nonRabCatId = 'non_rab';
+    $nrSubcats = [];
+    $nrCatTotal = 0;
+    $nrWeeklyTotals = [];
+
+    $itemNo = 1;
+    foreach ($nonRabTx as $tx) {
+        $txAmount = floatval($tx['total_amount'] ?? $tx['total_price'] ?? 0);
+        $txWeek = intval($tx['target_week'] ?: ($tx['week_number'] ?: 1));
+
+        $txWeekly = [];
+        if ($showWeeklyColumns) {
+            foreach ($weeklyRanges as $week) {
+                $wNum = $week['week_number'];
+                $isTargetWeek = ($wNum === $txWeek);
+                $txWeekly[$wNum] = $isTargetWeek ? $txAmount : 0;
+                if (!isset($nrWeeklyTotals[$wNum])) {
+                    $nrWeeklyTotals[$wNum] = 0;
+                }
+                if ($isTargetWeek) {
+                    $nrWeeklyTotals[$wNum] += $txAmount;
+                }
+            }
+        }
+
+        $nrSubcats[] = [
+            'id' => 'nr_' . ($tx['item_id'] ?? $itemNo),
+            'code' => $nonRabCatCode . '.' . $itemNo,
+            'name' => $tx['item_name'] . (!empty($tx['notes']) ? ' (' . $tx['notes'] . ')' : ''),
+            'unit' => $tx['unit'] ?: 'ls',
+            'display_target_total' => 0.0,
+            'display_rap_total' => 0.0,
+            'display_actual_upah' => 0.0,
+            'display_actual_material' => 0.0,
+            'display_actual_alat' => 0.0,
+            'display_actual_total' => $txAmount,
+            'display_selisih' => -$txAmount,
+            'display_progress' => 0.0,
+            'weekly' => $txWeekly
+        ];
+
+        $nrCatTotal += $txAmount;
+        $itemNo++;
+    }
+
+    $actualData[$nonRabCatId] = [
+        'category' => [
+            'id' => $nonRabCatId,
+            'code' => $nonRabCatCode,
+            'name' => $nonRabCatName,
+            'sort_order' => 9999
+        ],
+        'subcategories' => $nrSubcats,
+        'total_target' => 0.0,
+        'total_rap' => 0.0,
+        'total_upah' => 0.0,
+        'total_material' => 0.0,
+        'total_alat' => 0.0,
+        'total_actual' => $nrCatTotal,
+        'total_selisih' => -$nrCatTotal,
+        'weekly_totals' => $nrWeeklyTotals
+    ];
+
+    $grandActualTotal += $nrCatTotal;
+    $grandSelisih -= $nrCatTotal;
+
+    if ($showWeeklyColumns) {
+        foreach ($weeklyRanges as $week) {
+            $wNum = $week['week_number'];
+            $wTotal = $nrWeeklyTotals[$weekNum] ?? 0;
+            if (!isset($weeklyGrandTotals[$weekNum])) {
+                $weeklyGrandTotals[$weekNum] = 0;
+            }
+            $weeklyGrandTotals[$weekNum] += $wTotal;
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -525,9 +616,16 @@ foreach ($categories as $cat) {
             <!-- Grand Total -->
             <?php 
             $grandProgress = $grandRapTotal > 0 ? ($grandActualTotal / $grandRapTotal) * 100 : 0;
+            $ppnPct = floatval($project['ppn_percentage'] ?? 11);
+            $ppnTarget = $grandRapTotal * ($ppnPct / 100);
+            $ppnActual = $grandActualTotal * ($ppnPct / 100);
+            $totalTargetWithPpn = $grandRapTotal + $ppnTarget;
+            $totalActualWithPpn = $grandActualTotal + $ppnActual;
+            $totalTargetRounded = ceil($totalTargetWithPpn / 10) * 10;
+            $totalActualRounded = ceil($totalActualWithPpn / 10) * 10;
             ?>
             <tr class="grand-total">
-                <td colspan="3" class="text-end">JUMLAH TOTAL REALISASI</td>
+                <td colspan="3" class="text-end">JUMLAH TOTAL (<?= $targetLabel ?>)</td>
                 <td class="text-end"><?= number_format($grandRapTotal, 2, ',', '.') ?></td>
                 <td class="text-end"><?= number_format($grandActualUpah, 2, ',', '.') ?></td>
                 <td class="text-end"><?= number_format($grandActualMaterial, 2, ',', '.') ?></td>
@@ -545,6 +643,34 @@ foreach ($categories as $cat) {
                 <td class="text-end"><?= $weekGrand > 0 ? number_format($weekGrand, 0, ',', '.') : '-' ?></td>
                 <td class="text-center"><?= $grandWeekBobot > 0 ? number_format($grandWeekBobot, 2, ',', '.') . '%' : '-' ?></td>
                 <?php endforeach; ?>
+                <?php endif; ?>
+            </tr>
+            <!-- PPN Row -->
+            <tr class="cat-total">
+                <td colspan="3" class="text-end">PPN <?= number_format($ppnPct, 0) ?>%</td>
+                <td class="text-end"><?= number_format($ppnTarget, 2, ',', '.') ?></td>
+                <td colspan="3"></td>
+                <td class="text-end"><?= number_format($ppnActual, 2, ',', '.') ?></td>
+                <td class="text-end"><?= number_format($ppnTarget - $ppnActual, 2, ',', '.') ?></td>
+                <td class="text-center">-</td>
+                <?php if ($showWeeklyColumns): ?>
+                <?php for ($i = 0; $i < count($weeklyRanges) * 2; $i++): ?>
+                <td></td>
+                <?php endfor; ?>
+                <?php endif; ?>
+            </tr>
+            <!-- Rounded Total Row -->
+            <tr class="grand-total">
+                <td colspan="3" class="text-end">JUMLAH TOTAL DIBULATKAN</td>
+                <td class="text-end"><?= number_format($totalTargetRounded, 2, ',', '.') ?></td>
+                <td colspan="3"></td>
+                <td class="text-end"><?= number_format($totalActualRounded, 2, ',', '.') ?></td>
+                <td class="text-end"><?= number_format($totalTargetRounded - $totalActualRounded, 2, ',', '.') ?></td>
+                <td class="text-center">-</td>
+                <?php if ($showWeeklyColumns): ?>
+                <?php for ($i = 0; $i < count($weeklyRanges) * 2; $i++): ?>
+                <td></td>
+                <?php endfor; ?>
                 <?php endif; ?>
             </tr>
         </tfoot>

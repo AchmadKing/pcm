@@ -85,11 +85,13 @@ if ($statusFilter) {
 
 $whereClause = !empty($where) ? "WHERE " . implode(" AND ", $where) : "";
 
+$nonRabCategories = getNonRabCategories();
+
 $requests = dbGetAll("
     SELECT req.*, p.name as project_name, u.full_name as created_by_name,
         upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
         ua.full_name as approved_by_name, ua.role as approved_by_role,
-        (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
+        (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -191,11 +193,23 @@ if ($reqViewMode === 'all') {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($requests as $req): ?>
+                            <?php foreach ($requests as $req): 
+                                $isNonRab = ($req['request_type'] ?? 'rab') === 'non_rab';
+                            ?>
                             <tr>
-                                <td><strong><?= sanitize($req['request_number']) ?></strong></td>
+                                <td>
+                                    <strong><?= sanitize($req['request_number']) ?></strong>
+                                    <?php if ($isNonRab): ?>
+                                    <br><span class="badge text-white" style="background-color: #6f42c1; font-size: 0.7rem;"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?= sanitize($req['project_name']) ?></td>
-                                <td><?= formatDateTime($req['created_at']) ?></td>
+                                <td>
+                                    <?= formatDateTime($req['created_at']) ?>
+                                    <?php if ($isNonRab && !empty($req['request_date'])): ?>
+                                    <br><small class="text-muted"><i class="mdi mdi-calendar"></i> Nota: <?= formatDate($req['request_date']) ?></small>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
                                 <td><?= getDetailedStatusBadge($req) ?></td>
                                 <?php if (hasPermission('requests.approve')): ?>

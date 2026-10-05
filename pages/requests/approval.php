@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     try {
         // Determine current request status
-        $currentReq = dbGetRow("SELECT status, project_id FROM requests WHERE id = ?", [$reqId]);
+        $currentReq = dbGetRow("SELECT req.*, p.name as project_name FROM requests req LEFT JOIN projects p ON req.project_id = p.id WHERE req.id = ?", [$reqId]);
         $currentStatus = $currentReq['status'] ?? '';
         
         if ($action === 'approve') {
@@ -54,11 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             // Get target_week from the request (set by requester at creation)
-            $targetWeek = dbGetRow("SELECT target_week FROM requests WHERE id = ?", [$reqId])['target_week'] ?? null;
-            if (empty($targetWeek)) {
+            $targetWeek = $currentReq['target_week'] ?? null;
+            if (empty($targetWeek) && ($currentReq['request_type'] ?? 'rab') !== 'non_rab') {
                 setFlash('error', 'Pengajuan ini belum memiliki minggu target!');
                 header('Location: approval.php?id=' . $reqId);
                 exit;
+            }
+            if (empty($targetWeek)) {
+                $targetWeek = 1;
             }
             
             if (!$isAdmin) {
@@ -70,16 +73,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             
+            // ADMIN APPROVAL
             $newStatus = 'approved';
+            $reqType = $currentReq['request_type'] ?? 'rab';
+            $projId = $currentReq['project_id'];
+            $projName = $currentReq['project_name'] ?? '';
+
+            // Calculate authoritative total of this request
+            $reqTotalRow = dbGetRow("SELECT COALESCE(SUM(quantity * unit_price), 0) as total FROM request_items WHERE request_id = ?", [$reqId]);
+            $reqTotal = floatval($reqTotalRow['total']);
             
-            // Update request status with target_week and week_number
-            dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                [$newStatus, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+            if ($reqType === 'non_rab') {
+                // Update request status
+                dbExecute("UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                    [$newStatus, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+                
+                setFlash('success', 'Pengajuan Biaya Lain-Lain (' . formatRupiah($reqTotal) . ') berhasil disetujui!');
+                $_SESSION['approved_project_id'] = $projId;
+                $_SESSION['approved_project_name'] = $projName;
+                header('Location: approval.php');
+                exit;
+            }
+            
+            // DIRECT COST (RAB/RAP) OR MIXED FLOW
+            // Update request status with target_week, week_number and approved_amount
+            dbExecute("UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                [$newStatus, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
             
             // Insert realization into weekly_progress using sequential filling
-            $projId = $currentReq['project_id'];
-            $projName = dbGetRow("SELECT name FROM projects WHERE id = ?", [$projId])['name'] ?? '';
-            
             // Get project info for weekly ranges
             $projInfo = dbGetRow("SELECT start_date, duration_days FROM projects WHERE id = ?", [$projId]);
             $weekRanges = generateWeeklyRanges($projInfo['start_date'], $projInfo['duration_days']);
@@ -99,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Get all items of the approved request with subcat_details
                 $approvedItems = dbGetAll("
                     SELECT id, subcategory_id, subcat_details, item_code, item_type,
-                           unit_price, coefficient
+                           unit_price, coefficient, quantity
                     FROM request_items 
                     WHERE request_id = ?
                 ", [$reqId]);
@@ -108,6 +129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $subcatAmounts = [];
                 
                 foreach ($approvedItems as $item) {
+                    if (empty($item['subcategory_id']) && empty($item['subcat_details'])) {
+                        // Non-RAB item in mixed request: does not write to weekly_progress table
+                        continue;
+                    }
                     $itemCoef = floatval($item['coefficient']);
                     $itemPrice = floatval($item['unit_price']);
                     $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
@@ -242,7 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
-            $deductionMsg = $totalDeduction > 0 ? ' (dipotong sisa anggaran ' . number_format($totalDeduction, 0, ',', '.') . ')' : '';
+            $deductionMsg = (isset($totalDeduction) && $totalDeduction > 0) ? ' (dipotong sisa anggaran ' . number_format($totalDeduction, 0, ',', '.') . ')' : '';
             setFlash('success', 'Pengajuan berhasil disetujui dan tercatat di realisasi!' . $deductionMsg);
             
             // Store approved project info for navigation modal
@@ -269,6 +294,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// Get non-RAB category list
+$nonRabCategories = getNonRabCategories();
+
 // Get requests based on role
 $isAdmin = hasPermission('projects.edit');
 $where = $isAdmin ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
@@ -282,7 +310,7 @@ $pendingRequests = dbGetAll("
     SELECT req.*, p.name as project_name, u.full_name as created_by_name,
         upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
         ua.full_name as approved_by_name, ua.role as approved_by_role,
-        (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
+        (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -304,6 +332,7 @@ $projects = dbGetAll("
 // If specific request selected, get details
 $selectedRequest = null;
 $selectedItems = [];
+$nonRabBudgetStats = null;
 if ($requestId) {
     $statusFilter = $isAdmin ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
     $selectedRequest = dbGetRow("
@@ -320,83 +349,97 @@ if ($requestId) {
     
     if ($selectedRequest) {
         $projectId = $selectedRequest['project_id'];
+        $isNonRabRequest = ($selectedRequest['request_type'] ?? 'rab') === 'non_rab';
         
-        // Get items with RAP comparison - match by item_code from Master Data RAP tables
-        // Use subquery to get project_ahsp_details_rap data to avoid duplicates
-        $selectedItems = dbGetAll("
-            SELECT reqi.*, rs.code, rs.name as subcategory_name,
-                -- RAP data from Master Data RAP (matched by item_code within same project)
-                (SELECT d2.coefficient FROM project_ahsp_details_rap d2 
-                 JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
-                 JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
-                 JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
-                 JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
-                 WHERE pir2.item_code = reqi.item_code 
-                   AND pir2.project_id = ?
-                   AND rs2.id = reqi.subcategory_id
-                 LIMIT 1) as rap_coefficient,
-                (SELECT COALESCE(d2.unit_price, pir2.price) FROM project_ahsp_details_rap d2 
-                 JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
-                 JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
-                 JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
-                 JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
-                 WHERE pir2.item_code = reqi.item_code 
-                   AND pir2.project_id = ?
-                   AND rs2.id = reqi.subcategory_id
-                 LIMIT 1) as rap_unit_price,
-                rap.volume as rap_volume,
-                -- Qty per Item RAP = koefisien AHSP × volume pekerjaan
-                (SELECT COALESCE(d2.coefficient, 0) * COALESCE(rap.volume, 0) 
-                 FROM project_ahsp_details_rap d2 
-                 JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
-                 JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
-                 JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
-                 JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
-                 WHERE pir2.item_code = reqi.item_code 
-                   AND pir2.project_id = ?
-                   AND rs2.id = reqi.subcategory_id
-                 LIMIT 1) as rap_qty,
-                -- Sum approved qty by item_code for this subcategory
-                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
-                 FROM request_items reqi2 
-                 JOIN requests r ON reqi2.request_id = r.id 
-                 WHERE reqi2.item_code = reqi.item_code 
-                   AND reqi2.subcategory_id = reqi.subcategory_id
-                   AND r.status = 'approved' 
-                   AND r.id != req.id) as approved_qty
-            FROM request_items reqi
-            LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
-            LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
-            JOIN requests req ON reqi.request_id = req.id
-            WHERE reqi.request_id = ?
-            ORDER BY rs.code, reqi.item_name
-        ", [$projectId, $projectId, $projectId, $requestId]);
-        
-        // Get distinct pekerjaan (subcategories) for this request
-        // Extract all subcategory IDs from subcat_details JSON (not just subcategory_id column)
-        $reqItemsForPekerjaan = dbGetAll("SELECT subcat_details, subcategory_id FROM request_items WHERE request_id = ?", [$requestId]);
-        $allSubcatIds = [];
-        foreach ($reqItemsForPekerjaan as $ri) {
-            $sd = json_decode($ri['subcat_details'] ?? '', true);
-            if (!empty($sd) && is_array($sd)) {
-                foreach ($sd as $detail) {
-                    $allSubcatIds[intval($detail['subcategory_id'])] = true;
+        if ($isNonRabRequest) {
+            // Non-RAB request items
+            $selectedItems = dbGetAll("
+                SELECT reqi.*
+                FROM request_items reqi
+                WHERE reqi.request_id = ?
+                ORDER BY reqi.id ASC
+            ", [$requestId]);
+            
+            $selectedPekerjaan = [];
+        } else {
+            // Direct Cost (RAB/RAP)
+            // Get items with RAP comparison - match by item_code from Master Data RAP tables
+            // Use subquery to get project_ahsp_details_rap data to avoid duplicates
+            $selectedItems = dbGetAll("
+                SELECT reqi.*, rs.code, rs.name as subcategory_name,
+                    -- RAP data from Master Data RAP (matched by item_code within same project)
+                    (SELECT d2.coefficient FROM project_ahsp_details_rap d2 
+                     JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
+                     JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
+                     JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
+                     JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
+                     WHERE pir2.item_code = reqi.item_code 
+                       AND pir2.project_id = ?
+                       AND rs2.id = reqi.subcategory_id
+                     LIMIT 1) as rap_coefficient,
+                    (SELECT COALESCE(d2.unit_price, pir2.price) FROM project_ahsp_details_rap d2 
+                     JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
+                     JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
+                     JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
+                     JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
+                     WHERE pir2.item_code = reqi.item_code 
+                       AND pir2.project_id = ?
+                       AND rs2.id = reqi.subcategory_id
+                     LIMIT 1) as rap_unit_price,
+                    rap.volume as rap_volume,
+                    -- Qty per Item RAP = koefisien AHSP × volume pekerjaan
+                    (SELECT COALESCE(d2.coefficient, 0) * COALESCE(rap.volume, 0) 
+                     FROM project_ahsp_details_rap d2 
+                     JOIN project_items_rap pir2 ON d2.item_id = pir2.id 
+                     JOIN project_ahsp_rap par2 ON d2.ahsp_id = par2.id
+                     JOIN project_ahsp pa2 ON par2.ahsp_code = pa2.ahsp_code AND par2.project_id = pa2.project_id
+                     JOIN rab_subcategories rs2 ON rs2.ahsp_id = pa2.id
+                     WHERE pir2.item_code = reqi.item_code 
+                       AND pir2.project_id = ?
+                       AND rs2.id = reqi.subcategory_id
+                     LIMIT 1) as rap_qty,
+                    -- Sum approved qty by item_code for this subcategory
+                    (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+                     FROM request_items reqi2 
+                     JOIN requests r ON reqi2.request_id = r.id 
+                     WHERE reqi2.item_code = reqi.item_code 
+                       AND reqi2.subcategory_id = reqi.subcategory_id
+                       AND r.status = 'approved' 
+                       AND r.id != req.id) as approved_qty
+                FROM request_items reqi
+                LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
+                LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
+                JOIN requests req ON reqi.request_id = req.id
+                WHERE reqi.request_id = ?
+                ORDER BY rs.code, reqi.item_name
+            ", [$projectId, $projectId, $projectId, $requestId]);
+            
+            // Get distinct pekerjaan (subcategories) for this request
+            // Extract all subcategory IDs from subcat_details JSON (not just subcategory_id column)
+            $reqItemsForPekerjaan = dbGetAll("SELECT subcat_details, subcategory_id FROM request_items WHERE request_id = ?", [$requestId]);
+            $allSubcatIds = [];
+            foreach ($reqItemsForPekerjaan as $ri) {
+                $sd = json_decode($ri['subcat_details'] ?? '', true);
+                if (!empty($sd) && is_array($sd)) {
+                    foreach ($sd as $detail) {
+                        $allSubcatIds[intval($detail['subcategory_id'])] = true;
+                    }
+                } elseif (!empty($ri['subcategory_id'])) {
+                    $allSubcatIds[intval($ri['subcategory_id'])] = true;
                 }
-            } elseif (!empty($ri['subcategory_id'])) {
-                $allSubcatIds[intval($ri['subcategory_id'])] = true;
             }
-        }
-        $selectedPekerjaan = [];
-        if (!empty($allSubcatIds)) {
-            $ids = array_keys($allSubcatIds);
-            $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $selectedPekerjaan = dbGetAll("
-                SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
-                FROM rab_subcategories rs
-                JOIN rab_categories rc ON rs.category_id = rc.id
-                WHERE rs.id IN ($placeholders)
-                ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
-            ", $ids);
+            $selectedPekerjaan = [];
+            if (!empty($allSubcatIds)) {
+                $ids = array_keys($allSubcatIds);
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $selectedPekerjaan = dbGetAll("
+                    SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
+                    FROM rab_subcategories rs
+                    JOIN rab_categories rc ON rs.category_id = rc.id
+                    WHERE rs.id IN ($placeholders)
+                    ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+                ", $ids);
+            }
         }
     }
 }
@@ -486,6 +529,9 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <?php if ($req['status'] === 'pm_approved'): ?>
                                 <span class="badge bg-info">PM Approved</span>
                                 <?php endif; ?>
+                                <?php if (($req['request_type'] ?? 'rab') === 'non_rab'): ?>
+                                <br><span class="badge text-white" style="background-color: #6f42c1; font-size: 0.7rem;"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
+                                <?php endif; ?>
                                 <br><small><?= sanitize($req['project_name']) ?></small>
                                 <br><small class="text-muted"><?= formatDateTime($req['created_at']) ?></small>
                             </div>
@@ -501,12 +547,30 @@ require_once __DIR__ . '/../../includes/header.php';
     
     <!-- Request Details -->
     <div class="col-lg-8">
-        <?php if ($selectedRequest): ?>
+        <?php if ($selectedRequest): 
+            $isNonRab = ($selectedRequest['request_type'] ?? 'rab') === 'non_rab';
+            $isMixed = ($selectedRequest['request_type'] ?? 'rab') === 'mixed';
+            
+            $directItems = [];
+            $nonRabItems = [];
+            foreach ($selectedItems as $it) {
+                if (!empty($it['subcategory_id'])) {
+                    $directItems[] = $it;
+                } else {
+                    $nonRabItems[] = $it;
+                }
+            }
+        ?>
         <div class="card">
-            <div class="card-header <?= $selectedRequest['status'] === 'pm_approved' ? 'bg-info text-white' : 'bg-warning' ?>">
+            <div class="card-header <?= $selectedRequest['status'] === 'pm_approved' ? 'bg-info text-white' : ($isMixed ? 'bg-primary text-white' : ($isNonRab ? 'text-white' : 'bg-warning')) ?>" <?= $isNonRab && $selectedRequest['status'] !== 'pm_approved' ? 'style="background-color: #6f42c1;"' : '' ?>>
                 <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><?= sanitize($selectedRequest['request_number']) ?></h5>
-                    <div>
+                    <h5 class="mb-0 <?= ($isNonRab || $isMixed) && $selectedRequest['status'] !== 'pm_approved' ? 'text-white' : '' ?>"><?= sanitize($selectedRequest['request_number']) ?></h5>
+                    <div class="d-flex gap-1 align-items-center">
+                        <?php if ($isMixed): ?>
+                        <span class="badge bg-light text-primary fw-bold"><i class="mdi mdi-layers-outline"></i> RAB + Non-RAB</span>
+                        <?php elseif ($isNonRab): ?>
+                        <span class="badge bg-light text-dark fw-bold"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
+                        <?php endif; ?>
                         <?php if ($selectedRequest['status'] === 'pm_approved'): ?>
                         <span class="badge bg-light text-info">PM Approved</span>
                         <?php endif; ?>
@@ -516,27 +580,41 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="card-body">
                 <div class="row mb-3">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <small class="text-muted">Dibuat Oleh</small>
                         <p class="mb-0"><strong><?= sanitize($selectedRequest['created_by_name']) ?></strong></p>
                     </div>
-                    <div class="col-md-4">
-                        <small class="text-muted">Tanggal</small>
+                    <div class="col-md-3">
+                        <small class="text-muted">Tanggal Input</small>
                         <p class="mb-0"><?= formatDateTime($selectedRequest['created_at'], true) ?></p>
                     </div>
-                    <div class="col-md-4">
+                    <?php if ($isNonRab || $isMixed): ?>
+                    <div class="col-md-3">
+                        <small class="text-muted">Tgl Nota/Kwitansi</small>
+                        <p class="mb-0"><strong><?= !empty($selectedRequest['request_date']) ? formatDate($selectedRequest['request_date']) : '-' ?></strong></p>
+                    </div>
+                    <?php endif; ?>
+                    <div class="col-md-3">
                         <small class="text-muted">Minggu Ke</small>
                         <p class="mb-0"><?= $selectedRequest['target_week'] ?? $selectedRequest['week_number'] ?? '-' ?></p>
                     </div>
                 </div>
                 
                 <?php if ($selectedRequest['description']): ?>
-                <div class="alert alert-light mb-3"><?= sanitize($selectedRequest['description']) ?></div>
+                <div class="alert alert-light mb-3"><strong>Keterangan:</strong> <?= sanitize($selectedRequest['description']) ?></div>
                 <?php endif; ?>
-                
+
+                <?php 
+                $totalReq = 0;
+                $totalRap = 0;
+                $totalNonRab = 0;
+                ?>
+
+                <!-- DIRECT COST (RAB/RAP) ITEM ANALYSIS -->
+                <?php if (!empty($directItems)): ?>
                 <?php if (!empty($selectedPekerjaan)): ?>
                 <div class="alert alert-info mb-3">
-                    <h6 class="alert-heading mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan yang Diajukan</h6>
+                    <h6 class="alert-heading mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan yang Diajukan (RAP)</h6>
                     <ol class="mb-0 ps-3">
                         <?php foreach ($selectedPekerjaan as $pek): ?>
                         <li class="mb-1"><strong><?= sanitize($pek['code']) ?></strong> - <?= sanitize($pek['name']) ?> <small class="text-muted">(<?= sanitize($pek['category_code']) ?>. <?= sanitize($pek['category_name']) ?>)</small></li>
@@ -545,8 +623,8 @@ require_once __DIR__ . '/../../includes/header.php';
                 </div>
                 <?php endif; ?>
                 
-                <h6 class="mb-3">Analisis Item Pengajuan</h6>
-                <div class="table-responsive">
+                <h6 class="mb-3 text-primary"><i class="mdi mdi-calculator"></i> Analisis Item Biaya Langsung (RAP)</h6>
+                <div class="table-responsive mb-4">
                     <table class="table table-bordered table-sm">
                         <thead class="table-light">
                             <tr>
@@ -562,21 +640,14 @@ require_once __DIR__ . '/../../includes/header.php';
                         </thead>
                         <tbody>
                             <?php 
-                            $totalReq = 0;
-                            $totalRap = 0;
-                            foreach ($selectedItems as $item): 
-                                // Total Lapangan = unit_price × coefficient
+                            foreach ($directItems as $item): 
                                 $hargaLapangan = $item['unit_price'] * $item['coefficient'];
                                 $totalReq += $hargaLapangan;
                                 
-                                // Harga RAP = harga satuan RAP × koefisien yang diajukan
                                 $hargaRap = ($item['rap_unit_price'] ?? 0) * $item['coefficient'];
                                 $totalRap += $hargaRap;
                                 
-                                // Qty per Item RAP = koefisien AHSP × volume pekerjaan
                                 $qtyRap = $item['rap_qty'] ?? 0;
-                                
-                                // Remaining qty = qty RAP - approved qty
                                 $remainingQty = $qtyRap - ($item['approved_qty'] ?? 0);
                                 $isOverQty = $item['coefficient'] > $remainingQty && $qtyRap > 0;
                                 $afterApproval = $remainingQty - $item['coefficient'];
@@ -644,7 +715,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </tbody>
                         <tfoot>
                             <tr class="table-light">
-                                <td colspan="4" class="text-end"><strong>Total Pengajuan</strong></td>
+                                <td colspan="4" class="text-end"><strong>Total Item RAP</strong></td>
                                 <td class="text-end"><strong><?= formatRupiah($totalReq) ?></strong></td>
                                 <td class="text-end"><strong><?= formatRupiah($totalRap) ?></strong></td>
                                 <td colspan="2">
@@ -666,7 +737,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <td colspan="3"></td>
                             </tr>
                             <tr class="table-warning">
-                                <td colspan="4" class="text-end"><strong>Nett yang Harus Dikirim</strong></td>
+                                <td colspan="4" class="text-end"><strong>Nett yang Harus Dikirim (RAP)</strong></td>
                                 <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $availableRemaining['total'])) ?></strong></td>
                                 <td colspan="3"></td>
                             </tr>
@@ -674,9 +745,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </tfoot>
                     </table>
                 </div>
-            </div>
 
-                
                 <?php if ($availableRemaining['total'] > 0): ?>
                 <div class="alert alert-success mb-3">
                     <h6 class="alert-heading mb-2"><i class="mdi mdi-cash-refund"></i> Sisa Anggaran dari Aktualisasi Sebelumnya</h6>
@@ -698,6 +767,89 @@ require_once __DIR__ . '/../../includes/header.php';
                     <div class="text-center">
                         <strong>Total Sisa: <?= formatRupiah($availableRemaining['total']) ?></strong>
                         <br><small>Akan otomatis dipotong dari realisasi saat di-approve.</small>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <?php endif; ?>
+
+                <!-- NON-RAB ITEMS -->
+                <?php if (!empty($nonRabItems)): ?>
+                <h6 class="mb-3" style="color: #6f42c1;"><i class="mdi mdi-receipt"></i> Rincian Pengeluaran Biaya Non-RAB</h6>
+                <div class="table-responsive mb-3">
+                    <table class="table table-bordered table-sm align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="40" class="text-center">No</th>
+                                <th>Nama Biaya / Uraian</th>
+                                <th width="90" class="text-end">Volume</th>
+                                <th width="70">Satuan</th>
+                                <th width="130" class="text-end">Harga Satuan</th>
+                                <th width="150" class="text-end">Total</th>
+                                <th width="90" class="text-center">Bukti Nota</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php 
+                            $no = 1;
+                            foreach ($nonRabItems as $item): 
+                                $subtotal = floatval($item['quantity'] ?: $item['coefficient'] ?: 1) * floatval($item['unit_price']);
+                                $totalNonRab += $subtotal;
+                            ?>
+                            <tr>
+                                <td class="text-center"><?= $no++ ?></td>
+                                <td>
+                                    <strong><?= sanitize($item['item_name']) ?></strong>
+                                    <?php if (!empty($item['notes'])): ?>
+                                    <br><small class="text-muted"><?= sanitize($item['notes']) ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end"><?= formatVolume($item['quantity'] ?: $item['coefficient'] ?: 1) ?></td>
+                                <td><?= sanitize($item['unit'] ?: 'ls') ?></td>
+                                <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
+                                <td class="text-end"><strong><?= formatRupiah($subtotal, false) ?></strong></td>
+                                <td class="text-center">
+                                    <?php if (!empty($item['receipt_file'])): 
+                                        $fileUrl = $baseUrl . '/uploads/receipts/' . $item['receipt_file'];
+                                        $ext = strtolower(pathinfo($item['receipt_file'], PATHINFO_EXTENSION));
+                                    ?>
+                                        <?php if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])): ?>
+                                        <a href="<?= $fileUrl ?>" target="_blank" class="btn btn-sm btn-outline-primary py-0 px-2" title="Lihat Foto Nota">
+                                            <i class="mdi mdi-image"></i>
+                                        </a>
+                                        <?php else: ?>
+                                        <a href="<?= $fileUrl ?>" target="_blank" class="btn btn-sm btn-outline-danger py-0 px-2" title="Lihat Dokumen Nota">
+                                            <i class="mdi mdi-file-pdf-box"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-primary">
+                                <td colspan="5" class="text-end"><strong>TOTAL BIAYA NON-RAB</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($totalNonRab) ?></strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <?php endif; ?>
+
+                <?php if (!empty($directItems) && !empty($nonRabItems)): ?>
+                <div class="card bg-light border-primary mb-3">
+                    <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <span class="text-muted me-3">Subtotal RAP: <strong><?= formatRupiah($totalReq) ?></strong></span>
+                            <span class="text-muted">Subtotal Non-RAB: <strong><?= formatRupiah($totalNonRab) ?></strong></span>
+                        </div>
+                        <div>
+                            <span class="fs-6 text-muted me-2">Grand Total Pengajuan:</span>
+                            <span class="fs-5 fw-bold text-primary font-monospace"><?= formatRupiah($totalReq + $totalNonRab) ?></span>
+                        </div>
                     </div>
                 </div>
                 <?php endif; ?>

@@ -74,72 +74,100 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-// Get request items - uses subcategory_id and item_name from request_items
-$items = dbGetAll("
-    SELECT reqi.*, rs.code, rs.name as subcategory_name
-    FROM request_items reqi
-    LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
-    WHERE reqi.request_id = ?
-    ORDER BY rs.code, reqi.item_name
-", [$requestId]);
+$isNonRab = ($request['request_type'] ?? 'rab') === 'non_rab';
+$isMixed = ($request['request_type'] ?? 'rab') === 'mixed';
+$nonRabCategories = getNonRabCategories();
 
-$totalAmount = array_sum(array_column($items, 'total_price'));
+if ($isNonRab) {
+    // Non-RAB items
+    $items = dbGetAll("
+        SELECT reqi.*
+        FROM request_items reqi
+        WHERE reqi.request_id = ?
+        ORDER BY reqi.id ASC
+    ", [$requestId]);
 
-// Get request attachments
-$requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
-
-// Get actualization data if exists
-$actualData = null;
-$actualAttachments = [];
-if ($request['status'] === 'approved') {
-    $actualData = dbGetRow("SELECT ra.*, u.full_name as created_by_name FROM request_actuals ra LEFT JOIN users u ON ra.created_by = u.id WHERE ra.request_id = ?", [$requestId]);
-    if ($actualData) {
-        $actualAttachments = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY created_at", [$actualData['id']]);
+    $totalAmount = 0;
+    foreach ($items as $it) {
+        $totalAmount += floatval($it['quantity']) * floatval($it['unit_price']);
     }
-}
 
-// Get totals by category for actualization comparison
-$itemTotalsByCategory = dbGetAll("
-    SELECT 
-        COALESCE(pi.category, reqi.item_type, 'other') as item_category,
-        SUM(reqi.total_price) as total
-    FROM request_items reqi
-    LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
-    WHERE reqi.request_id = ?
-    GROUP BY item_category
-", [$request['project_id'], $requestId]);
+    $requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
+    $actualData = null;
+    $actualAttachments = [];
+    $catTotals = ['upah' => 0, 'material' => 0, 'alat' => 0];
+    $pekerjaan = [];
+} else {
+    // Get request items - uses subcategory_id and item_name from request_items
+    $items = dbGetAll("
+        SELECT reqi.*, rs.code, rs.name as subcategory_name
+        FROM request_items reqi
+        LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
+        WHERE reqi.request_id = ?
+        ORDER BY rs.code, reqi.item_name
+    ", [$requestId]);
 
-$catTotals = ['upah' => 0, 'material' => 0, 'alat' => 0];
-foreach ($itemTotalsByCategory as $row) {
-    $c = $row['item_category'] ?? '';
-    if (isset($catTotals[$c])) $catTotals[$c] = floatval($row['total']);
-}
+    $totalAmount = 0;
+    foreach ($items as $it) {
+        $totalAmount += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+    }
 
-// Get distinct pekerjaan (subcategories) for this request
-// Extract all subcategory IDs from subcat_details JSON (not just subcategory_id column)
-$reqItemsForPekerjaan = dbGetAll("SELECT subcat_details, subcategory_id FROM request_items WHERE request_id = ?", [$requestId]);
-$allSubcatIds = [];
-foreach ($reqItemsForPekerjaan as $ri) {
-    $sd = json_decode($ri['subcat_details'] ?? '', true);
-    if (!empty($sd) && is_array($sd)) {
-        foreach ($sd as $detail) {
-            $allSubcatIds[intval($detail['subcategory_id'])] = true;
+    // Get request attachments
+    $requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
+
+    // Get actualization data if exists
+    $actualData = null;
+    $actualAttachments = [];
+    if ($request['status'] === 'approved') {
+        $actualData = dbGetRow("SELECT ra.*, u.full_name as created_by_name FROM request_actuals ra LEFT JOIN users u ON ra.created_by = u.id WHERE ra.request_id = ?", [$requestId]);
+        if ($actualData) {
+            $actualAttachments = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY created_at", [$actualData['id']]);
         }
-    } elseif (!empty($ri['subcategory_id'])) {
-        $allSubcatIds[intval($ri['subcategory_id'])] = true;
     }
-}
-$pekerjaan = [];
-if (!empty($allSubcatIds)) {
-    $ids = array_keys($allSubcatIds);
-    $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $pekerjaan = dbGetAll("
-        SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
-        FROM rab_subcategories rs
-        JOIN rab_categories rc ON rs.category_id = rc.id
-        WHERE rs.id IN ($placeholders)
-        ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
-    ", $ids);
+
+    // Get totals by category for actualization comparison
+    $itemTotalsByCategory = dbGetAll("
+        SELECT 
+            COALESCE(pi.category, reqi.item_type, 'other') as item_category,
+            SUM(reqi.total_price) as total
+        FROM request_items reqi
+        LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
+        WHERE reqi.request_id = ?
+        GROUP BY item_category
+    ", [$request['project_id'], $requestId]);
+
+    $catTotals = ['upah' => 0, 'material' => 0, 'alat' => 0];
+    foreach ($itemTotalsByCategory as $row) {
+        $c = $row['item_category'] ?? '';
+        if (isset($catTotals[$c])) $catTotals[$c] = floatval($row['total']);
+    }
+
+    // Get distinct pekerjaan (subcategories) for this request
+    // Extract all subcategory IDs from subcat_details JSON (not just subcategory_id column)
+    $reqItemsForPekerjaan = dbGetAll("SELECT subcat_details, subcategory_id FROM request_items WHERE request_id = ?", [$requestId]);
+    $allSubcatIds = [];
+    foreach ($reqItemsForPekerjaan as $ri) {
+        $sd = json_decode($ri['subcat_details'] ?? '', true);
+        if (!empty($sd) && is_array($sd)) {
+            foreach ($sd as $detail) {
+                $allSubcatIds[intval($detail['subcategory_id'])] = true;
+            }
+        } elseif (!empty($ri['subcategory_id'])) {
+            $allSubcatIds[intval($ri['subcategory_id'])] = true;
+        }
+    }
+    $pekerjaan = [];
+    if (!empty($allSubcatIds)) {
+        $ids = array_keys($allSubcatIds);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $pekerjaan = dbGetAll("
+            SELECT DISTINCT rs.id, rs.code, rs.name, rc.code as category_code, rc.name as category_name
+            FROM rab_subcategories rs
+            JOIN rab_categories rc ON rs.category_id = rc.id
+            WHERE rs.id IN ($placeholders)
+            ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+        ", $ids);
+    }
 }
 
 // NOW include header (after all possible redirects)
@@ -171,6 +199,11 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="d-flex justify-content-between align-items-center">
                     <div class="d-flex align-items-center gap-2">
                         <span>Status:</span> <?= getDetailedStatusBadge($request) ?>
+                        <?php if ($isMixed): ?>
+                        <span class="badge bg-primary text-white ms-2"><i class="mdi mdi-layers-outline"></i> RAB + Non-RAB</span>
+                        <?php elseif ($isNonRab): ?>
+                        <span class="badge text-white ms-2" style="background-color: #6f42c1;"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
+                        <?php endif; ?>
                         <span class="ms-3">Proyek: <strong><?= sanitize($request['project_name']) ?></strong></span>
                     </div>
                     <div class="d-flex gap-2">
@@ -218,7 +251,11 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h5 class="header-title mb-3">Informasi Pengajuan</h5>
                 <table class="table table-sm mb-0">
                     <tr><th>No. Request</th><td><?= sanitize($request['request_number']) ?></td></tr>
-                    <tr><th>Tanggal Pengajuan</th><td><?= formatDateTime($request['created_at'], true) ?></td></tr>
+                    <tr><th>Jenis Pengajuan</th><td><span class="badge <?= $isNonRab ? 'text-white' : 'bg-primary' ?>" <?= $isNonRab ? 'style="background-color: #6f42c1;"' : '' ?>><?= $isNonRab ? 'Biaya Lain-Lain / Non-RAB' : 'Direct Cost (RAB/RAP)' ?></span></td></tr>
+                    <?php if ($isNonRab): ?>
+                    <tr><th>Tgl Nota / Kwitansi</th><td><strong><?= !empty($request['request_date']) ? formatDate($request['request_date']) : '-' ?></strong></td></tr>
+                    <?php endif; ?>
+                    <tr><th>Tanggal Input</th><td><?= formatDateTime($request['created_at'], true) ?></td></tr>
                     <tr><th>Minggu Ke</th><td><?= $request['target_week'] ?? $request['week_number'] ?? '-' ?></td></tr>
                     <tr><th>Dibuat Oleh</th><td><?= sanitize($request['created_by_name']) ?></td></tr>
                     <?php if ($request['description']): ?>
@@ -290,8 +327,8 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
         </div>
         
-        <!-- Pekerjaan Card -->
-        <?php if (!empty($pekerjaan)): ?>
+        <!-- Pekerjaan Card (Direct Cost Only) -->
+        <?php if (!$isNonRab && !empty($pekerjaan)): ?>
         <div class="card border-info">
             <div class="card-body">
                 <h6 class="header-title mb-2"><i class="mdi mdi-briefcase-outline"></i> Pekerjaan Terkait</h6>
@@ -361,11 +398,32 @@ require_once __DIR__ . '/../../includes/header.php';
     
     <!-- Items List -->
     <div class="col-lg-8">
-        <div class="card">
+        <?php
+        $directItems = [];
+        $nonRabItems = [];
+        foreach ($items as $it) {
+            if (!empty($it['subcategory_id'])) {
+                $directItems[] = $it;
+            } else {
+                $nonRabItems[] = $it;
+            }
+        }
+        $subtotalDirect = 0;
+        foreach ($directItems as $it) {
+            $subtotalDirect += floatval($it['total_price'] ?: ($it['coefficient'] * $it['unit_price']));
+        }
+        $subtotalNonRab = 0;
+        foreach ($nonRabItems as $it) {
+            $subtotalNonRab += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+        }
+        ?>
+
+        <?php if (!empty($directItems)): ?>
+        <div class="card mb-3">
             <div class="card-body">
-                <h5 class="header-title mb-3">Daftar Item</h5>
+                <h5 class="header-title mb-3"><i class="mdi mdi-calculator text-primary"></i> Daftar Item Biaya Langsung (RAP)</h5>
                 <div class="table-responsive">
-                    <table class="table table-bordered">
+                    <table class="table table-bordered align-middle">
                         <thead class="table-light">
                             <tr>
                                 <th width="100">Kode</th>
@@ -377,7 +435,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($items as $item): ?>
+                            <?php foreach ($directItems as $item): ?>
                             <tr>
                                 <td>
                                     <code><?= sanitize($item['item_code'] ?: ($item['code'] ?? '-')) ?></code>
@@ -397,20 +455,105 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <td><?= sanitize($item['unit']) ?></td>
                                 <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
-                                <td class="text-end"><strong><?= formatRupiah($item['total_price'], false) ?></strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($item['total_price'] ?: ($item['coefficient'] * $item['unit_price']), false) ?></strong></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
                         <tfoot>
                             <tr class="table-primary">
-                                <td colspan="5" class="text-end"><strong>TOTAL</strong></td>
-                                <td class="text-end"><strong><?= formatRupiah($totalAmount, false) ?></strong></td>
+                                <td colspan="5" class="text-end"><strong>SUBTOTAL BIAYA LANGSUNG (RAP)</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($subtotalDirect, false) ?></strong></td>
                             </tr>
                         </tfoot>
                     </table>
                 </div>
             </div>
         </div>
+        <?php endif; ?>
+
+        <?php if (!empty($nonRabItems)): ?>
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="header-title mb-3" style="color: #6f42c1;"><i class="mdi mdi-receipt"></i> Daftar Item Biaya Non-RAB</h5>
+                <div class="table-responsive">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="40" class="text-center">No</th>
+                                <th>Nama Biaya / Uraian</th>
+                                <th width="60">Satuan</th>
+                                <th width="90" class="text-end">Volume</th>
+                                <th width="130" class="text-end">Harga Satuan</th>
+                                <th width="140" class="text-end">Jumlah</th>
+                                <th width="80" class="text-center">Nota</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php 
+                            $no = 1;
+                            foreach ($nonRabItems as $item): 
+                                $subtotal = floatval($item['quantity'] ?: $item['coefficient'] ?: 1) * floatval($item['unit_price']);
+                            ?>
+                            <tr>
+                                <td class="text-center"><?= $no++ ?></td>
+                                <td>
+                                    <strong><?= sanitize($item['item_name']) ?></strong>
+                                    <?php if ($item['notes']): ?>
+                                    <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?= sanitize($item['unit'] ?: 'ls') ?></td>
+                                <td class="text-end"><?= formatVolume($item['quantity'] ?: $item['coefficient'] ?: 1) ?></td>
+                                <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
+                                <td class="text-end"><strong><?= formatRupiah($subtotal, false) ?></strong></td>
+                                <td class="text-center">
+                                    <?php if (!empty($item['receipt_file'])): 
+                                        $fileUrl = $baseUrl . '/uploads/receipts/' . $item['receipt_file'];
+                                        $ext = strtolower(pathinfo($item['receipt_file'], PATHINFO_EXTENSION));
+                                    ?>
+                                        <?php if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])): ?>
+                                        <a href="<?= $fileUrl ?>" target="_blank" class="btn btn-sm btn-outline-primary py-0 px-2" title="Lihat Foto Nota">
+                                            <i class="mdi mdi-image"></i>
+                                        </a>
+                                        <?php else: ?>
+                                        <a href="<?= $fileUrl ?>" target="_blank" class="btn btn-sm btn-outline-danger py-0 px-2" title="Lihat Dokumen Nota">
+                                            <i class="mdi mdi-file-pdf-box"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-primary">
+                                <td colspan="5" class="text-end"><strong>SUBTOTAL BIAYA NON-RAB</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($subtotalNonRab, false) ?></strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($directItems) && !empty($nonRabItems)): ?>
+        <div class="card bg-light border-primary mb-3">
+            <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <span class="text-muted me-3">Subtotal RAP: <strong><?= formatRupiah($subtotalDirect) ?></strong></span>
+                    <span class="text-muted">Subtotal Non-RAB: <strong><?= formatRupiah($subtotalNonRab) ?></strong></span>
+                </div>
+                <div>
+                    <span class="fs-6 text-muted me-2">Grand Total Pengajuan:</span>
+                    <span class="fs-5 fw-bold text-primary font-monospace"><?= formatRupiah($totalAmount) ?></span>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -418,7 +561,17 @@ require_once __DIR__ . '/../../includes/header.php';
 <!-- Actualization Section -->
 <div class="row mt-3">
     <div class="col-12">
-        <?php if ($actualData): ?>
+        <?php if ($isNonRab): ?>
+        <div class="card border-purple" style="border-color: #6f42c1;">
+            <div class="card-header text-white py-2" style="background-color: #6f42c1;">
+                <h6 class="mb-0"><i class="mdi mdi-check-decagram"></i> Realisasi Biaya Lain-Lain</h6>
+            </div>
+            <div class="card-body">
+                <p class="mb-1">Pengajuan Biaya Lain-Lain ini telah <strong>Disetujui</strong> dan nilai sebesar <strong><?= formatRupiah($totalAmount) ?></strong> telah tercatat pada <strong>Realisasi Biaya Proyek</strong>.</p>
+                <small class="text-muted">Biaya Lain-Lain / Non-RAB tidak melalui proses potongan sisa anggaran upah/material/alat (FIFO) maupun weekly progress RAB.</small>
+            </div>
+        </div>
+        <?php elseif ($actualData): ?>
         <div class="card border-success">
             <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
                 <h6 class="mb-0"><i class="mdi mdi-clipboard-check"></i> Laporan Aktual</h6>

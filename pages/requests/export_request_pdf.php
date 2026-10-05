@@ -58,7 +58,10 @@ $items = dbGetAll("
     ORDER BY rs.code, reqi.item_name
 ", [$requestId]);
 
-$totalAmount = array_sum(array_column($items, 'total_price'));
+$totalAmount = 0;
+foreach ($items as $it) {
+    $totalAmount += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+}
 
 // Fetch attachments if requested
 $requestAttachments = [];
@@ -399,17 +402,17 @@ $baseUrl = getBaseUrl();
             ?>
             <tr>
                 <td class="text-center"><?= $i++ ?></td>
-                <td><code><?= htmlspecialchars($item['code'] ?? '-') ?></code></td>
+                <td><code><?= htmlspecialchars($item['code'] ?? ($item['item_code'] ?: '-')) ?></code></td>
                 <td>
                     <?= htmlspecialchars($item['item_name']) ?>
                     <?php if ($item['notes']): ?>
                     <br><small style="color: #666; font-style: italic;">Note: <?= htmlspecialchars($item['notes']) ?></small>
                     <?php endif; ?>
                 </td>
-                <td class="text-center"><?= htmlspecialchars($item['unit']) ?></td>
-                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
+                <td class="text-center"><?= htmlspecialchars($item['unit'] ?: 'ls') ?></td>
+                <td class="text-end"><?= formatVolume($item['coefficient'] ?: $item['quantity']) ?></td>
                 <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?></td>
-                <td class="text-end"><?= number_format($item['total_price'], 2, ',', '.') ?></td>
+                <td class="text-end"><?= number_format($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), 2, ',', '.') ?></td>
             </tr>
             <?php endforeach; ?>
             

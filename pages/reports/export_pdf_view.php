@@ -345,7 +345,12 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
             <?php 
             $stats = calculateProjectRealtimeStats($selectedProject['id']);
             $catStats = $stats['category_stats'] ?? [];
+            $nonRabTransactions = getProjectNonRabTransactions($selectedProject['id']);
+            $totalNonRabActual = $stats['total_non_rab_actual'] ?? getProjectNonRabActualTotal($selectedProject['id']);
+            $consolidatedActual = $stats['total_consolidated_actual'] ?? (($stats['total_actual'] ?? 0) + $totalNonRabActual);
+            $netProjectMargin = $stats['net_project_margin'] ?? (($stats['total_rab'] ?? 0) - $consolidatedActual);
             ?>
+            <h4 style="margin-bottom: 6px; font-size: 10pt; text-transform: uppercase;">1. Biaya Langsung (Direct Cost / RAP)</h4>
             <table class="data-table">
                 <thead>
                     <tr>
@@ -383,7 +388,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 </tbody>
                 <tfoot>
                     <tr class="total-row">
-                        <th colspan="3" class="text-center">SUBTOTAL</th>
+                        <th colspan="3" class="text-center">SUBTOTAL DIRECT COST</th>
                         <th class="text-end"><?= number_format($stats['subtotal_rab'] ?? 0, 2, ',', '.') ?></th>
                         <th class="text-end"><?= number_format($stats['total_rap'] ?? 0, 2, ',', '.') ?></th>
                         <th class="text-end"><?= number_format($stats['total_actual'] ?? 0, 2, ',', '.') ?></th>
@@ -403,6 +408,74 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     </tr>
                     <?php endif; ?>
                 </tfoot>
+            </table>
+
+            <h4 style="margin-top: 20px; margin-bottom: 6px; font-size: 10pt; text-transform: uppercase;">2. Biaya Lain-Lain (Non-RAB)</h4>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th width="35">No</th>
+                        <th width="85">Tgl Transaksi</th>
+                        <th width="110">No. Request</th>
+                        <th>Nama Pengeluaran</th>
+                        <th>Catatan / Keterangan</th>
+                        <th width="140" class="text-end">Nominal (Rp)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    if (empty($nonRabTransactions)):
+                    ?>
+                    <tr>
+                        <td colspan="6" class="text-center" style="padding: 10px; color: #888;">Belum ada realisasi Biaya Lain-Lain / Non-RAB yang disetujui.</td>
+                    </tr>
+                    <?php 
+                    else:
+                        $nNo = 1;
+                        foreach ($nonRabTransactions as $nr):
+                    ?>
+                    <tr>
+                        <td class="text-center"><?= $nNo++ ?></td>
+                        <td class="text-center"><?= !empty($nr['receipt_date']) ? date('d/m/Y', strtotime($nr['receipt_date'])) : '-' ?></td>
+                        <td class="text-center"><strong><?= htmlspecialchars($nr['request_number']) ?></strong></td>
+                        <td><strong><?= htmlspecialchars($nr['item_name']) ?></strong></td>
+                        <td style="color: #555;"><?= htmlspecialchars($nr['notes'] ?? '-') ?></td>
+                        <td class="text-end"><?= number_format(floatval($nr['total_price']), 2, ',', '.') ?></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+                <tfoot>
+                    <tr class="total-row">
+                        <th colspan="5" class="text-end">TOTAL REALISASI BIAYA LAIN-LAIN</th>
+                        <th class="text-end"><?= number_format($totalNonRabActual, 2, ',', '.') ?></th>
+                    </tr>
+                </tfoot>
+            </table>
+
+            <h4 style="margin-top: 20px; margin-bottom: 6px; font-size: 10pt; text-transform: uppercase;">3. Konsolidasi Total Biaya & Proyeksi Margin Bersih</h4>
+            <table class="data-table">
+                <tr class="total-row">
+                    <td><strong>Nilai Kontrak RAB (Inc. PPN)</strong></td>
+                    <td class="text-end"><strong><?= number_format($stats['total_rab'] ?? 0, 2, ',', '.') ?></strong></td>
+                </tr>
+                <tr>
+                    <td>Realisasi Direct Cost</td>
+                    <td class="text-end"><?= number_format($stats['total_actual'] ?? 0, 2, ',', '.') ?></td>
+                </tr>
+                <tr>
+                    <td>Realisasi Biaya Lain-Lain (Non-RAB)</td>
+                    <td class="text-end"><?= number_format($totalNonRabActual, 2, ',', '.') ?></td>
+                </tr>
+                <tr>
+                    <td><strong>Total Realisasi Proyek (Direct + Biaya Lain-Lain)</strong></td>
+                    <td class="text-end"><strong><?= number_format($consolidatedActual, 2, ',', '.') ?></strong></td>
+                </tr>
+                <tr class="total-row" style="background-color: #d1e7dd;">
+                    <td><strong>PROYEKSI MARGIN BERSIH PROYEK (Kontrak - Total Realisasi)</strong></td>
+                    <td class="text-end" style="<?= $netProjectMargin < 0 ? 'color: red;' : 'color: green;' ?>">
+                        <strong><?= number_format($netProjectMargin, 2, ',', '.') ?></strong>
+                    </td>
+                </tr>
             </table>
         <?php endif; ?>
 
@@ -437,22 +510,28 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 foreach ($transactions as $t):
                     $nominal = floatval($t['total_price']);
                     $totalNominal += $nominal;
+                    $isNonRab = (($t['request_type'] ?? '') === 'non_rab');
+                    $tglTransaksi = !empty($t['request_date']) ? date('d/m/Y', strtotime($t['request_date'])) : date('d/m/Y', strtotime($t['created_at']));
+                    $catCode = $isNonRab ? 'LAIN-LAIN' : ($t['subcategory_code'] ?? '-');
+                    $catName = $isNonRab ? 'Biaya Lain-Lain' : ($t['subcategory_name'] ?? '-');
+                    $qty = ($isNonRab && isset($t['quantity']) && floatval($t['quantity']) > 0) ? floatval($t['quantity']) : floatval($t['coefficient'] ?? 0);
+                    $weekVal = $isNonRab ? 'Non-RAB' : ($t['target_week'] ?? $t['week_number'] ?? '-');
                 ?>
                 <tr>
                     <td class="text-center"><?= $no++ ?></td>
-                    <td class="text-center"><?= date('d/m/Y', strtotime($t['created_at'])) ?></td>
+                    <td class="text-center"><?= $tglTransaksi ?></td>
                     <td class="text-center"><strong><?= htmlspecialchars($t['request_number']) ?></strong></td>
                     <?php if ($isAllProjects): ?><td><?= htmlspecialchars($t['project_name']) ?></td><?php endif; ?>
-                    <td class="text-center"><?= $t['target_week'] ?? $t['week_number'] ?? '-' ?></td>
-                    <td><code><?= htmlspecialchars($t['item_code'] ?? $t['subcategory_code'] ?? '-') ?></code></td>
+                    <td class="text-center"><?= $weekVal ?></td>
+                    <td><code><?= htmlspecialchars($t['item_code'] ?? $catCode) ?></code></td>
                     <td>
                         <?= htmlspecialchars($t['item_name']) ?>
-                        <?php if ($t['subcategory_name']): ?>
-                        <br><small style="color: #666; font-style: italic;">(<?= htmlspecialchars($t['subcategory_name']) ?>)</small>
+                        <?php if ($catName && !$isNonRab): ?>
+                        <br><small style="color: #666; font-style: italic;">(<?= htmlspecialchars($catName) ?>)</small>
                         <?php endif; ?>
                     </td>
-                    <td class="text-center"><?= htmlspecialchars($t['unit']) ?></td>
-                    <td class="text-end"><?= formatVolume(floatval($t['coefficient'])) ?></td>
+                    <td class="text-center"><?= htmlspecialchars($t['unit'] ?: 'ls') ?></td>
+                    <td class="text-end"><?= formatVolume($qty) ?></td>
                     <td class="text-end"><?= number_format(floatval($t['unit_price']), 2, ',', '.') ?></td>
                     <td class="text-end"><strong><?= number_format($nominal, 2, ',', '.') ?></strong></td>
                     <td><?= htmlspecialchars($t['created_by_name'] ?? '-') ?></td>

@@ -166,10 +166,13 @@ if ($format === 'csv') {
             ], $delimiter);
 
         } else {
-            // Rekap Per Kategori untuk 1 Proyek
+            // Rekap Per Kategori untuk 1 Proyek (Direct Cost + Biaya Lain-Lain)
             $stats = calculateProjectRealtimeStats($selectedProject['id']);
             $catStats = $stats['category_stats'] ?? [];
+            $nonRabTx = getProjectNonRabTransactions($selectedProject['id']);
+            $totalNonRabActual = $stats['total_non_rab_actual'] ?? getProjectNonRabActualTotal($selectedProject['id']);
 
+            fputcsv($output, ['1. BIAYA LANGSUNG (DIRECT COST / RAP)'], $delimiter);
             fputcsv($output, ['No', 'Kode Kategori', 'Nama Kategori Pekerjaan', 'Total RAB (Rp)', 'Total RAP (Rp)', 'Realisasi / Aktual (Rp)', 'Sisa Budget RAP (Rp)', 'Margin (Rp)'], $delimiter);
 
             $no = 1;
@@ -192,9 +195,8 @@ if ($format === 'csv') {
                 ], $delimiter);
             }
 
-            fputcsv($output, [], $delimiter);
             fputcsv($output, [
-                'SUBTOTAL', '', '',
+                'SUBTOTAL DIRECT COST', '', '',
                 number_format($stats['subtotal_rab'] ?? 0, 2, ',', '.'),
                 number_format($stats['total_rap'] ?? 0, 2, ',', '.'),
                 number_format($stats['total_actual'] ?? 0, 2, ',', '.'),
@@ -206,6 +208,37 @@ if ($format === 'csv') {
                 fputcsv($output, ['PPN', '', '', number_format($stats['ppn_amount'], 2, ',', '.'), '', '', '', ''], $delimiter);
                 fputcsv($output, ['TOTAL RAB DIBULATKAN', '', '', number_format($stats['total_rab'], 2, ',', '.'), '', '', '', ''], $delimiter);
             }
+
+            fputcsv($output, [], $delimiter);
+            fputcsv($output, ['2. BIAYA LAIN-LAIN (NON-RAB)'], $delimiter);
+            fputcsv($output, ['No', 'Tanggal Transaksi', 'No. Request', 'Nama Pengeluaran', 'Catatan / Keterangan', 'Nominal (Rp)'], $delimiter);
+
+            $nNo = 1;
+            foreach ($nonRabTx as $nr) {
+                fputcsv($output, [
+                    $nNo++,
+                    !empty($nr['receipt_date']) ? date('d-m-Y', strtotime($nr['receipt_date'])) : '-',
+                    $nr['request_number'],
+                    $nr['item_name'],
+                    $nr['notes'] ?? '-',
+                    number_format(floatval($nr['total_price']), 2, ',', '.')
+                ], $delimiter);
+            }
+            if (empty($nonRabTx)) {
+                fputcsv($output, ['-', 'Belum ada realisasi Biaya Lain-Lain / Non-RAB', '', '', '', '0,00'], $delimiter);
+            }
+            fputcsv($output, [
+                'TOTAL REALISASI BIAYA LAIN-LAIN', '', '', '', '',
+                number_format($totalNonRabActual, 2, ',', '.')
+            ], $delimiter);
+
+            fputcsv($output, [], $delimiter);
+            fputcsv($output, ['3. REKAPITULASI KONSOLIDASI & MARGIN BERSIH PROYEK'], $delimiter);
+            fputcsv($output, ['Nilai Kontrak RAB (Inc. PPN)', ':', number_format($stats['total_rab'] ?? 0, 2, ',', '.')], $delimiter);
+            fputcsv($output, ['Realisasi Direct Cost', ':', number_format($stats['total_actual'] ?? 0, 2, ',', '.')], $delimiter);
+            fputcsv($output, ['Realisasi Biaya Lain-Lain', ':', number_format($totalNonRabActual, 2, ',', '.')], $delimiter);
+            fputcsv($output, ['Total Realisasi Proyek (Direct + Biaya Lain-Lain)', ':', number_format($stats['total_consolidated_actual'] ?? (($stats['total_actual'] ?? 0) + $totalNonRabActual), 2, ',', '.')], $delimiter);
+            fputcsv($output, ['Margin Bersih Proyek', ':', number_format($stats['net_project_margin'] ?? (($stats['total_rab'] ?? 0) - ($stats['total_consolidated_actual'] ?? 0)), 2, ',', '.')], $delimiter);
         }
 
     } elseif ($type === 'transactions') {
@@ -221,7 +254,7 @@ if ($format === 'csv') {
         fputcsv($output, [], $delimiter);
 
         fputcsv($output, [
-            'No', 'Tanggal Pengajuan', 'No. Pengajuan', 'Nama Proyek', 'Minggu Ke',
+            'No', 'Tanggal Transaksi', 'No. Pengajuan', 'Nama Proyek', 'Minggu Ke',
             'Kode Pekerjaan', 'Kategori / Pekerjaan', 'Kode Item', 'Uraian Pekerjaan / Item',
             'Satuan', 'Volume', 'Harga Satuan (Rp)', 'Total Biaya (Rp)', 'Pemohon', 'Catatan'
         ], $delimiter);
@@ -234,18 +267,25 @@ if ($format === 'csv') {
             $nominal = floatval($t['total_price']);
             $totalNominal += $nominal;
 
+            $isNonRab = (($t['request_type'] ?? '') === 'non_rab');
+            $tglTransaksi = !empty($t['request_date']) ? date('d-m-Y', strtotime($t['request_date'])) : date('d-m-Y', strtotime($t['created_at']));
+            $catCode = $isNonRab ? 'LAIN-LAIN' : ($t['subcategory_code'] ?? '-');
+            $catName = $isNonRab ? 'Biaya Lain-Lain' : ($t['subcategory_name'] ?? '-');
+            $qty = ($isNonRab && isset($t['quantity']) && floatval($t['quantity']) > 0) ? floatval($t['quantity']) : floatval($t['coefficient'] ?? 0);
+            $weekVal = $isNonRab ? 'Non-RAB' : ($t['target_week'] ?? $t['week_number'] ?? '-');
+
             fputcsv($output, [
                 $no++,
-                date('d-m-Y', strtotime($t['created_at'])),
+                $tglTransaksi,
                 $t['request_number'],
                 $t['project_name'],
-                $t['target_week'] ?? $t['week_number'] ?? '-',
-                $t['subcategory_code'] ?? '-',
-                $t['subcategory_name'] ?? '-',
+                $weekVal,
+                $catCode,
+                $catName,
                 $t['item_code'] ?? '-',
                 $t['item_name'],
-                $t['unit'],
-                formatVolume(floatval($t['coefficient'])),
+                $t['unit'] ?: 'ls',
+                formatVolume($qty),
                 number_format(floatval($t['unit_price']), 2, ',', '.'),
                 number_format($nominal, 2, ',', '.'),
                 $t['created_by_name'] ?? '-',
@@ -577,11 +617,11 @@ function getProjectPeriodActualSpending($projectId, $startDate = null, $endDate 
     $params = [$projectId];
     
     if ($startDate) {
-        $where .= " AND DATE(req.created_at) >= ?";
+        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
         $params[] = $startDate;
     }
     if ($endDate) {
-        $where .= " AND DATE(req.created_at) <= ?";
+        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
         $params[] = $endDate;
     }
     
@@ -614,19 +654,19 @@ function fetchProjectTransactions($accessibleProjectIds, $projectId = 'all', $st
     }
     
     if ($startDate) {
-        $where .= " AND DATE(req.created_at) >= ?";
+        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
         $params[] = $startDate;
     }
     if ($endDate) {
-        $where .= " AND DATE(req.created_at) <= ?";
+        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
         $params[] = $endDate;
     }
     
     return dbGetAll("
-        SELECT req.id as request_id, req.request_number, req.created_at, req.target_week, req.week_number,
+        SELECT req.id as request_id, req.request_number, req.request_type, req.non_rab_category, req.request_date, req.created_at, req.target_week, req.week_number,
                p.id as project_id, p.name as project_name,
                u.full_name as created_by_name,
-               reqi.item_name, reqi.item_code, reqi.unit, reqi.coefficient, reqi.unit_price, reqi.total_price, reqi.notes,
+               reqi.item_name, reqi.item_code, reqi.unit, reqi.quantity, reqi.coefficient, reqi.unit_price, reqi.total_price, reqi.notes,
                rs.code as subcategory_code, rs.name as subcategory_name
         FROM request_items reqi
         JOIN requests req ON reqi.request_id = req.id
@@ -634,7 +674,7 @@ function fetchProjectTransactions($accessibleProjectIds, $projectId = 'all', $st
         LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
         LEFT JOIN users u ON req.created_by = u.id
         WHERE $where
-        ORDER BY req.created_at DESC, p.name, req.id DESC
+        ORDER BY COALESCE(req.request_date, DATE(req.created_at)) DESC, p.name, req.id DESC
     ", $params);
 }
 

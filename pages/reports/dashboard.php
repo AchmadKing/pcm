@@ -114,14 +114,14 @@ $overallStats = getOverallProjectsRealtimeStats();
     <div class="col-xl-3 col-md-6 mb-3">
         <div class="card mini-stats-wid shadow-sm border-0 h-100 mb-0">
             <div class="card-body">
-                <?php $totalActual = $overallStats['total_actual'] ?? 0; $totalRap = $overallStats['total_rap'] ?? 0; ?>
+                <?php $totalActual = $overallStats['total_consolidated_actual'] ?? ($overallStats['total_actual'] ?? 0); $totalRap = $overallStats['total_rap'] ?? 0; ?>
                 <div class="d-flex align-items-center">
                     <div class="flex-grow-1">
                         <p class="text-muted fw-medium mb-1">Total Realisasi (Aktual)</p>
                         <h4 class="<?= $totalActual > $totalRap ? 'text-danger' : 'text-success' ?> mb-1">
                             <?= formatRupiah($totalActual) ?>
                         </h4>
-                        <small class="text-muted">Pengeluaran ter-approve</small>
+                        <small class="text-muted">Direct + Biaya Lain-Lain</small>
                     </div>
                     <div class="avatar-sm align-self-center ms-2 flex-shrink-0">
                         <span class="avatar-title rounded-circle <?= $totalActual > $totalRap ? 'bg-danger text-danger' : 'bg-success text-success' ?> bg-soft font-size-22">
@@ -135,7 +135,7 @@ $overallStats = getOverallProjectsRealtimeStats();
     <div class="col-xl-3 col-md-6 mb-3">
         <div class="card mini-stats-wid shadow-sm border-0 h-100 mb-0">
             <div class="card-body">
-                <?php $margin = ($overallStats['total_rab'] ?? 0) - $totalActual; ?>
+                <?php $margin = $overallStats['net_margin'] ?? (($overallStats['total_rab'] ?? 0) - $totalActual); ?>
                 <div class="d-flex align-items-center">
                     <div class="flex-grow-1">
                         <p class="text-muted fw-medium mb-1">Margin Potensial</p>
@@ -206,34 +206,48 @@ $overallStats = getOverallProjectsRealtimeStats();
                 </span>
             </div>
             <div class="card-body">
+                <?php 
+                $totalNonRabActual = $projectStats['total_non_rab_actual'] ?? getProjectNonRabActualTotal($projectId);
+                $consolidatedActual = $projectStats['total_consolidated_actual'] ?? (($projectStats['total_actual'] ?? 0) + $totalNonRabActual);
+                $netProjectMargin = $projectStats['net_project_margin'] ?? (($projectStats['total_rab'] ?? 0) - $consolidatedActual);
+                ?>
                 <!-- Summary Cards -->
                 <div class="row mb-4">
-                    <div class="col-md-4">
-                        <div class="border rounded p-3 text-center bg-primary bg-opacity-10">
-                            <h6 class="text-muted mb-1">RAB (Kontrak)</h6>
-                            <h4 class="text-primary mb-0"><?= formatRupiah($projectStats['total_rab']) ?></h4>
+                    <div class="col-md-3 col-6 mb-2">
+                        <div class="border rounded p-3 text-center bg-primary bg-opacity-10 h-100">
+                            <h6 class="text-muted mb-1 small">RAB Kontrak (Inc. PPN)</h6>
+                            <h5 class="text-primary mb-0 fw-bold"><?= formatRupiah($projectStats['total_rab']) ?></h5>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <div class="border rounded p-3 text-center bg-info bg-opacity-10">
-                            <h6 class="text-muted mb-1">RAP (Budget)</h6>
-                            <h4 class="text-info mb-0"><?= formatRupiah($projectStats['total_rap']) ?></h4>
+                    <div class="col-md-3 col-6 mb-2">
+                        <div class="border rounded p-3 text-center bg-info bg-opacity-10 h-100">
+                            <h6 class="text-muted mb-1 small">RAP Direct Cost</h6>
+                            <h5 class="text-info mb-0 fw-bold"><?= formatRupiah($projectStats['total_rap']) ?></h5>
+                            <small class="text-muted">Realisasi: <?= formatRupiah($projectStats['total_actual']) ?></small>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <div class="border rounded p-3 text-center <?= $projectStats['total_actual'] > $projectStats['total_rap'] ? 'bg-danger' : 'bg-success' ?> bg-opacity-10">
-                            <h6 class="text-muted mb-1">Realisasi (Aktual)</h6>
-                            <h4 class="<?= $projectStats['total_actual'] > $projectStats['total_rap'] ? 'text-danger' : 'text-success' ?> mb-0">
-                                <?= formatRupiah($projectStats['total_actual']) ?>
-                            </h4>
+                    <div class="col-md-3 col-6 mb-2">
+                        <div class="border rounded p-3 text-center bg-purple bg-opacity-10 h-100" style="background-color: rgba(111, 66, 193, 0.1);">
+                            <h6 class="text-muted mb-1 small">Realisasi Biaya Lain-Lain</h6>
+                            <h5 class="mb-0 fw-bold" style="color: #6f42c1;"><?= formatRupiah($totalNonRabActual) ?></h5>
+                            <small class="text-muted">Non-RAB Actual</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6 mb-2">
+                        <div class="border rounded p-3 text-center bg-success bg-opacity-10 h-100">
+                            <h6 class="text-muted mb-1 small">Total Realisasi Proyek</h6>
+                            <h5 class="text-success mb-0 fw-bold">
+                                <?= formatRupiah($consolidatedActual) ?>
+                            </h5>
+                            <small class="text-muted">Direct + Biaya Lain-Lain</small>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Category Breakdown -->
-                <h6 class="mb-3 fw-bold"><i class="mdi mdi-view-list me-1 text-primary"></i> Detail Biaya per Kategori Pekerjaan</h6>
-                <div class="table-responsive">
-                    <table class="table table-bordered table-sm table-hover align-middle">
+                <!-- Section 1: Category Breakdown (Direct Cost) -->
+                <h6 class="mb-3 fw-bold"><i class="mdi mdi-view-list me-1 text-primary"></i> 1. Detail Biaya Langsung (Direct Cost / RAP)</h6>
+                <div class="table-responsive mb-4">
+                    <table class="table table-bordered table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>Kategori</th>
@@ -265,7 +279,7 @@ $overallStats = getOverallProjectsRealtimeStats();
                         </tbody>
                         <tfoot class="table-dark">
                             <tr>
-                                <th>SUBTOTAL</th>
+                                <th>SUBTOTAL DIRECT COST</th>
                                 <th class="text-end"><?= formatRupiah($projectStats['subtotal_rab']) ?></th>
                                 <th class="text-end"><?= formatRupiah($projectStats['total_rap']) ?></th>
                                 <th class="text-end"><?= formatRupiah($projectStats['total_actual']) ?></th>
@@ -287,6 +301,53 @@ $overallStats = getOverallProjectsRealtimeStats();
                         </tfoot>
                     </table>
                 </div>
+
+                <!-- Section 2: Biaya Lain-Lain (Non-RAB) -->
+                <h6 class="mb-3 fw-bold" style="color: #6f42c1;"><i class="mdi mdi-receipt me-1"></i> 2. Biaya Lain-Lain (Non-RAB)</h6>
+                <?php $nonRabTransactions = getProjectNonRabTransactions($projectId); ?>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="40" class="text-center">No</th>
+                                <th width="100">Tgl Transaksi</th>
+                                <th width="120">No. Request</th>
+                                <th>Nama Pengeluaran</th>
+                                <th>Catatan / Keterangan</th>
+                                <th width="140" class="text-end">Nominal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($nonRabTransactions)): ?>
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-3">Belum ada realisasi Biaya Lain-Lain / Non-RAB yang disetujui.</td>
+                            </tr>
+                            <?php else: 
+                                $noNr = 1;
+                                foreach ($nonRabTransactions as $nrTx):
+                            ?>
+                            <tr>
+                                <td class="text-center"><?= $noNr++ ?></td>
+                                <td><?= !empty($nrTx['receipt_date']) ? date('d/m/Y', strtotime($nrTx['receipt_date'])) : '-' ?></td>
+                                <td>
+                                    <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $nrTx['request_id'] ?>" class="text-primary fw-medium" target="_blank">
+                                        <?= sanitize($nrTx['request_number']) ?>
+                                    </a>
+                                </td>
+                                <td><strong><?= sanitize($nrTx['item_name']) ?></strong></td>
+                                <td class="small text-muted"><?= sanitize($nrTx['notes'] ?? '-') ?></td>
+                                <td class="text-end font-monospace fw-semibold"><?= formatRupiah($nrTx['total_price']) ?></td>
+                            </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                        <tfoot class="table-light fw-bold">
+                            <tr>
+                                <th colspan="5" class="text-end">TOTAL REALISASI BIAYA LAIN-LAIN</th>
+                                <th class="text-end font-monospace" style="color: #6f42c1;"><?= formatRupiah($totalNonRabActual) ?></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -295,63 +356,66 @@ $overallStats = getOverallProjectsRealtimeStats();
     <div class="col-lg-4">
         <div class="card shadow-sm border-0">
             <div class="card-header bg-light py-3">
-                <h5 class="mb-0 text-dark"><i class="mdi mdi-chart-donut me-1 text-primary"></i> Analisis Margin & Budget</h5>
+                <h5 class="mb-0 text-dark"><i class="mdi mdi-chart-donut me-1 text-primary"></i> Analisis Margin Proyek</h5>
             </div>
             <div class="card-body">
                 <?php 
-                $marginRabRap = $projectStats['total_rab'] - $projectStats['total_rap'];
-                $marginRapAktual = $projectStats['total_rap'] - $projectStats['total_actual'];
-                $marginTotal = $projectStats['total_rab'] - $projectStats['total_actual'];
-                $percentUsed = $projectStats['total_rap'] > 0 ? ($projectStats['total_actual'] / $projectStats['total_rap']) * 100 : 0;
+                $percentUsedDirect = $projectStats['total_rap'] > 0 ? ($projectStats['total_actual'] / $projectStats['total_rap']) * 100 : 0;
+                $netMarginPct = $projectStats['total_rab'] > 0 ? ($netProjectMargin / $projectStats['total_rab']) * 100 : 0;
                 ?>
                 
-                <div class="mb-4">
+                <div class="mb-3">
                     <div class="d-flex justify-content-between mb-1">
-                        <span class="fw-semibold">Penggunaan Budget RAP</span>
-                        <span class="fw-bold <?= $percentUsed > 100 ? 'text-danger' : ($percentUsed > 80 ? 'text-warning' : 'text-success') ?>">
-                            <?= number_format($percentUsed, 1) ?>%
+                        <span class="fw-semibold small">Pemakaian RAP Direct Cost</span>
+                        <span class="fw-bold small <?= $percentUsedDirect > 100 ? 'text-danger' : ($percentUsedDirect > 80 ? 'text-warning' : 'text-success') ?>">
+                            <?= number_format($percentUsedDirect, 1) ?>%
                         </span>
                     </div>
-                    <div class="progress" style="height: 18px;">
-                        <div class="progress-bar <?= $percentUsed > 100 ? 'bg-danger' : ($percentUsed > 80 ? 'bg-warning' : 'bg-success') ?>" 
-                             style="width: <?= min($percentUsed, 100) ?>%"></div>
+                    <div class="progress" style="height: 14px;">
+                        <div class="progress-bar <?= $percentUsedDirect > 100 ? 'bg-danger' : ($percentUsedDirect > 80 ? 'bg-warning' : 'bg-success') ?>" 
+                             style="width: <?= min($percentUsedDirect, 100) ?>%"></div>
                     </div>
                 </div>
                 
-                <table class="table table-sm mb-3">
+                <table class="table table-sm mb-3 align-middle">
                     <tr>
-                        <td>Margin RAB vs RAP</td>
-                        <td class="text-end <?= $marginRabRap >= 0 ? 'text-success' : 'text-danger' ?>">
-                            <strong><?= formatRupiah($marginRabRap) ?></strong>
-                        </td>
+                        <td class="text-muted small">RAB Kontrak (Nilai Proyek)</td>
+                        <td class="text-end"><strong><?= formatRupiah($projectStats['total_rab']) ?></strong></td>
                     </tr>
                     <tr>
-                        <td>Sisa Budget RAP</td>
-                        <td class="text-end <?= $marginRapAktual >= 0 ? 'text-success' : 'text-danger' ?>">
-                            <strong><?= formatRupiah($marginRapAktual) ?></strong>
-                        </td>
+                        <td class="text-muted small">Realisasi Direct Cost</td>
+                        <td class="text-end text-primary"><strong><?= formatRupiah($projectStats['total_actual']) ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted small">Realisasi Biaya Lain-Lain</td>
+                        <td class="text-end" style="color: #6f42c1;"><strong><?= formatRupiah($totalNonRabActual) ?></strong></td>
                     </tr>
                     <tr class="table-light">
-                        <td><strong>Total Margin Proyek</strong></td>
-                        <td class="text-end <?= $marginTotal >= 0 ? 'text-success' : 'text-danger' ?>">
-                            <strong><?= formatRupiah($marginTotal) ?></strong>
+                        <td><strong>Total Realisasi Proyek</strong></td>
+                        <td class="text-end"><strong><?= formatRupiah($consolidatedActual) ?></strong></td>
+                    </tr>
+                    <tr class="table-warning bg-opacity-25">
+                        <td><strong class="text-dark">Margin Bersih Proyek</strong></td>
+                        <td class="text-end <?= $netProjectMargin >= 0 ? 'text-success' : 'text-danger' ?>">
+                            <strong class="fs-6"><?= formatRupiah($netProjectMargin) ?></strong>
+                            <div class="small <?= $netMarginPct >= 0 ? 'text-success' : 'text-danger' ?>"><?= number_format($netMarginPct, 2) ?>% Kontrak</div>
                         </td>
                     </tr>
                 </table>
                 
                 <hr>
-                <h6>Status Budget</h6>
-                <?php if ($percentUsed > 100): ?>
-                <div class="alert alert-danger py-2 mb-0">
-                    <i class="mdi mdi-alert me-1"></i> Budget RAP telah terlampaui!
+                <h6>Status Pengendalian Biaya Direct</h6>
+                <?php if ($percentUsedDirect > 100): ?>
+                <div class="alert alert-danger py-2 mb-0 small">
+                    <i class="mdi mdi-alert me-1"></i> Realisasi Direct Cost telah melebihi target RAP!
                 </div>
-                <?php elseif ($percentUsed > 80): ?>
-                <div class="alert alert-warning py-2 mb-0">
-                    <i class="mdi mdi-alert-circle me-1"></i> Penggunaan budget telah mencapai &gt; 80%
+                <?php elseif ($percentUsedDirect > 80): ?>
+                <div class="alert alert-warning py-2 mb-0 small">
+                    <i class="mdi mdi-alert-circle me-1"></i> Penggunaan RAP Direct Cost telah mencapai &gt; 80%
                 </div>
                 <?php else: ?>
-                <div class="alert alert-success py-2 mb-0">
-                    <i class="mdi mdi-check-circle me-1"></i> Penggunaan budget dalam batas aman
+                <div class="alert alert-success py-2 mb-0 small">
+                    <i class="mdi mdi-check-circle me-1"></i> Penggunaan RAP Direct Cost dalam batas aman
                 </div>
                 <?php endif; ?>
             </div>

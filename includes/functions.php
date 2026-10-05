@@ -128,6 +128,9 @@ function formatDateTime($datetime, $withDay = false) {
  * @return string
  */
 function sanitize($input) {
+    if (is_array($input)) {
+        return '';
+    }
     return htmlspecialchars(trim((string)($input ?? '')), ENT_QUOTES, 'UTF-8');
 }
 
@@ -1941,6 +1944,11 @@ function calculateProjectRealtimeStats($projectId) {
     $totalRabWithPpn = $subtotalRab + $ppnAmount;
     $totalRabRounded = ceil($totalRabWithPpn / 10) * 10;
 
+    // Non-RAB / Biaya Lain-Lain Actual Spending
+    $totalNonRabActual = getProjectNonRabActualTotal($projectId);
+    $totalConsolidatedActual = $totalActual + $totalNonRabActual;
+    $netProjectMargin = $totalRabRounded - $totalConsolidatedActual;
+
     return [
         'project' => $project,
         'name' => $project['name'],
@@ -1951,7 +1959,10 @@ function calculateProjectRealtimeStats($projectId) {
         'total_rab_raw' => $totalRabWithPpn,
         'total_rap' => $totalRap,
         'total_actual' => $totalActual,
-        'category_stats' => $categoryStats
+        'category_stats' => $categoryStats,
+        'total_non_rab_actual' => $totalNonRabActual,
+        'total_consolidated_actual' => $totalConsolidatedActual,
+        'net_project_margin' => $netProjectMargin
     ];
 }
 
@@ -2034,7 +2045,7 @@ function batchGetActualSpendingBySubcategory($projectId) {
         SELECT reqi.subcategory_id, COALESCE(SUM(reqi.total_price), 0) as total
         FROM request_items reqi
         JOIN requests req ON reqi.request_id = req.id
-        WHERE req.project_id = ? AND req.status = 'approved'
+        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type IN ('rab', 'mixed') OR req.request_type IS NULL) AND reqi.subcategory_id IS NOT NULL
         GROUP BY reqi.subcategory_id
     ", [$projectId]);
 
@@ -2060,7 +2071,7 @@ function batchGetActualBreakdownBySubcategory($projectId) {
         FROM request_items reqi
         JOIN requests req ON reqi.request_id = req.id
         JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = req.project_id
-        WHERE req.project_id = ? AND req.status = 'approved'
+        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type IN ('rab', 'mixed') OR req.request_type IS NULL) AND reqi.subcategory_id IS NOT NULL
         GROUP BY reqi.subcategory_id, pi.category
     ", [$projectId]);
 
@@ -2094,7 +2105,7 @@ function batchGetActualizationAdjustments($projectId) {
                GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
         FROM requests r
         JOIN request_actuals ra ON ra.request_id = r.id
-        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
+        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1 AND (r.request_type IN ('rab', 'mixed') OR r.request_type IS NULL)
         HAVING total_remaining > 0
     ", [$projectId]);
 
@@ -2155,6 +2166,7 @@ function getOverallProjectsRealtimeStats() {
     $totalRab = 0;
     $totalRap = 0;
     $totalActual = 0;
+    $totalNonRabActual = 0;
 
     foreach ($projects as $p) {
         if ($p['status'] === 'on_progress') $activeProjects++;
@@ -2165,8 +2177,12 @@ function getOverallProjectsRealtimeStats() {
             $totalRab += $stats['total_rab'];
             $totalRap += $stats['total_rap'];
             $totalActual += $stats['total_actual'];
+            $totalNonRabActual += $stats['total_non_rab_actual'] ?? 0;
         }
     }
+
+    $totalConsolidatedActual = $totalActual + $totalNonRabActual;
+    $netMargin = $totalRab - $totalConsolidatedActual;
 
     return [
         'total_projects' => $totalProjects,
@@ -2174,7 +2190,11 @@ function getOverallProjectsRealtimeStats() {
         'completed_projects' => $completedProjects,
         'total_rab' => $totalRab,
         'total_rap' => $totalRap,
-        'total_actual' => $totalActual
+        'total_actual' => $totalActual,
+        'total_non_rab_actual' => $totalNonRabActual,
+        'total_consolidated_actual' => $totalConsolidatedActual,
+        'net_margin' => $netMargin,
+        'total_net_margin' => $netMargin
     ];
 }
 
@@ -2729,13 +2749,13 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             dbExecute("UPDATE projects SET rap_source_id = 0 WHERE id = ?", [$newProjectId]);
         }
         
-        // 10. Clone Requests (requests -> items, attachments, actuals, actual attachments)
+        // 10. Clone Requests (Direct requests only -> items, attachments, actuals, actual attachments)
         $reqUploadDir = __DIR__ . '/../uploads/requests/';
         $actUploadDir = __DIR__ . '/../uploads/actuals/';
         if (!is_dir($reqUploadDir)) mkdir($reqUploadDir, 0755, true);
         if (!is_dir($actUploadDir)) mkdir($actUploadDir, 0755, true);
         
-        $requests = dbGetAll("SELECT * FROM requests WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+        $requests = dbGetAll("SELECT * FROM requests WHERE project_id = ? AND (request_type = 'rab' OR request_type IS NULL) ORDER BY id ASC", [$sourceProjectId]);
         foreach ($requests as $req) {
             $newReqId = dbInsert("
                 INSERT INTO requests (
@@ -2781,16 +2801,17 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             $reqAtts = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY id ASC", [$req['id']]);
             foreach ($reqAtts as $att) {
                 $srcFile = $reqUploadDir . $att['filename'];
-                if (!file_exists($srcFile)) {
-                    throw new RuntimeException("Source request attachment file not found: " . $att['filename']);
+                $newFilename = $att['filename'];
+                if (file_exists($srcFile)) {
+                    $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
+                    $newFilename = 'req_' . $newReqId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                    $destFile = $reqUploadDir . $newFilename;
+                    if (copy($srcFile, $destFile)) {
+                        $createdFiles[] = $destFile;
+                    } else {
+                        $newFilename = $att['filename'];
+                    }
                 }
-                $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
-                $newFilename = 'req_' . $newReqId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
-                $destFile = $reqUploadDir . $newFilename;
-                if (!copy($srcFile, $destFile)) {
-                    throw new RuntimeException("Failed to copy request attachment from $srcFile to $destFile");
-                }
-                $createdFiles[] = $destFile;
                 
                 dbInsert("
                     INSERT INTO request_attachments (request_id, filename, original_name, file_type, file_size)
@@ -2816,16 +2837,17 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                 $actAtts = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY id ASC", [$actual['id']]);
                 foreach ($actAtts as $att) {
                     $srcFile = $actUploadDir . $att['filename'];
-                    if (!file_exists($srcFile)) {
-                        throw new RuntimeException("Source actual attachment file not found: " . $att['filename']);
+                    $newFilename = $att['filename'];
+                    if (file_exists($srcFile)) {
+                        $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
+                        $newFilename = 'act_' . $newActId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                        $destFile = $actUploadDir . $newFilename;
+                        if (copy($srcFile, $destFile)) {
+                            $createdFiles[] = $destFile;
+                        } else {
+                            $newFilename = $att['filename'];
+                        }
                     }
-                    $ext = pathinfo($att['filename'], PATHINFO_EXTENSION);
-                    $newFilename = 'act_' . $newActId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
-                    $destFile = $actUploadDir . $newFilename;
-                    if (!copy($srcFile, $destFile)) {
-                        throw new RuntimeException("Failed to copy actual attachment from $srcFile to $destFile");
-                    }
-                    $createdFiles[] = $destFile;
                     
                     dbInsert("
                         INSERT INTO request_actual_attachments (request_actual_id, filename, original_name, file_type, file_size)
@@ -2856,16 +2878,17 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
         $images = dbGetAll("SELECT * FROM project_images WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
         foreach ($images as $img) {
             $srcFile = $imgUploadDir . $img['filename'];
-            if (!file_exists($srcFile)) {
-                throw new RuntimeException("Source project image file not found: " . $img['filename']);
+            $newFilename = $img['filename'];
+            if (file_exists($srcFile)) {
+                $ext = pathinfo($img['filename'], PATHINFO_EXTENSION);
+                $newFilename = 'proj_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                $destFile = $imgUploadDir . $newFilename;
+                if (copy($srcFile, $destFile)) {
+                    $createdFiles[] = $destFile;
+                } else {
+                    $newFilename = $img['filename'];
+                }
             }
-            $ext = pathinfo($img['filename'], PATHINFO_EXTENSION);
-            $newFilename = 'proj_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
-            $destFile = $imgUploadDir . $newFilename;
-            if (!copy($srcFile, $destFile)) {
-                throw new RuntimeException("Failed to copy project image from $srcFile to $destFile");
-            }
-            $createdFiles[] = $destFile;
             
             $newImgId = dbInsert("
                 INSERT INTO project_images (project_id, filename, original_name, description, uploaded_by)
@@ -2909,16 +2932,17 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             }
             
             $srcFile = $docUploadDir . $doc['filename'];
-            if (!file_exists($srcFile)) {
-                throw new RuntimeException("Source project document file not found: " . $doc['filename']);
+            $newFilename = $doc['filename'];
+            if (file_exists($srcFile)) {
+                $ext = pathinfo($doc['filename'], PATHINFO_EXTENSION);
+                $newFilename = 'doc_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                $destFile = $docUploadDir . $newFilename;
+                if (copy($srcFile, $destFile)) {
+                    $createdFiles[] = $destFile;
+                } else {
+                    $newFilename = $doc['filename'];
+                }
             }
-            $ext = pathinfo($doc['filename'], PATHINFO_EXTENSION);
-            $newFilename = 'doc_' . $newProjectId . '_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
-            $destFile = $docUploadDir . $newFilename;
-            if (!copy($srcFile, $destFile)) {
-                throw new RuntimeException("Failed to copy project document from $srcFile to $destFile");
-            }
-            $createdFiles[] = $destFile;
             
             $newDocId = dbInsert("
                 INSERT INTO project_documents (
@@ -2930,15 +2954,13 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                 $doc['file_type'], $doc['file_size'], $doc['category'], $doc['description'], $doc['uploaded_by']
             ]);
             $maps['project_documents'][$doc['id']] = intval($newDocId);
-        }
-        
-        // 14. Integrity Verification before commit
+        }        // 14. Integrity Verification before commit
         $checks = [
             ['table' => 'project_items', 'sourceCount' => count($items), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?"],
             ['table' => 'project_ahsp', 'sourceCount' => count($ahsps), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?"],
             ['table' => 'rab_categories', 'sourceCount' => count($categories), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_categories WHERE project_id = ?"],
             ['table' => 'rab_snapshots', 'sourceCount' => count($snapshots), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_snapshots WHERE project_id = ?"],
-            ['table' => 'requests', 'sourceCount' => count($requests), 'newQuery' => "SELECT COUNT(*) as cnt FROM requests WHERE project_id = ?"],
+            ['table' => 'requests', 'sourceCount' => count($requests), 'newQuery' => "SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND (request_type = 'rab' OR request_type IS NULL)"],
             ['table' => 'weekly_progress', 'sourceCount' => count($progressList), 'newQuery' => "SELECT COUNT(*) as cnt FROM weekly_progress WHERE project_id = ?"],
             ['table' => 'project_images', 'sourceCount' => count($images), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_images WHERE project_id = ?"],
             ['table' => 'project_documents', 'sourceCount' => count($docs), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?"],
@@ -2967,6 +2989,198 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
         error_log("Duplicate Project Error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
         throw $e;
     }
+}
+
+/**
+ * Get standard list of Non-RAB / Indirect Cost categories
+ * 
+ * @return array
+ */
+function getNonRabCategories() {
+    return [
+        'operasional' => [
+            'label' => 'Biaya Operasional',
+            'icon' => 'mdi-gas-station',
+            'color' => 'warning',
+            'description' => 'BBM, listrik/air site office, konsumsi lembur, akomodasi mess lapangan'
+        ],
+        'umum' => [
+            'label' => 'Biaya Umum & Administrasi',
+            'icon' => 'mdi-file-document-outline',
+            'color' => 'info',
+            'description' => 'Perizinan, retribusi wilayah, materai, legalitas, ATK lapangan'
+        ],
+        'tak_terduga' => [
+            'label' => 'Biaya Tak Terduga (Contingency)',
+            'icon' => 'mdi-alert-circle-outline',
+            'color' => 'danger',
+            'description' => 'Perbaikan darurat, penanganan cuaca ekstrem, kejadian tak terduga'
+        ],
+        'lainnya' => [
+            'label' => 'Biaya Non-RAB Lainnya',
+            'icon' => 'mdi-dots-horizontal-circle-outline',
+            'color' => 'secondary',
+            'description' => 'Pengeluaran proyek non-RAB lainnya yang sah dan disetujui'
+        ]
+    ];
+}
+
+/**
+ * Get display label for a Non-RAB category key (Backward Compatibility)
+ * 
+ * @param string|null $categoryKey
+ * @return string
+ */
+function getNonRabCategoryLabel($categoryKey) {
+    if (empty($categoryKey)) {
+        return 'Biaya Lain-Lain';
+    }
+    $categories = getNonRabCategories();
+    if (isset($categories[$categoryKey])) {
+        return is_array($categories[$categoryKey]) ? ($categories[$categoryKey]['label'] ?? $categoryKey) : $categories[$categoryKey];
+    }
+    return (string)$categoryKey;
+}
+
+/**
+ * Get all approved Non-RAB / Biaya Lain-Lain transactions for a project
+ *
+ * @param int $projectId
+ * @return array
+ */
+function getProjectNonRabTransactions($projectId) {
+    $projectId = intval($projectId);
+    return dbGetAll("
+        SELECT req.id as request_id, req.request_number, req.request_date, req.request_date as receipt_date, req.created_at, req.target_week, req.week_number, req.description,
+               u.full_name as created_by_name,
+               reqi.id as item_id, reqi.item_name, reqi.quantity, reqi.unit, reqi.unit_price, 
+               reqi.total_price as total_amount,
+               reqi.total_price as total_price,
+               reqi.notes,
+               (SELECT filename FROM request_attachments ra WHERE ra.request_id = req.id LIMIT 1) as receipt_file,
+               req.non_rab_category
+        FROM request_items reqi
+        JOIN requests req ON reqi.request_id = req.id
+        LEFT JOIN users u ON req.created_by = u.id
+        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
+        ORDER BY req.request_date DESC, req.created_at DESC, reqi.id ASC
+    ", [$projectId]);
+}
+
+/**
+ * Get total approved Non-RAB / Biaya Lain-Lain actual spending for a project
+ *
+ * @param int $projectId
+ * @return float
+ */
+function getProjectNonRabActualTotal($projectId) {
+    $projectId = intval($projectId);
+    $row = dbGetRow("
+        SELECT COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_approved
+        FROM requests req
+        JOIN request_items reqi ON reqi.request_id = req.id
+        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
+    ", [$projectId]);
+    return floatval($row['total_approved'] ?? 0);
+}
+
+/**
+ * Get comprehensive Non-RAB budget and actual spending summary for a project
+ * 
+ * @param int $projectId
+ * @return array
+ */
+function getProjectNonRabBudgetSummary($projectId) {
+    $projectId = intval($projectId);
+    $categories = getNonRabCategories();
+
+    // Fetch configured budgets
+    $budgets = dbGetAll("SELECT * FROM project_non_rab_budgets WHERE project_id = ?", [$projectId]);
+    $budgetMap = [];
+    foreach ($budgets as $b) {
+        $budgetMap[$b['category']] = $b;
+    }
+
+    // Approved Non-RAB Actuals (Authoritative SUM(quantity * unit_price))
+    $approvedRows = dbGetAll("
+        SELECT req.non_rab_category, COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_approved
+        FROM requests req
+        JOIN request_items reqi ON reqi.request_id = req.id
+        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
+        GROUP BY req.non_rab_category
+    ", [$projectId]);
+    $approvedMap = [];
+    foreach ($approvedRows as $r) {
+        $approvedMap[$r['non_rab_category']] = floatval($r['total_approved']);
+    }
+
+    // Pending / PM Approved Non-RAB Requests
+    $pendingRows = dbGetAll("
+        SELECT req.non_rab_category, COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_pending
+        FROM requests req
+        JOIN request_items reqi ON reqi.request_id = req.id
+        WHERE req.project_id = ? AND req.status IN ('pending', 'pm_approved') AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
+        GROUP BY req.non_rab_category
+    ", [$projectId]);
+    $pendingMap = [];
+    foreach ($pendingRows as $r) {
+        $pendingMap[$r['non_rab_category']] = floatval($r['total_pending']);
+    }
+
+    $summary = [
+        'categories' => [],
+        'total_budget' => 0.0,
+        'total_allocated' => 0.0,
+        'total_actual' => 0.0,
+        'total_pending' => 0.0,
+        'total_remaining' => 0.0
+    ];
+
+    foreach ($categories as $catKey => $catMeta) {
+        $bAmount = floatval($budgetMap[$catKey]['budget_amount'] ?? 0);
+        $bNotes = $budgetMap[$catKey]['notes'] ?? '';
+        $bUpdatedAt = $budgetMap[$catKey]['updated_at'] ?? null;
+        $actAmount = floatval($approvedMap[$catKey] ?? 0);
+        $pendAmount = floatval($pendingMap[$catKey] ?? 0);
+        $remAmount = $bAmount - $actAmount;
+        $availForRequest = max(0, $bAmount - $actAmount - $pendAmount);
+        $pct = $bAmount > 0 ? round(($actAmount / $bAmount) * 100, 1) : 0;
+
+        $summary['categories'][$catKey] = [
+            'key' => $catKey,
+            'label' => $catMeta['label'],
+            'icon' => $catMeta['icon'],
+            'color' => $catMeta['color'],
+            'description' => $catMeta['description'],
+            'budget_amount' => $bAmount,
+            'allocated' => $bAmount,
+            'notes' => $bNotes,
+            'updated_at' => $bUpdatedAt,
+            'actual_amount' => $actAmount,
+            'actual' => $actAmount,
+            'pending_amount' => $pendAmount,
+            'remaining_amount' => $remAmount,
+            'remaining' => $remAmount,
+            'available_for_request' => $availForRequest,
+            'percentage_used' => $pct,
+            'usage_percentage' => $pct
+        ];
+
+        $summary['total_budget'] += $bAmount;
+        $summary['total_allocated'] += $bAmount;
+        $summary['total_actual'] += $actAmount;
+        $summary['total_pending'] += $pendAmount;
+        $summary['total_remaining'] += $remAmount;
+    }
+
+    $overallPct = $summary['total_budget'] > 0 
+        ? round(($summary['total_actual'] / $summary['total_budget']) * 100, 1) 
+        : 0;
+
+    $summary['total_percentage_used'] = $overallPct;
+    $summary['overall_usage_percentage'] = $overallPct;
+
+    return $summary;
 }
 
 

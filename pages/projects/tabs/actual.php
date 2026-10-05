@@ -62,6 +62,10 @@ $actualizationAdjustments = batchGetActualizationAdjustments($projectId);
 $batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
 $batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
 
+// Get Biaya Lain-Lain / Non-RAB data
+$nonRabTransactions = getProjectNonRabTransactions($projectId);
+$totalNonRabActual = getProjectNonRabActualTotal($projectId);
+
 // Get categories
 $categories = dbGetAll("
     SELECT rc.id, rc.code, rc.name, rc.sort_order
@@ -255,9 +259,114 @@ foreach ($categories as $cat) {
         'weekly_totals' => $catWeeklyTotals
     ];
 }
+
+// Automatically append "Lain-Lain" category at the bottom if there are approved Non-RAB transactions
+if (!empty($nonRabTransactions)) {
+    // Determine category code (next letter after last category)
+    $lastCatCode = '';
+    if (!empty($categories)) {
+        $lastCat = end($categories);
+        $lastCatCode = trim($lastCat['code']);
+    }
+    if (preg_match('/^[A-Z]$/i', $lastCatCode)) {
+        $nonRabCatCode = chr(ord(strtoupper($lastCatCode)) + 1);
+    } elseif (is_numeric($lastCatCode)) {
+        $nonRabCatCode = (string)(intval($lastCatCode) + 1);
+    } else {
+        $nonRabCatCode = 'L';
+    }
+
+    $nonRabCatName = 'LAIN-LAIN';
+    $nonRabCatId = 'non_rab';
+
+    $nonRabSubcats = [];
+    $nonRabCatActualTotal = 0;
+    $nonRabWeeklyTotals = [];
+
+    $itemNo = 1;
+    foreach ($nonRabTransactions as $tx) {
+        $txAmount = floatval($tx['total_amount'] ?? $tx['total_price'] ?? 0);
+        $txWeek = intval($tx['target_week'] ?: ($tx['week_number'] ?: 1));
+
+        $txWeekly = [];
+        if ($showWeeklyColumns) {
+            foreach ($weeklyRanges as $week) {
+                $wNum = $week['week_number'];
+                $isTargetWeek = ($wNum === $txWeek);
+                $txWeekly[$wNum] = $isTargetWeek ? $txAmount : 0;
+                if (!isset($nonRabWeeklyTotals[$wNum])) {
+                    $nonRabWeeklyTotals[$wNum] = 0;
+                }
+                if ($isTargetWeek) {
+                    $nonRabWeeklyTotals[$wNum] += $txAmount;
+                }
+            }
+        }
+
+        $nonRabSubcats[] = [
+            'id' => 'nr_' . ($tx['item_id'] ?? $itemNo),
+            'is_non_rab' => true,
+            'request_id' => $tx['request_id'],
+            'request_number' => $tx['request_number'],
+            'code' => $nonRabCatCode . '.' . $itemNo,
+            'name' => $tx['item_name'],
+            'unit' => $tx['unit'] ?: 'ls',
+            'quantity' => floatval($tx['quantity'] ?: 1),
+            'unit_price' => floatval($tx['unit_price'] ?: $txAmount),
+            'notes' => $tx['notes'] ?? '',
+            'receipt_file' => $tx['receipt_file'] ?? '',
+            'request_date' => $tx['request_date'] ?? $tx['created_at'],
+            'target_total' => 0.0,
+            'target_upah' => 0.0,
+            'target_material' => 0.0,
+            'target_alat' => 0.0,
+            'rap_total' => 0.0,
+            'rap_upah' => 0.0,
+            'rap_material' => 0.0,
+            'rap_alat' => 0.0,
+            'actual_total' => $txAmount,
+            'actual_upah' => 0.0,
+            'actual_material' => 0.0,
+            'actual_alat' => 0.0,
+            'selisih' => -$txAmount,
+            'progress' => 0.0,
+            'weekly' => $txWeekly
+        ];
+
+        $nonRabCatActualTotal += $txAmount;
+        $itemNo++;
+    }
+
+    $actualData[$nonRabCatId] = [
+        'category' => [
+            'id' => $nonRabCatId,
+            'code' => $nonRabCatCode,
+            'name' => $nonRabCatName,
+            'sort_order' => 9999
+        ],
+        'is_non_rab' => true,
+        'subcategories' => $nonRabSubcats,
+        'target_total' => 0.0,
+        'target_upah' => 0.0,
+        'target_material' => 0.0,
+        'target_alat' => 0.0,
+        'rap_total' => 0.0,
+        'actual_total' => $nonRabCatActualTotal,
+        'rap_upah' => 0.0,
+        'rap_material' => 0.0,
+        'rap_alat' => 0.0,
+        'actual_upah' => 0.0,
+        'actual_material' => 0.0,
+        'actual_alat' => 0.0,
+        'selisih' => -$nonRabCatActualTotal,
+        'progress' => 0.0,
+        'subcat_count' => count($nonRabSubcats),
+        'weekly_totals' => $nonRabWeeklyTotals
+    ];
+}
 ?>
 
-<?php if (empty($categories)): ?>
+<?php if (empty($actualData)): ?>
 <div class="text-center py-5">
     <i class="mdi mdi-chart-bar display-4 text-muted"></i>
     <h5 class="mt-3">Belum ada data RAB</h5>
@@ -676,7 +785,17 @@ $lastStickyRight = 1220; // Total width of sticky area
             ?>
             <tr class="sub-row" data-subcategory-id="<?= $sub['id'] ?>">
                 <td class="sticky-col col-no"><?= sanitize($sub['code']) ?></td>
-                <td class="sticky-col col-uraian"><?= sanitize($sub['name']) ?></td>
+                <td class="sticky-col col-uraian">
+                    <?= sanitize($sub['name']) ?>
+                    <?php if (!empty($sub['is_non_rab'])): ?>
+                        <?php if (!empty($sub['notes'])): ?>
+                        <br><small class="text-muted"><i class="mdi mdi-information-outline"></i> <?= sanitize($sub['notes']) ?></small>
+                        <?php endif; ?>
+                        <?php if ($sub['quantity'] > 1 || (!empty($sub['unit']) && $sub['unit'] !== 'ls')): ?>
+                        <br><small class="text-muted"><?= formatVolume($sub['quantity']) ?> <?= sanitize($sub['unit']) ?> @ <?= formatRupiah($sub['unit_price']) ?></small>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </td>
                 <td class="sticky-col col-rap text-end"><?= formatNumber($displayTarget, 2) ?></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah text-end text-primary"><?= formatNumber($sub['actual_upah'], 2) ?></td>
@@ -690,12 +809,16 @@ $lastStickyRight = 1220; // Total width of sticky area
                     <?= ($displaySelisih >= 0 ? '+' : '') . formatNumber($displaySelisih, 2) ?>
                 </td>
                 <td class="col-progress">
+                    <?php if (!empty($sub['is_non_rab'])): ?>
+                    <span class="badge bg-light text-muted border">-</span>
+                    <?php else: ?>
                     <div class="progress" style="height: 18px;">
                         <div class="progress-bar <?= $progressClass ?>" 
                              style="width: <?= min($displayProgress, 100) ?>%">
                             <?= number_format($displayProgress, 1) ?>%
                         </div>
                     </div>
+                    <?php endif; ?>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): 
@@ -711,12 +834,20 @@ $lastStickyRight = 1220; // Total width of sticky area
                 </td>
                 <td class="text-center weekly-col">
                     <?php if ($weekRealization > 0): ?>
-                    <button type="button" 
-                       class="btn btn-sm btn-outline-info py-0 px-1" 
-                       title="Lihat detail pengajuan minggu ke-<?= $weekNum ?>"
-                       onclick="showWeeklyDetail(<?= $projectId ?>, <?= $sub['id'] ?>, <?= $weekNum ?>, '<?= addslashes($sub['name']) ?>')">
-                        <i class="mdi mdi-eye"></i>
-                    </button>
+                        <?php if (!empty($sub['is_non_rab'])): ?>
+                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $sub['request_id'] ?>" 
+                           class="btn btn-sm btn-outline-primary py-0 px-1" 
+                           title="Lihat Pengajuan <?= sanitize($sub['request_number']) ?>" target="_blank">
+                            <i class="mdi mdi-eye"></i>
+                        </a>
+                        <?php else: ?>
+                        <button type="button" 
+                           class="btn btn-sm btn-outline-info py-0 px-1" 
+                           title="Lihat detail pengajuan minggu ke-<?= $weekNum ?>"
+                           onclick="showWeeklyDetail(<?= $projectId ?>, <?= $sub['id'] ?>, <?= $weekNum ?>, '<?= addslashes($sub['name']) ?>')">
+                            <i class="mdi mdi-eye"></i>
+                        </button>
+                        <?php endif; ?>
                     <?php else: ?>
                     <span class="text-muted">-</span>
                     <?php endif; ?>
@@ -763,6 +894,9 @@ $lastStickyRight = 1220; // Total width of sticky area
                     <strong><?= ($catDisplaySelisih >= 0 ? '+' : '') . formatNumber($catDisplaySelisih, 2) ?></strong>
                 </td>
                 <td class="col-progress">
+                    <?php if (!empty($data['is_non_rab'])): ?>
+                    <span class="badge bg-light text-muted border">-</span>
+                    <?php else: ?>
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1" style="height: 18px;">
                             <div class="progress-bar <?= $catProgressClass ?>" 
@@ -771,6 +905,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                         </div>
                         <strong class="ms-2" style="min-width: 45px;"><?= number_format($catDisplayProgress, 1) ?>%</strong>
                     </div>
+                    <?php endif; ?>
                 </td>
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): 
@@ -972,6 +1107,32 @@ $lastStickyRight = 1220; // Total width of sticky area
     <strong>Info:</strong> Data realisasi mingguan otomatis terisi dari pengajuan yang telah disetujui melalui <strong>Approval Center</strong>.
 </div>
 <?php endif; ?>
+
+
+<!-- Modal Non-RAB Detail -->
+<div class="modal fade" id="nonRabDetailModal" tabindex="-1" aria-labelledby="nonRabDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header text-white" style="background-color: #6f42c1;">
+                <h5 class="modal-title" id="nonRabDetailModalLabel">
+                    <i class="mdi mdi-receipt"></i> Rincian Pengajuan Biaya Non-RAB
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="nonRabDetailBody">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Memuat...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Memuat data pengajuan Non-RAB...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Weekly Detail Modal -->
 <div class="modal fade" id="weeklyDetailModal" tabindex="-1" aria-labelledby="weeklyDetailModalLabel" aria-hidden="true">
@@ -1356,6 +1517,141 @@ function escapeHtml(str) {
     var div = document.createElement('div');
     div.appendChild(document.createTextNode(str));
     return div.innerHTML;
+}
+
+// Show Non-RAB Details Modal
+function showNonRabDetail(projectId, category, categoryLabel) {
+    document.getElementById('nonRabDetailModalLabel').innerHTML = 
+        '<i class="mdi mdi-receipt"></i> Rincian Pengajuan Biaya Non-RAB — <small>' + escapeHtml(categoryLabel) + '</small>';
+    
+    document.getElementById('nonRabDetailBody').innerHTML = 
+        '<div class="text-center py-4">' +
+        '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Memuat...</span></div>' +
+        '<p class="mt-2 text-muted">Memuat data pengajuan Non-RAB...</p></div>';
+    
+    var modal = new bootstrap.Modal(document.getElementById('nonRabDetailModal'));
+    modal.show();
+    
+    var url = '?id=' + projectId + '&tab=actual&ajax=non_rab_detail' +
+              '&project_id=' + projectId + 
+              '&category=' + encodeURIComponent(category);
+    
+    fetch(url)
+        .then(function(response) { return response.json(); })
+        .then(function(result) {
+            if (result.error) {
+                document.getElementById('nonRabDetailBody').innerHTML = 
+                    '<div class="alert alert-danger">' + escapeHtml(result.error) + '</div>';
+                return;
+            }
+            
+            var requests = result.data || [];
+            if (requests.length === 0) {
+                document.getElementById('nonRabDetailBody').innerHTML = 
+                    '<div class="text-center py-5 text-muted">' +
+                    '<i class="mdi mdi-receipt-text-outline display-4"></i>' +
+                    '<h5 class="mt-3">Belum Ada Realisasi</h5>' +
+                    '<p class="mb-0">Belum ada pengajuan biaya Non-RAB yang disetujui untuk kategori ini.</p></div>';
+                return;
+            }
+            
+            var totalAll = 0;
+            var html = '<div class="d-flex flex-column gap-3">';
+            
+            for (var i = 0; i < requests.length; i++) {
+                var req = requests[i];
+                var reqTotal = parseFloat(req.total_amount) || 0;
+                totalAll += reqTotal;
+                var tglTransaksi = req.request_date ? formatDateId(req.request_date) : formatDateTimeJs(req.created_at);
+                
+                html += '<div class="card border shadow-none mb-0">';
+                html += '<div class="card-header bg-light d-flex justify-content-between align-items-center py-2 px-3">';
+                html += '<div>';
+                html += '<span class="fw-bold text-dark me-2">' + escapeHtml(req.request_number) + '</span>';
+                html += '<span class="badge text-white me-2" style="background-color: #6f42c1;">' + escapeHtml(req.category_name || categoryLabel) + '</span>';
+                html += '<small class="text-muted"><i class="mdi mdi-calendar-clock"></i> Tgl Transaksi: <strong>' + tglTransaksi + '</strong></small>';
+                html += '</div>';
+                html += '<div class="text-end">';
+                html += '<span class="text-muted small me-1">Total:</span><span class="fw-bold text-primary font-monospace">' + formatRupiahJs(reqTotal) + '</span>';
+                html += '</div>';
+                html += '</div>';
+                
+                html += '<div class="card-body p-3">';
+                if (req.description) {
+                    html += '<div class="mb-2 small text-muted"><i class="mdi mdi-text-short"></i> <strong>Keterangan Pengajuan:</strong> ' + escapeHtml(req.description) + '</div>';
+                }
+                
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-bordered align-middle mb-0">';
+                html += '<thead class="table-light">';
+                html += '<tr>';
+                html += '<th width="30" class="text-center">#</th>';
+                html += '<th>Nama Biaya / Kebutuhan</th>';
+                html += '<th width="70" class="text-center">Satuan</th>';
+                html += '<th width="70" class="text-end">Volume</th>';
+                html += '<th width="120" class="text-end">Harga Satuan</th>';
+                html += '<th width="130" class="text-end">Subtotal</th>';
+                html += '<th width="90" class="text-center">Bukti/Nota</th>';
+                html += '<th>Catatan</th>';
+                html += '</tr>';
+                html += '</thead><tbody>';
+                
+                var items = req.items || [];
+                for (var j = 0; j < items.length; j++) {
+                    var it = items[j];
+                    var qty = parseFloat(it.quantity) || 0;
+                    var price = parseFloat(it.unit_price) || 0;
+                    var subtotal = parseFloat(it.subtotal) || (qty * price);
+                    
+                    var receiptBtn = '<span class="text-muted small">-</span>';
+                    if (it.receipt_path) {
+                        receiptBtn = '<a href="<?= $baseUrl ?>/' + escapeHtml(it.receipt_path) + '" target="_blank" class="btn btn-xs btn-outline-info py-0 px-1">' +
+                                     '<i class="mdi mdi-paperclip"></i> Lihat</a>';
+                    }
+                    
+                    html += '<tr>';
+                    html += '<td class="text-center">' + (j + 1) + '</td>';
+                    html += '<td class="fw-semibold">' + escapeHtml(it.item_name) + '</td>';
+                    html += '<td class="text-center">' + escapeHtml(it.unit || 'ls') + '</td>';
+                    html += '<td class="text-end font-monospace">' + formatNumberJs(qty, 2) + '</td>';
+                    html += '<td class="text-end font-monospace">' + formatRupiahJs(price) + '</td>';
+                    html += '<td class="text-end font-monospace fw-bold text-primary">' + formatRupiahJs(subtotal) + '</td>';
+                    html += '<td class="text-center">' + receiptBtn + '</td>';
+                    html += '<td class="small text-muted">' + escapeHtml(it.notes || '-') + '</td>';
+                    html += '</tr>';
+                }
+                
+                html += '</tbody></table></div>';
+                
+                html += '<div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top text-muted small">';
+                html += '<div><i class="mdi mdi-account"></i> Diajukan oleh: <strong>' + escapeHtml(req.created_by_name || '-') + '</strong></div>';
+                html += '<div>';
+                if (req.pm_approved_by_name) {
+                    html += '<span class="me-3"><i class="mdi mdi-check-circle text-success"></i> PM: ' + escapeHtml(req.pm_approved_by_name) + '</span>';
+                }
+                if (req.approved_by_name) {
+                    html += '<span><i class="mdi mdi-check-all text-primary"></i> Admin: ' + escapeHtml(req.approved_by_name) + '</span>';
+                }
+                html += '</div>';
+                html += '</div>'; // footer
+                
+                html += '</div></div>'; // end card
+            }
+            
+            html += '</div>'; // end container
+            
+            // Grand summary alert
+            var summaryHtml = '<div class="alert alert-primary d-flex justify-content-between align-items-center py-2 mb-3">' +
+                              '<div><strong>Total Realisasi ' + escapeHtml(categoryLabel) + ':</strong> ' + requests.length + ' Pengajuan Disetujui</div>' +
+                              '<div class="h5 mb-0 fw-bold font-monospace">' + formatRupiahJs(totalAll) + '</div>' +
+                              '</div>';
+            
+            document.getElementById('nonRabDetailBody').innerHTML = summaryHtml + html;
+        })
+        .catch(function(err) {
+            document.getElementById('nonRabDetailBody').innerHTML = 
+                '<div class="alert alert-danger">Gagal memuat data: ' + escapeHtml(err.message) + '</div>';
+        });
 }
 
 // Open PDF Preview in modal for Realisasi

@@ -102,11 +102,12 @@ foreach ($assignedUsers as $au) {
 }
 
 // Fetch requests for this project (enhanced query)
+$nonRabCategories = getNonRabCategories();
 $requests = dbGetAll("
     SELECT r.*, u.full_name as created_by_name,
            upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
            ua.full_name as approved_by_name, ua.role as approved_by_role,
-           (SELECT COALESCE(SUM(reqi.total_price), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount
+           (SELECT COALESCE(SUM(CASE WHEN r.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount
     FROM requests r
     LEFT JOIN users u ON r.created_by = u.id
     LEFT JOIN users upm ON r.pm_approved_by = upm.id
@@ -344,6 +345,7 @@ $canManageTeam = ($project['status'] === 'on_progress');
                         </thead>
                         <tbody>
                             <?php foreach ($requests as $req): 
+                                $isNonRab = ($req['request_type'] ?? 'rab') === 'non_rab';
                                 $statusBadges = [
                                     'pending' => '<span class="badge bg-warning">Pending</span>',
                                     'pm_approved' => '<span class="badge bg-info">PM Approved</span>',
@@ -352,8 +354,18 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                 ];
                             ?>
                             <tr>
-                                <td><code><?= sanitize($req['request_number'] ?: 'REQ-' . $req['id']) ?></code></td>
-                                <td><?= formatDateTime($req['created_at']) ?></td>
+                                <td>
+                                    <code><?= sanitize($req['request_number'] ?: 'REQ-' . $req['id']) ?></code>
+                                    <?php if ($isNonRab): ?>
+                                    <br><span class="badge text-white" style="background-color: #6f42c1; font-size: 0.68rem;"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?= formatDateTime($req['created_at']) ?>
+                                    <?php if ($isNonRab && !empty($req['request_date'])): ?>
+                                    <br><small class="text-muted"><i class="mdi mdi-calendar"></i> Nota: <?= formatDate($req['request_date']) ?></small>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-center"><?= $req['target_week'] ?? $req['week_number'] ?? '-' ?></td>
                                 <td><?= sanitize($req['description'] ?: '-') ?></td>
                                 <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
@@ -361,7 +373,9 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                 <td><?= sanitize($req['created_by_name']) ?></td>
                                 <td class="text-center">
                                     <?php if ($req['status'] === 'approved'): ?>
-                                        <?php if (!empty($req['is_actualized'])): ?>
+                                        <?php if ($isNonRab): ?>
+                                        <span class="badge text-white" style="background-color: #6f42c1;"><i class="mdi mdi-check"></i> Langsung</span>
+                                        <?php elseif (!empty($req['is_actualized'])): ?>
                                         <span class="badge bg-success"><i class="mdi mdi-check"></i> Sudah</span>
                                         <?php else: ?>
                                         <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $req['id'] ?>" 
