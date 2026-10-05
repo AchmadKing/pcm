@@ -1048,6 +1048,140 @@ require_once __DIR__ . '/../../includes/header.php';
 #itemCheckboxContainer .item-check-row.selected { background: #e8f5e9; }
 .btn-add-selected { position: sticky; bottom: 0; background: #fff; border-top: 2px solid #28a745; }
 .harian-badge-vol { background-color: #e3fafc; color: #0c8599; border: 1px solid #99e9f2; }
+
+/* Note Column & Tooltip Editor Styles */
+.note-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+.note-input-wrapper .item-notes-input {
+    padding-right: 22px !important;
+    text-overflow: ellipsis;
+    transition: all 0.15s ease-in-out;
+}
+.note-input-wrapper.is-overflowing .item-notes-input {
+    border-color: #93c5fd !important;
+    background-color: #f0f7ff !important;
+}
+.note-input-wrapper .note-expand-trigger {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 11px;
+    z-index: 2;
+    transition: all 0.15s ease-in-out;
+}
+.note-input-wrapper:hover .note-expand-trigger,
+.note-input-wrapper.is-overflowing .note-expand-trigger {
+    display: flex;
+}
+.note-input-wrapper .note-expand-trigger:hover {
+    color: #0d6efd;
+    background-color: #e2e8f0;
+}
+.note-editor-tooltip {
+    position: absolute;
+    z-index: 1060;
+    width: 360px;
+    max-width: calc(100vw - 28px);
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22), 0 3px 8px rgba(15, 23, 42, 0.08);
+    font-family: inherit;
+    animation: noteTooltipFadeIn 0.15s ease-out;
+}
+@keyframes noteTooltipFadeIn {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.note-editor-tooltip .note-tooltip-arrow {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #ffffff;
+    transform: rotate(45deg);
+    border: 1px solid #cbd5e1;
+    z-index: 0;
+}
+.note-editor-tooltip.arrow-bottom .note-tooltip-arrow {
+    bottom: -6px;
+    border-top: none;
+    border-left: none;
+}
+.note-editor-tooltip.arrow-top .note-tooltip-arrow {
+    top: -6px;
+    border-bottom: none;
+    border-right: none;
+}
+.note-tooltip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 12px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    border-top-left-radius: 9px;
+    border-top-right-radius: 9px;
+    font-size: 12px;
+    position: relative;
+    z-index: 1;
+}
+.note-tooltip-body {
+    padding: 8px 10px;
+    position: relative;
+    z-index: 1;
+    background: #ffffff;
+}
+.note-tooltip-textarea {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+    resize: vertical;
+    min-height: 72px;
+    max-height: 200px;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    background: #ffffff !important;
+}
+.note-tooltip-textarea:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+.note-tooltip-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px 8px 12px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    border-bottom-left-radius: 9px;
+    border-bottom-right-radius: 9px;
+    font-size: 11px;
+    position: relative;
+    z-index: 1;
+}
+.kbd-hint {
+    background: #e2e8f0;
+    color: #334155;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 10px;
+    border: 1px solid #cbd5e1;
+}
 </style>
 
 <!-- Request Form -->
@@ -1206,7 +1340,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <th width="120">Harga Satuan</th>
                                     <th width="90" id="tableCoefHeader">Volume</th>
                                     <th width="130">Total Harga</th>
-                                    <th width="100">Catatan</th>
+                                    <th width="110">Catatan</th>
                                     <th width="100">Status Harga</th>
                                     <th width="110">Status Qty</th>
                                     <th width="40">Aksi</th>
@@ -1478,6 +1612,31 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 
+<!-- Floating Note Editor Tooltip -->
+<div id="noteEditorTooltip" class="note-editor-tooltip" style="display: none;">
+    <div class="note-tooltip-arrow"></div>
+    <div class="note-tooltip-header">
+        <div class="d-flex align-items-center gap-1 text-truncate me-2">
+            <i class="mdi mdi-comment-text-outline text-primary fs-6"></i>
+            <span class="note-tooltip-title fw-semibold text-dark font-size-12">Catatan:</span>
+            <span class="badge bg-light text-primary border note-tooltip-item-badge text-truncate" style="max-width: 170px;">-</span>
+        </div>
+        <button type="button" class="btn-close btn-close-sm note-tooltip-close-btn" aria-label="Close" title="Tutup (Esc)"></button>
+    </div>
+    <div class="note-tooltip-body">
+        <textarea class="form-control note-tooltip-textarea" rows="3" placeholder="Tulis catatan lengkap untuk item ini..."></textarea>
+    </div>
+    <div class="note-tooltip-footer">
+        <div class="text-muted note-tooltip-hint">
+            <span class="note-tooltip-char-count">0 karakter</span>
+            <span class="mx-1">•</span>
+            <span class="text-secondary"><kbd class="kbd-hint">Esc</kbd> tutup</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-primary note-tooltip-done-btn py-0 px-2 fw-semibold">
+            <i class="mdi mdi-check me-1"></i> Selesai
+        </button>
+    </div>
+</div>
 
 <?php 
 // Store script in $extraScripts to load AFTER jQuery in footer
@@ -1566,7 +1725,7 @@ $(document).ready(function() {
                     <th width="55" class="text-center">Sat.</th>
                     <th width="120" class="text-end">Tarif Satuan</th>
                     <th width="130" class="text-end">Total Lapangan</th>
-                    <th width="90">Catatan</th>
+                    <th width="105">Catatan</th>
                     <th width="125" class="text-center">Status Harga</th>
                     <th width="105" class="text-center">Status Sisa Qty</th>
                     <th width="40" class="text-center">Aksi</th>
@@ -1584,7 +1743,7 @@ $(document).ready(function() {
                     <th width="120" class="text-end">Harga Satuan</th>
                     <th width="90" class="text-end" id="tableCoefHeader">Volume</th>
                     <th width="130" class="text-end">Total Harga</th>
-                    <th width="100">Catatan</th>
+                    <th width="110">Catatan</th>
                     <th width="100" class="text-center">Status Harga</th>
                     <th width="110" class="text-center">Status Qty</th>
                     <th width="40" class="text-center">Aksi</th>
@@ -1630,6 +1789,288 @@ $(document).ready(function() {
         }
         input.val(result);
     }
+    
+    // =====================================
+    // EXPANDED NOTE TOOLTIP EDITOR MODULE
+    // =====================================
+    let activeNoteInput = null;
+    let _canvasMeasureContext = null;
+
+    function measureTextWidth(text, font) {
+        if (!_canvasMeasureContext) {
+            const canvas = document.createElement('canvas');
+            _canvasMeasureContext = canvas.getContext('2d');
+        }
+        _canvasMeasureContext.font = font || '13px system-ui, sans-serif';
+        return _canvasMeasureContext.measureText(text).width;
+    }
+
+    function isNotesOverflowing(input) {
+        if (!input) return false;
+        const text = input.value || '';
+        if (!text.trim()) return false;
+        
+        // DOM scrollWidth check
+        if (input.scrollWidth > input.clientWidth + 2) {
+            return true;
+        }
+        
+        // Visual pixel width calculation
+        try {
+            const style = window.getComputedStyle(input);
+            const font = `${style.fontWeight || '400'} ${style.fontSize || '13px'} ${style.fontFamily || 'sans-serif'}`;
+            const textWidth = measureTextWidth(text, font);
+            const paddingLeft = parseFloat(style.paddingLeft) || 8;
+            const paddingRight = parseFloat(style.paddingRight) || 22;
+            const availableWidth = input.clientWidth - paddingLeft - paddingRight;
+            
+            if (availableWidth > 0 && textWidth > availableWidth - 2) {
+                return true;
+            }
+        } catch (e) {}
+        
+        // Fallbacks for narrow columns
+        if (input.clientWidth <= 140 && text.length > 12) {
+            return true;
+        }
+        if (text.length >= 18) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    function updateNotesOverflowState(input) {
+        if (!input) return;
+        const $wrapper = $(input).closest('.note-input-wrapper');
+        const overflowing = isNotesOverflowing(input);
+        if (overflowing) {
+            $wrapper.addClass('is-overflowing');
+            input.title = input.value;
+        } else {
+            $wrapper.removeClass('is-overflowing');
+            if (!input.value) {
+                input.removeAttribute('title');
+            } else {
+                input.title = input.value;
+            }
+        }
+    }
+
+    function openNoteTooltip(input, focusTextarea = true) {
+        if (!input) return;
+        activeNoteInput = input;
+        const $input = $(input);
+        const $tooltip = $('#noteEditorTooltip');
+        const $textarea = $tooltip.find('.note-tooltip-textarea');
+        const $itemBadge = $tooltip.find('.note-tooltip-item-badge');
+        const $charCount = $tooltip.find('.note-tooltip-char-count');
+        
+        // Find item name for tooltip header context
+        const $row = $input.closest('tr');
+        let itemName = '';
+        const rowNameInput = $row.find('input[name*="[item_name]"], .non-rab-item-name');
+        if (rowNameInput.length) {
+            itemName = rowNameInput.val();
+        }
+        if (!itemName) {
+            const rowNum = $row.find('td:first').text().trim();
+            itemName = rowNum ? 'Item #' + rowNum : 'Item Pengajuan';
+        }
+        $itemBadge.text(itemName).attr('title', itemName);
+        
+        // Populate textarea
+        const currentVal = input.value || '';
+        $textarea.val(currentVal);
+        $charCount.text(currentVal.length + ' karakter');
+        
+        // Show and position tooltip
+        $tooltip.show();
+        positionNoteTooltip(input);
+        
+        // Focus and preserve cursor position
+        if (focusTextarea) {
+            $textarea.focus();
+            const start = typeof input.selectionStart === 'number' ? input.selectionStart : currentVal.length;
+            const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : currentVal.length;
+            try {
+                $textarea[0].setSelectionRange(start, end);
+            } catch (e) {}
+        }
+    }
+
+    function positionNoteTooltip(targetInput) {
+        const $tooltip = $('#noteEditorTooltip');
+        if (!$tooltip.is(':visible') || !targetInput) return;
+        
+        const rect = targetInput.getBoundingClientRect();
+        const tooltipWidth = Math.min(380, window.innerWidth - 24);
+        $tooltip.css('width', tooltipWidth + 'px');
+        const tooltipHeight = $tooltip.outerHeight() || 185;
+        
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        
+        // Horizontal calculation
+        let left = rect.left + scrollX;
+        const minLeft = scrollX + 12;
+        const maxLeft = scrollX + window.innerWidth - tooltipWidth - 12;
+        if (left > maxLeft) left = maxLeft;
+        if (left < minLeft) left = minLeft;
+        
+        // Vertical calculation
+        let top;
+        let arrowClass = 'arrow-bottom';
+        const spaceAbove = rect.top;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        
+        if (spaceAbove >= tooltipHeight + 12) {
+            top = rect.top + scrollY - tooltipHeight - 8;
+            arrowClass = 'arrow-bottom';
+        } else if (spaceBelow >= tooltipHeight + 12) {
+            top = rect.bottom + scrollY + 8;
+            arrowClass = 'arrow-top';
+        } else {
+            if (spaceAbove >= spaceBelow) {
+                top = rect.top + scrollY - tooltipHeight - 8;
+                arrowClass = 'arrow-bottom';
+            } else {
+                top = rect.bottom + scrollY + 8;
+                arrowClass = 'arrow-top';
+            }
+        }
+        
+        // Arrow position pointing to horizontal center of input
+        const inputCenterX = rect.left + scrollX + (rect.width / 2);
+        let arrowLeft = inputCenterX - left - 6;
+        arrowLeft = Math.max(16, Math.min(tooltipWidth - 28, arrowLeft));
+        
+        $tooltip.removeClass('arrow-top arrow-bottom').addClass(arrowClass);
+        $tooltip.find('.note-tooltip-arrow').css('left', arrowLeft + 'px');
+        $tooltip.css({
+            top: Math.max(scrollY + 6, top) + 'px',
+            left: left + 'px'
+        });
+    }
+
+    function closeNoteTooltip(restoreFocus = false) {
+        const $tooltip = $('#noteEditorTooltip');
+        if ($tooltip.is(':visible')) {
+            $tooltip.hide();
+            if (activeNoteInput) {
+                updateNotesOverflowState(activeNoteInput);
+                if (restoreFocus) {
+                    $(activeNoteInput).focus();
+                }
+            }
+            activeNoteInput = null;
+        }
+    }
+
+    // Event: Click on catatan input (opens tooltip if text overflows column)
+    $(document).on('click', '.item-notes-input', function(e) {
+        if (isNotesOverflowing(this)) {
+            openNoteTooltip(this);
+        }
+    });
+
+    // Event: Click on expand button (always opens tooltip)
+    $(document).on('click', '.note-expand-trigger', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const input = $(this).siblings('.item-notes-input')[0];
+        if (input) {
+            openNoteTooltip(input);
+        }
+    });
+
+    // Event: Double click on catatan input opens tooltip anytime
+    $(document).on('dblclick', '.item-notes-input', function(e) {
+        openNoteTooltip(this);
+    });
+
+    // Event: Typing inside catatan input updates overflow state
+    $(document).on('input', '.item-notes-input', function() {
+        updateNotesOverflowState(this);
+    });
+
+    // Event: Enter key inside catatan input opens tooltip instead of submitting form
+    $(document).on('keydown', '.item-notes-input', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            openNoteTooltip(this);
+        }
+    });
+
+    // Event: Textarea live synchronization
+    $(document).on('input', '#noteEditorTooltip .note-tooltip-textarea', function() {
+        const val = $(this).val();
+        $('#noteEditorTooltip .note-tooltip-char-count').text(val.length + ' karakter');
+        if (activeNoteInput) {
+            activeNoteInput.value = val;
+            activeNoteInput.title = val;
+            $(activeNoteInput).trigger('input').trigger('change');
+            updateNotesOverflowState(activeNoteInput);
+        }
+    });
+
+    // Event: Textarea keyboard navigation (Esc, Ctrl+Enter, Tab)
+    $(document).on('keydown', '#noteEditorTooltip .note-tooltip-textarea', function(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeNoteTooltip(true);
+        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            closeNoteTooltip(true);
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const currentInput = activeNoteInput;
+            closeNoteTooltip(false);
+            if (currentInput) {
+                const $row = $(currentInput).closest('tr');
+                if (e.shiftKey) {
+                    const inputs = $row.find('input:visible, select:visible');
+                    const idx = inputs.index(currentInput);
+                    if (idx > 0) inputs.eq(idx - 1).focus();
+                } else {
+                    const inputs = $row.find('input:visible, select:visible, button:visible');
+                    const idx = inputs.index(currentInput);
+                    if (idx !== -1 && idx < inputs.length - 1) {
+                        inputs.eq(idx + 1).focus();
+                    }
+                }
+            }
+        }
+    });
+
+    // Event: Close & Done buttons
+    $(document).on('click', '#noteEditorTooltip .note-tooltip-close-btn, #noteEditorTooltip .note-tooltip-done-btn', function(e) {
+        e.preventDefault();
+        closeNoteTooltip(true);
+    });
+
+    // Event: Click outside closes tooltip
+    $(document).on('mousedown touchstart', function(e) {
+        if (!activeNoteInput) return;
+        const $tooltip = $('#noteEditorTooltip');
+        if ($tooltip.is(':visible') && 
+            !$tooltip.is(e.target) && $tooltip.has(e.target).length === 0 &&
+            !$(activeNoteInput).is(e.target) && !$(activeNoteInput).closest('.note-input-wrapper').has(e.target).length) {
+            closeNoteTooltip(false);
+        }
+    });
+
+    // Event: Reposition on scroll / resize
+    $(window).on('resize scroll', function() {
+        if (activeNoteInput) {
+            positionNoteTooltip(activeNoteInput);
+        }
+    });
+    $('.table-responsive').on('scroll', function() {
+        if (activeNoteInput) {
+            positionNoteTooltip(activeNoteInput);
+        }
+    });
     
     // =====================================
     // RAP PEKERJAAN CHECKBOX HANDLERS
@@ -2612,9 +3053,16 @@ $(document).ready(function() {
                         <input type="hidden" name="items[${itemIndex}][coefficient]" class="harian-hidden-coef" value="${billableQty.toFixed(6)}">
                     </td>
                     <td>
-                        <input type="text" name="items[${itemIndex}][notes]" 
-                               value="${escapeHtml(data.notes || '')}" 
-                               class="form-control form-control-sm" placeholder="Catatan">
+                        <div class="note-input-wrapper position-relative">
+                            <input type="text" name="items[${itemIndex}][notes]" 
+                                   value="${escapeHtml(data.notes || '')}" 
+                                   class="form-control form-control-sm item-notes-input" 
+                                   placeholder="Catatan"
+                                   title="${escapeHtml(data.notes || '')}">
+                            <button type="button" class="note-expand-trigger" title="Perluas catatan" tabindex="-1">
+                                <i class="mdi mdi-arrow-expand-all"></i>
+                            </button>
+                        </div>
                     </td>
                     <td class="text-center harian-status-harga-cell status-harga-cell">
                         <span class="badge bg-secondary">-</span>
@@ -2629,6 +3077,7 @@ $(document).ready(function() {
             `;
             
             $('#itemsBody').append(row);
+            updateNotesOverflowState($('#itemsBody tr:last .item-notes-input')[0]);
             updateHarianSubcategoryStatus(data.subcategory_id);
             updateItemCount();
             calculateGrandTotal();
@@ -2715,9 +3164,16 @@ $(document).ready(function() {
                            class="form-control form-control-sm text-end readonly-field total-price" readonly>
                 </td>
                 <td>
-                    <input type="text" name="items[${itemIndex}][notes]" 
-                           value="${escapeHtml(data.notes || '')}"
-                           class="form-control form-control-sm" placeholder="Catatan">
+                    <div class="note-input-wrapper position-relative">
+                        <input type="text" name="items[${itemIndex}][notes]" 
+                               value="${escapeHtml(data.notes || '')}"
+                               class="form-control form-control-sm item-notes-input" 
+                               placeholder="Catatan"
+                               title="${escapeHtml(data.notes || '')}">
+                        <button type="button" class="note-expand-trigger" title="Perluas catatan" tabindex="-1">
+                            <i class="mdi mdi-arrow-expand-all"></i>
+                        </button>
+                    </div>
                 </td>
                 <td class="text-center status-harga-cell">${statusHargaHtml}</td>
                 <td class="text-center status-qty-cell">${statusQtyHtml}</td>
@@ -2728,6 +3184,7 @@ $(document).ready(function() {
         `;
         
         $('#itemsBody').append(row);
+        updateNotesOverflowState($('#itemsBody tr:last .item-notes-input')[0]);
         updateItemCount();
         calculateGrandTotal();
     }
@@ -3110,8 +3567,15 @@ $(document).ready(function() {
                 </td>
                 <td class="text-end fw-semibold font-size-13 non-rab-row-total">Rp 0</td>
                 <td>
-                    <input type="text" class="form-control form-control-sm non-rab-item-notes" 
-                           value="${escapeHtml(notes)}" placeholder="Catatan tambahan...">
+                    <div class="note-input-wrapper position-relative">
+                        <input type="text" class="form-control form-control-sm non-rab-item-notes item-notes-input" 
+                               value="${escapeHtml(notes)}" 
+                               placeholder="Catatan tambahan..."
+                               title="${escapeHtml(notes)}">
+                        <button type="button" class="note-expand-trigger" title="Perluas catatan" tabindex="-1">
+                            <i class="mdi mdi-arrow-expand-all"></i>
+                        </button>
+                    </div>
                 </td>
                 <td class="text-center">
                     <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="removeNonRabRow(${idx})" title="Hapus baris">
@@ -3121,6 +3585,7 @@ $(document).ready(function() {
             </tr>
         `;
         $('#nonRabItemsBody').append(html);
+        updateNotesOverflowState($(`#nonRabRow_${idx} .item-notes-input`)[0]);
         reindexNonRabRows();
         calcNonRabRow(idx);
         if (!item) {
@@ -3710,6 +4175,16 @@ $(document).ready(function() {
     
     // Load RAP Pekerjaan checkboxes on page load
     loadRapPekerjaan();
+    
+    // Move Note Tooltip Editor to body to avoid overflow clipping from table-responsive
+    if ($('#noteEditorTooltip').length) {
+        $('body').append($('#noteEditorTooltip'));
+    }
+    
+    // Evaluate initial overflow state for any existing note inputs
+    $('.item-notes-input').each(function() {
+        updateNotesOverflowState(this);
+    });
 });
 </script>
 <?php 
