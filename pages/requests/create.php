@@ -166,7 +166,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
     
     // Get info of all selected subcategories in proper order
     $subcatInfo = dbGetAll("
-        SELECT rs.id, rs.code, rs.name, rs.unit, rs.category_id, rc.code as category_code, rc.name as category_name
+        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as subcat_volume, rs.category_id, rc.code as category_code, rc.name as category_name
         FROM rab_subcategories rs
         JOIN rab_categories rc ON rs.category_id = rc.id
         WHERE rs.id IN ($placeholders)
@@ -187,7 +187,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
                 JOIN requests r ON reqi2.request_id = r.id 
                 WHERE reqi2.item_code = pir.item_code 
                   AND reqi2.subcategory_id = rs.id
-                  AND r.status IN ('approved','pending')
+                  AND r.status IN ('approved','pending','pm_approved')
                ) as used_qty
         FROM rab_subcategories rs
         JOIN project_ahsp pa ON rs.ahsp_id = pa.id
@@ -216,6 +216,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
             'subcategory_id' => $subId,
             'subcat_code' => $item['subcat_code'],
             'subcat_name' => $item['subcat_name'],
+            'subcat_unit' => $item['subcat_unit'],
             'item_code' => $item['item_code'],
             'name' => $item['name'],
             'unit' => ($itemType === 'upah' && !empty($item['subcat_unit']) ? $item['subcat_unit'] : $item['unit']),
@@ -236,10 +237,52 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
     foreach ($subcatInfo as $sc) {
         $subId = intval($sc['id']);
         $subcatItems = $itemsBySubcat[$subId] ?? [];
+        $subcatVolume = floatval($sc['subcat_volume'] ?? 0);
+        
+        // Calculate RAP unit cost for this item_type: sum(ahsp_coefficient * unit_price)
+        $rapUnitCost = 0.0;
+        $minSisaVolume = $subcatVolume;
+        foreach ($subcatItems as $sItem) {
+            $rapUnitCost += ($sItem['ahsp_coefficient'] * $sItem['unit_price']);
+            if ($sItem['sisa_volume'] < $minSisaVolume) {
+                $minSisaVolume = $sItem['sisa_volume'];
+            }
+        }
+        
+        // Also deduct volume used by Harian requests for this subcategory
+        $harianUsedRow = dbGetRow("
+            SELECT COALESCE(SUM(h_vol), 0) as used_vol FROM (
+                SELECT MAX(reqi.work_volume) as h_vol
+                FROM request_items reqi
+                JOIN requests r ON reqi.request_id = r.id
+                WHERE reqi.subcategory_id = ? 
+                  AND reqi.work_volume IS NOT NULL
+                  AND r.status IN ('pending', 'pm_approved', 'approved')
+                GROUP BY r.id
+            ) t
+        ", [$subId]);
+        $usedHarianVol = floatval($harianUsedRow['used_vol'] ?? 0);
+        $sharedSisaVolume = max(0, $minSisaVolume - $usedHarianVol);
+        $rapTotalCost = $rapUnitCost * $subcatVolume;
+        
+        // Attach aggregated values to items for easy client-side access
+        foreach ($subcatItems as &$sItem) {
+            $sItem['rap_unit_cost'] = $rapUnitCost;
+            $sItem['rap_total_cost'] = $rapTotalCost;
+            $sItem['subcat_volume'] = $subcatVolume;
+            $sItem['sisa_volume'] = $sharedSisaVolume;
+        }
+        unset($sItem);
+        
         $result[] = [
             'subcategory_id' => $subId,
             'subcat_code' => $sc['code'],
             'subcat_name' => $sc['name'],
+            'subcat_unit' => $sc['unit'] ?: "m'",
+            'subcat_volume' => $subcatVolume,
+            'rap_unit_cost' => $rapUnitCost,
+            'rap_total_cost' => $rapTotalCost,
+            'sisa_volume' => $sharedSisaVolume,
             'category_id' => $sc['category_id'],
             'category_code' => $sc['category_code'],
             'category_name' => $sc['category_name'],
@@ -421,10 +464,19 @@ if ($projectId) {
                     'subcat_name' => $item['subcategory_name'] ?? '',
                     'item_code' => $item['item_code'] ?: '',
                     'item_type' => $item['item_type'] ?: '',
+                    'work_type' => $item['work_type'] ?? ($resubmitReq['work_type'] ?? 'borongan'),
+                    'work_volume' => floatval($item['work_volume'] ?? 0),
+                    'work_unit' => $item['work_unit'] ?? '',
+                    'work_quantity' => floatval($item['work_quantity'] ?? 0),
+                    'work_quantity_unit' => $item['work_quantity_unit'] ?? '',
+                    'work_duration' => floatval($item['work_duration'] ?? 0),
+                    'work_duration_unit' => $item['work_duration_unit'] ?? 'Hr',
+                    'work_billing_unit' => $item['work_billing_unit'] ?? '',
                     'item_name' => $item['item_name'],
                     'unit' => $item['unit'],
                     'unit_price' => floatval($item['unit_price']),
                     'coefficient' => floatval($item['coefficient'] ?: $item['quantity']),
+                    'total_price' => floatval($item['total_price'] ?? 0),
                     'notes' => $item['notes'] ?? '',
                     'subcat_details' => !empty($subcatDetails) ? $subcatDetails : [],
                     'rap_unit_price' => $rapUnitPrice,
@@ -471,6 +523,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $projectId = intval($_POST['project_id'] ?? 0);
     $description = trim($_POST['description'] ?? '');
     $targetWeek = intval($_POST['target_week'] ?? 0);
+    $workType = trim($_POST['work_type'] ?? 'borongan');
+    if (!in_array($workType, ['borongan', 'harian'])) {
+        $workType = 'borongan';
+    }
     $directItems = json_decode($_POST['items'] ?? '[]', true);
     $nonRabItems = json_decode($_POST['non_rab_items'] ?? '[]', true);
 
@@ -500,9 +556,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $itemCode = trim($item['item_code'] ?? '');
             $itemType = trim($item['item_type'] ?? '');
             $itemName = trim($item['item_name'] ?? '');
+            $itemWorkType = trim($item['work_type'] ?? $workType);
+            if (!in_array($itemWorkType, ['borongan', 'harian'])) {
+                $itemWorkType = $workType;
+            }
             $unit = trim($item['unit'] ?? '');
             $unitPrice = floatval($item['unit_price'] ?? 0);
-            $coefficient = floatval($item['coefficient'] ?? 0);
             $notes = trim($item['notes'] ?? '');
             $subcatDetails = trim($item['subcat_details'] ?? '');
             
@@ -510,23 +569,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $subcatDetails = '';
             }
             
-            if ($coefficient > 0 && $unitPrice > 0 && !empty($itemName)) {
-                $itemTotal = $unitPrice * $coefficient;
-                $directTotal += $itemTotal;
-                $validDirectItems[] = [
-                    'category_id' => $categoryId ?: null,
-                    'subcategory_id' => $subcategoryId ?: null,
-                    'subcat_details' => $subcatDetails ?: null,
-                    'item_code' => $itemCode ?: null,
-                    'item_type' => $itemType ?: null,
-                    'item_name' => $itemName,
-                    'unit' => $unit,
-                    'unit_price' => $unitPrice,
-                    'quantity' => $coefficient,
-                    'coefficient' => $coefficient,
-                    'total_price' => $itemTotal,
-                    'notes' => $notes
-                ];
+            if ($itemWorkType === 'harian') {
+                $workVolume = floatval($item['work_volume'] ?? 0);
+                $workUnit = trim($item['work_unit'] ?? '');
+                $workQuantity = floatval($item['work_quantity'] ?? 0);
+                $workQuantityUnit = trim($item['work_quantity_unit'] ?? 'orang');
+                $workDuration = floatval($item['work_duration'] ?? 0);
+                $workDurationUnit = trim($item['work_duration_unit'] ?? 'Hr');
+                $workBillingUnit = trim($item['work_billing_unit'] ?? 'OH');
+                
+                if ($itemType === 'material') {
+                    if ($workDuration <= 0) {
+                        $workDuration = 1;
+                    }
+                    if (empty($workDurationUnit) || $workDurationUnit === 'Hr' || $workDurationUnit === 'Kali') {
+                        $workDurationUnit = '-';
+                    }
+                    if (empty($workQuantityUnit)) {
+                        $workQuantityUnit = $unit ?: 'ls';
+                    }
+                    if (empty($workBillingUnit)) {
+                        $workBillingUnit = $unit ?: 'ls';
+                    }
+                }
+                
+                // Server-side calculation & integrity
+                $quantity = round($workQuantity * $workDuration, 4);
+                $coefficient = round($workQuantity * $workDuration, 6);
+                $itemTotal = round($quantity * $unitPrice, 2);
+                
+                if ($workVolume > 0 && $workQuantity > 0 && $workDuration > 0 && $unitPrice > 0 && !empty($itemName)) {
+                    $directTotal += $itemTotal;
+                    $validDirectItems[] = [
+                        'category_id' => $categoryId ?: null,
+                        'subcategory_id' => $subcategoryId ?: null,
+                        'subcat_details' => $subcatDetails ?: null,
+                        'item_code' => $itemCode ?: null,
+                        'item_type' => $itemType ?: null,
+                        'work_type' => 'harian',
+                        'work_volume' => $workVolume,
+                        'work_unit' => $workUnit ?: null,
+                        'work_quantity' => $workQuantity,
+                        'work_quantity_unit' => $workQuantityUnit ?: null,
+                        'work_duration' => $workDuration,
+                        'work_duration_unit' => $workDurationUnit ?: 'Hr',
+                        'work_billing_unit' => $workBillingUnit ?: null,
+                        'item_name' => $itemName,
+                        'unit' => $workBillingUnit ?: $unit,
+                        'unit_price' => $unitPrice,
+                        'quantity' => $quantity,
+                        'coefficient' => $coefficient,
+                        'total_price' => $itemTotal,
+                        'notes' => $notes
+                    ];
+                }
+            } else {
+                // Borongan existing
+                $coefficient = floatval($item['coefficient'] ?? 0);
+                if ($coefficient > 0 && $unitPrice > 0 && !empty($itemName)) {
+                    $itemTotal = round($unitPrice * $coefficient, 2);
+                    $directTotal += $itemTotal;
+                    $validDirectItems[] = [
+                        'category_id' => $categoryId ?: null,
+                        'subcategory_id' => $subcategoryId ?: null,
+                        'subcat_details' => $subcatDetails ?: null,
+                        'item_code' => $itemCode ?: null,
+                        'item_type' => $itemType ?: null,
+                        'work_type' => 'borongan',
+                        'work_volume' => null,
+                        'work_unit' => null,
+                        'work_quantity' => null,
+                        'work_quantity_unit' => null,
+                        'work_duration' => null,
+                        'work_duration_unit' => 'Hr',
+                        'work_billing_unit' => null,
+                        'item_name' => $itemName,
+                        'unit' => $unit,
+                        'unit_price' => $unitPrice,
+                        'quantity' => $coefficient,
+                        'coefficient' => $coefficient,
+                        'total_price' => $itemTotal,
+                        'notes' => $notes
+                    ];
+                }
             }
         }
     }
@@ -543,7 +668,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $notes = trim($item['notes'] ?? '');
 
             if ($quantity > 0 && $unitPrice > 0 && !empty($itemName)) {
-                $itemTotal = $quantity * $unitPrice;
+                $itemTotal = round($quantity * $unitPrice, 2);
                 $nonRabTotal += $itemTotal;
                 $validNonRabItems[] = [
                     'item_name' => $itemName,
@@ -570,8 +695,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Double-check lock status before saving
         $projCheck = dbGetRow("SELECT request_locked FROM projects WHERE id = ?", [$projectId]);
         if (!empty($projCheck['request_locked'])) {
+            $pdo->rollBack();
             echo json_encode(['success' => false, 'message' => 'Pengajuan dana untuk proyek ini sedang dikunci!']);
             exit;
+        }
+
+        // Shared physical volume capacity validation with concurrency locking
+        $subcatHarianVols = [];
+        foreach ($validDirectItems as $vi) {
+            if ($vi['work_type'] === 'harian' && !empty($vi['subcategory_id']) && !empty($vi['work_volume'])) {
+                $sId = intval($vi['subcategory_id']);
+                // Anti double-counting: use max work_volume for items in the same subcategory
+                $subcatHarianVols[$sId] = max($subcatHarianVols[$sId] ?? 0, floatval($vi['work_volume']));
+            }
+        }
+        
+        if (!empty($subcatHarianVols)) {
+            $lockPlaceholders = implode(',', array_fill(0, count($subcatHarianVols), '?'));
+            $lockedSubcats = dbGetAll("
+                SELECT rs.id, rs.code, rs.name, COALESCE(ri.volume, rs.volume, 0) as subcat_volume 
+                FROM rab_subcategories rs 
+                LEFT JOIN rap_items ri ON ri.subcategory_id = rs.id
+                WHERE rs.id IN ($lockPlaceholders) 
+                FOR UPDATE
+            ", array_keys($subcatHarianVols));
+            
+            foreach ($lockedSubcats as $lsc) {
+                $subId = intval($lsc['id']);
+                $subcatVol = floatval($lsc['subcat_volume'] ?? 0);
+                $reqVol = $subcatHarianVols[$subId] ?? 0;
+                
+                // Get Borongan used volume
+                $boronganUsedItems = dbGetAll("
+                    SELECT d.coefficient as ahsp_coef,
+                           COALESCE((
+                               SELECT SUM(reqi2.coefficient) 
+                               FROM request_items reqi2 
+                               JOIN requests r ON reqi2.request_id = r.id 
+                               WHERE reqi2.item_code = pir.item_code 
+                                 AND reqi2.subcategory_id = ? 
+                                 AND (reqi2.work_type = 'borongan' OR reqi2.work_type IS NULL)
+                                 AND r.status IN ('pending', 'pm_approved', 'approved')
+                           ), 0) as used_coef
+                    FROM rab_subcategories rs
+                    JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+                    JOIN project_ahsp_rap par ON par.ahsp_code = pa.ahsp_code AND par.project_id = pa.project_id
+                    JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
+                    JOIN project_items_rap pir ON d.item_id = pir.id
+                    WHERE rs.id = ? AND pir.category = 'upah'
+                ", [$subId, $subId]);
+                
+                $maxBoronganVol = 0.0;
+                foreach ($boronganUsedItems as $bItem) {
+                    $c = floatval($bItem['ahsp_coef']);
+                    if ($c > 0) {
+                        $v = floatval($bItem['used_coef']) / $c;
+                        if ($v > $maxBoronganVol) $maxBoronganVol = $v;
+                    }
+                }
+                
+                // Get Harian used volume
+                $harianUsedRow = dbGetRow("
+                    SELECT COALESCE(SUM(h_vol), 0) as used_vol FROM (
+                        SELECT MAX(reqi.work_volume) as h_vol
+                        FROM request_items reqi
+                        JOIN requests r ON reqi.request_id = r.id
+                        WHERE reqi.subcategory_id = ? 
+                          AND reqi.work_type = 'harian'
+                          AND reqi.work_volume IS NOT NULL
+                          AND r.status IN ('pending', 'pm_approved', 'approved')
+                        GROUP BY r.id
+                    ) t
+                ", [$subId]);
+                $usedHarianVol = floatval($harianUsedRow['used_vol'] ?? 0);
+                
+                $availableVol = max(0, $subcatVol - $maxBoronganVol - $usedHarianVol);
+                if ($reqVol > ($availableVol + 0.0001)) {
+                    $pdo->rollBack();
+                    echo json_encode([
+                        'success' => false, 
+                        'message' => 'Volume pengajuan harian untuk pekerjaan "' . ($lsc['code'] . '. ' . $lsc['name']) . '" (' . number_format($reqVol, 2, ',', '.') . ') melebihi sisa kapasitas yang tersedia (' . number_format($availableVol, 2, ',', '.') . ')!'
+                    ]);
+                    exit;
+                }
+            }
         }
         
         // Generate request number
@@ -589,18 +796,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $requestDate = !empty($_POST['request_date']) ? trim($_POST['request_date']) : date('Y-m-d');
         $totalAmount = $directTotal + $nonRabTotal;
 
-        // Insert request header
+        // Insert request header with work_type
         $requestId = dbInsert("
-            INSERT INTO requests (project_id, request_type, non_rab_category, request_number, request_date, week_number, target_week, description, status, total_amount, created_by)
-            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?, ?)
-        ", [$projectId, $requestType, $requestNumber, $requestDate, $targetWeek, $targetWeek, $description, $totalAmount, getCurrentUserId()]);
+            INSERT INTO requests (project_id, request_type, work_type, non_rab_category, request_number, request_date, week_number, target_week, description, status, total_amount, created_by)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        ", [$projectId, $requestType, $workType, $requestNumber, $requestDate, $targetWeek, $targetWeek, $description, $totalAmount, getCurrentUserId()]);
 
         // Insert Direct Cost items
         foreach ($validDirectItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ", [
                 $requestId, 
                 $vi['category_id'], 
@@ -608,6 +815,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $vi['subcat_details'],
                 $vi['item_code'], 
                 $vi['item_type'],
+                $vi['work_type'],
+                $vi['work_volume'],
+                $vi['work_unit'],
+                $vi['work_quantity'],
+                $vi['work_quantity_unit'],
+                $vi['work_duration'],
+                $vi['work_duration_unit'],
+                $vi['work_billing_unit'],
                 $vi['item_name'], 
                 $vi['unit'], 
                 $vi['unit_price'],
@@ -618,12 +833,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             ]);
         }
 
-        // Insert Non-RAB items (subcategory_id = NULL, item_type = 'non_rab')
+        // Insert Non-RAB items (subcategory_id = NULL, item_type = 'non_rab', work_type = 'borongan')
         foreach ($validNonRabItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
-                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', ?, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
+                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', 'borongan', NULL, NULL, NULL, NULL, NULL, 'Hr', NULL, ?, ?, ?, ?, ?, ?, ?)
             ", [
                 $requestId,
                 $vi['item_name'],
@@ -832,6 +1047,7 @@ require_once __DIR__ . '/../../includes/header.php';
 #itemCheckboxContainer .item-check-row:hover { background: #f8faff; }
 #itemCheckboxContainer .item-check-row.selected { background: #e8f5e9; }
 .btn-add-selected { position: sticky; bottom: 0; background: #fff; border-top: 2px solid #28a745; }
+.harian-badge-vol { background-color: #e3fafc; color: #0c8599; border: 1px solid #99e9f2; }
 </style>
 
 <!-- Request Form -->
@@ -910,7 +1126,19 @@ require_once __DIR__ . '/../../includes/header.php';
                                     Memuat data RAP...
                                 </div>
                             </div>
-                            <small class="text-muted">Centang pekerjaan yang akan diajukan dana-nya</small>
+                            <div class="d-flex justify-content-between align-items-center mt-1">
+                                <small class="text-muted">Centang pekerjaan yang akan diajukan dana-nya</small>
+                                <div class="btn-group shadow-sm" role="group" id="workTypeToggleGroup" aria-label="Metode Pengajuan">
+                                    <input type="radio" class="btn-check" name="work_type" id="workTypeBorongan" value="borongan" <?= ($resubmitReq['work_type'] ?? 'borongan') === 'harian' ? '' : 'checked' ?> autocomplete="off">
+                                    <label class="btn btn-outline-primary btn-sm px-3 fw-semibold" for="workTypeBorongan" id="lblWorkTypeBorongan" title="Metode Borongan (Standar)">
+                                        <i class="mdi mdi-hammer me-1"></i> Borongan
+                                    </label>
+                                    <input type="radio" class="btn-check" name="work_type" id="workTypeHarian" value="harian" <?= ($resubmitReq['work_type'] ?? 'borongan') === 'harian' ? 'checked' : '' ?> autocomplete="off">
+                                    <label class="btn btn-outline-primary btn-sm px-3 fw-semibold" for="workTypeHarian" id="lblWorkTypeHarian" title="Metode Harian (Input Volume, Jumlah, Hari, Tarif)">
+                                        <i class="mdi mdi-calendar-clock me-1"></i> Harian
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
@@ -1276,7 +1504,7 @@ function showToast(message, type) {
 $(document).ready(function() {
     console.log('=== CREATE.PHP SCRIPT LOADED ===');
     
-    const projectId = <?= $projectId ?>;
+    const projectId = <?= intval($projectId) ?>;
     const resubmitItems = <?= json_encode($resubmitItems ?? []) ?>;
     const resubmitAttachments = <?= json_encode($resubmitAttachments ?? []) ?>;
     const resubmitSubcatIds = <?= json_encode(array_values(array_keys($resubmitSubcatIds ?? []))) ?>;
@@ -1287,6 +1515,85 @@ $(document).ready(function() {
     let selectedSubcategoryId = null;
     let selectedSubcatName = '';
     let selectedSubcatCode = '';
+    
+    // Sync table headers on load based on checked work_type
+    let previousWorkType = $('input[name="work_type"]:checked').val() || 'borongan';
+    syncItemsTableHeader(previousWorkType);
+    
+    // Toggle Borongan / Harian
+    $(document).on('change', 'input[name="work_type"]', function() {
+        const newWorkType = $(this).val();
+        const hasExistingDirectItems = $('#itemsBody tr.item-row').length > 0;
+        
+        if (hasExistingDirectItems) {
+            if (!confirm('Mengubah metode pengajuan (Borongan / Harian) akan mengosongkan item pengajuan Direct Cost yang sudah dimasukkan. Lanjutkan?')) {
+                if (previousWorkType === 'harian') {
+                    $('#workTypeHarian').prop('checked', true);
+                } else {
+                    $('#workTypeBorongan').prop('checked', true);
+                }
+                return;
+            }
+            $('#itemsBody tr.item-row').remove();
+            $('#emptyRow').show();
+            updateItemCount();
+            calculateGrandTotal();
+        }
+        
+        previousWorkType = newWorkType;
+        syncItemsTableHeader(newWorkType);
+        
+        if ($('#itemTypeSelect').val()) {
+            $('#itemTypeSelect').trigger('change');
+        }
+    });
+
+    function syncItemsTableHeader(workType) {
+        const thead = $('#itemsTable thead');
+        const emptyRow = $('#emptyRow td');
+        const tfootFirst = $('#itemsTable tfoot tr td:first');
+        
+        if (workType === 'harian') {
+            thead.html(`
+                <tr>
+                    <th width="35" class="text-center">#</th>
+                    <th width="140">Item</th>
+                    <th>Nama Item</th>
+                    <th width="85" class="text-center">Vol.</th>
+                    <th width="50" class="text-center">Sat.</th>
+                    <th width="65" class="text-center">Jml</th>
+                    <th width="65" class="text-center">Hari</th>
+                    <th width="55" class="text-center">Sat.</th>
+                    <th width="120" class="text-end">Tarif Satuan</th>
+                    <th width="130" class="text-end">Total Lapangan</th>
+                    <th width="90">Catatan</th>
+                    <th width="125" class="text-center">Status Harga</th>
+                    <th width="105" class="text-center">Status Sisa Qty</th>
+                    <th width="40" class="text-center">Aksi</th>
+                </tr>
+            `);
+            emptyRow.attr('colspan', 14);
+            tfootFirst.attr('colspan', 9);
+        } else {
+            thead.html(`
+                <tr>
+                    <th width="40" class="text-center">#</th>
+                    <th width="150">Item</th>
+                    <th>Nama Item</th>
+                    <th width="70">Satuan</th>
+                    <th width="120" class="text-end">Harga Satuan</th>
+                    <th width="90" class="text-end" id="tableCoefHeader">Volume</th>
+                    <th width="130" class="text-end">Total Harga</th>
+                    <th width="100">Catatan</th>
+                    <th width="100" class="text-center">Status Harga</th>
+                    <th width="110" class="text-center">Status Qty</th>
+                    <th width="40" class="text-center">Aksi</th>
+                </tr>
+            `);
+            emptyRow.attr('colspan', 11);
+            tfootFirst.attr('colspan', 6);
+        }
+    }
     
     // =====================================
     // FORMAT HELPERS
@@ -1532,36 +1839,148 @@ $(document).ready(function() {
     
     // Render item checkboxes table grouped by selected pekerjaan
     function renderItemCheckboxes(pekerjaanList, itemType) {
+        const currentWorkType = $('input[name="work_type"]:checked').val() || 'borongan';
+        const isHarian = currentWorkType === 'harian';
         const isUpah = itemType === 'upah';
-        const colCount = isUpah ? 9 : 7;
+        const isAlat = itemType === 'alat';
+        const isMaterial = itemType === 'material';
         
+        if (!isHarian) {
+            // BORONGAN MODE (Existing unchanged)
+            const colCount = isUpah ? 9 : 7;
+            let html = '<table class="table table-sm table-hover mb-0" id="itemSelectionTable">';
+            html += '<thead class="table-secondary">';
+            html += '<tr>';
+            html += '<th width="35" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllItems" title="Pilih Semua Item"></th>';
+            html += '<th width="65">Kode</th>';
+            html += '<th>Nama Item</th>';
+            html += '<th width="60">Satuan</th>';
+            
+            if (isUpah) {
+                html += '<th width="85" class="text-center">Sisa Vol.</th>';
+                html += '<th width="85" class="text-center">Koef. AHSP</th>';
+                html += '<th width="110" class="text-center">Rencana Kerja <span class="text-danger">*</span></th>';
+                html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
+                html += '<th width="120" class="text-center">Jml Harga</th>';
+            } else {
+                html += '<th width="80" class="text-center">Sisa</th>';
+                html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
+                html += '<th width="100" class="text-center">Volume <span class="text-danger">*</span></th>';
+            }
+            
+            html += '</tr></thead><tbody>';
+            
+            let globalItemIdx = 0;
+            pekerjaanList.forEach(function(pek) {
+                const hasItems = pek.items && pek.items.length > 0;
+                
+                // Pekerjaan Header Row
+                html += '<tr class="subcat-header-row" data-subcat-id="' + pek.subcategory_id + '">';
+                html += '<td class="text-center">';
+                if (hasItems) {
+                    html += '<input type="checkbox" class="form-check-input subcat-group-check" data-subcat-id="' + pek.subcategory_id + '" title="Pilih Semua Item di Pekerjaan Ini">';
+                } else {
+                    html += '<i class="mdi mdi-minus text-muted" style="font-size: 0.8rem;"></i>';
+                }
+                html += '</td>';
+                html += '<td colspan="' + (colCount - 1) + '">';
+                html += '<div class="d-flex align-items-center justify-content-between">';
+                html += '<div>';
+                html += '<i class="mdi mdi-briefcase-outline me-1 text-primary"></i>';
+                html += '<strong>' + escapeHtml(pek.subcat_code) + '. ' + escapeHtml(pek.subcat_name) + '</strong>';
+                html += '</div>';
+                if (hasItems) {
+                    html += '<span class="badge bg-primary bg-opacity-25 text-primary" style="font-size: 0.72rem;">' + pek.items.length + ' item</span>';
+                } else {
+                    html += '<span class="badge bg-secondary bg-opacity-25 text-secondary" style="font-size: 0.7rem;">Tidak ada item ' + itemType + '</span>';
+                }
+                html += '</div></td></tr>';
+                
+                if (hasItems) {
+                    pek.items.forEach(function(item) {
+                        const price = item.actual_price || item.unit_price;
+                        const ahspCoef = parseFloat(item.ahsp_coefficient) || 0;
+                        const sisaQty = parseFloat(item.sisa_qty) || 0;
+                        const rapQty = parseFloat(item.rap_qty) || 0;
+                        const usedQty = parseFloat(item.used_qty) || 0;
+                        const sisaVol = item.sisa_volume !== undefined ? parseFloat(item.sisa_volume) : (ahspCoef > 0 ? (sisaQty / ahspCoef) : 0);
+                        const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+                        const sisaVolText = sisaVol > 0 ? sisaVol.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
+                        const idx = globalItemIdx++;
+                        
+                        html += '<tr class="item-check-row" data-subcat-id="' + pek.subcategory_id + '">';
+                        html += '<td class="text-center">';
+                        html += '<input type="checkbox" class="form-check-input item-checkbox" ';
+                        html += 'data-work-type="borongan" ';
+                        html += 'data-subcat-id="' + pek.subcategory_id + '" ';
+                        html += 'data-subcat-code="' + escapeHtml(pek.subcat_code) + '" ';
+                        html += 'data-subcat-name="' + escapeHtml(pek.subcat_name) + '" ';
+                        html += 'data-category-id="' + (pek.category_id || '') + '" ';
+                        html += 'data-code="' + (item.item_code || '') + '" ';
+                        html += 'data-name="' + escapeHtml(item.name) + '" ';
+                        html += 'data-unit="' + escapeHtml(item.unit) + '" ';
+                        html += 'data-price="' + price + '" ';
+                        html += 'data-ahsp-coef="' + ahspCoef + '" ';
+                        html += 'data-sisa-qty="' + sisaQty + '" ';
+                        html += 'data-sisa-volume="' + sisaVol + '" ';
+                        html += 'data-rap-qty="' + rapQty + '" ';
+                        html += 'data-used-qty="' + usedQty + '" ';
+                        html += 'data-item-type="' + item.item_type + '">';
+                        html += '</td>';
+                        html += '<td><small class="text-muted">' + (item.item_code || '-') + '</small></td>';
+                        html += '<td class="ps-3">' + escapeHtml(item.name) + '</td>';
+                        html += '<td><small>' + escapeHtml(item.unit) + '</small></td>';
+                        
+                        if (isUpah) {
+                            html += '<td class="text-center"><small class="' + (sisaVol > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaVolText + '</small></td>';
+                            html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
+                            html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
+                            html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
+                            html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
+                        } else {
+                            html += '<td class="text-center"><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaText + '</small></td>';
+                            html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
+                            html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
+                        }
+                        html += '</tr>';
+                    });
+                }
+            });
+            
+            html += '</tbody></table>';
+            $('#itemCheckboxContainer').html(html);
+            return;
+        }
+        
+        // HARIAN MODE
+        const colCount = isMaterial ? 9 : 10;
         let html = '<table class="table table-sm table-hover mb-0" id="itemSelectionTable">';
         html += '<thead class="table-secondary">';
         html += '<tr>';
         html += '<th width="35" class="text-center"><input type="checkbox" class="form-check-input" id="selectAllItems" title="Pilih Semua Item"></th>';
         html += '<th width="65">Kode</th>';
         html += '<th>Nama Item</th>';
-        html += '<th width="60">Satuan</th>';
-        
-        if (isUpah) {
-            html += '<th width="85" class="text-center">Sisa Vol.</th>';
-            html += '<th width="85" class="text-center">Koef. AHSP</th>';
-            html += '<th width="110" class="text-center">Rencana Kerja <span class="text-danger">*</span></th>';
-            html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
-            html += '<th width="120" class="text-center">Jml Harga</th>';
-        } else {
-            html += '<th width="80" class="text-center">Sisa</th>';
-            html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
-            html += '<th width="100" class="text-center">Volume <span class="text-danger">*</span></th>';
+        html += '<th width="85" class="text-center">Vol. <span class="text-danger">*</span></th>';
+        html += '<th width="50" class="text-center">Satuan</th>';
+        html += '<th width="65" class="text-center">Jumlah <span class="text-danger">*</span></th>';
+        if (!isMaterial) {
+            html += '<th width="65" class="text-center">Hari <span class="text-danger">*</span></th>';
         }
-        
+        html += '<th width="55" class="text-center">Satuan</th>';
+        html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
+        html += '<th width="125" class="text-end">Jml Harga</th>';
         html += '</tr></thead><tbody>';
         
         let globalItemIdx = 0;
         pekerjaanList.forEach(function(pek) {
             const hasItems = pek.items && pek.items.length > 0;
+            const subcatVol = parseFloat(pek.subcat_volume) || 0;
+            const sisaVol = pek.sisa_volume !== undefined ? parseFloat(pek.sisa_volume) : subcatVol;
+            const defaultWorkVol = sisaVol > 0 ? sisaVol : subcatVol;
+            const subcatUnit = pek.subcat_unit || "m'";
+            const rapUnitCost = parseFloat(pek.rap_unit_cost) || 0;
+            const rapTotalCost = parseFloat(pek.rap_total_cost) || 0;
             
-            // Pekerjaan Header Row
             html += '<tr class="subcat-header-row" data-subcat-id="' + pek.subcategory_id + '">';
             html += '<td class="text-center">';
             if (hasItems) {
@@ -1574,7 +1993,9 @@ $(document).ready(function() {
             html += '<div class="d-flex align-items-center justify-content-between">';
             html += '<div>';
             html += '<i class="mdi mdi-briefcase-outline me-1 text-primary"></i>';
-            html += '<strong>' + escapeHtml(pek.subcat_code) + '. ' + escapeHtml(pek.subcat_name) + '</strong>';
+            html += '<strong>' + escapeHtml(pek.subcat_code) + '. ' + escapeHtml(pek.subcat_name) + '</strong> ';
+            html += '<span class="badge harian-badge-vol ms-2 font-size-11" title="Volume RAP Pekerjaan">Vol RAP: ' + subcatVol.toLocaleString('id-ID', {maximumFractionDigits: 2}) + ' ' + escapeHtml(subcatUnit) + '</span>';
+            html += '<span class="badge ' + (sisaVol > 0 ? 'bg-soft-success text-success' : 'bg-soft-danger text-danger') + ' ms-1 font-size-11" title="Sisa Volume Bersama">Sisa: ' + sisaVol.toLocaleString('id-ID', {maximumFractionDigits: 2}) + ' ' + escapeHtml(subcatUnit) + '</span>';
             html += '</div>';
             if (hasItems) {
                 html += '<span class="badge bg-primary bg-opacity-25 text-primary" style="font-size: 0.72rem;">' + pek.items.length + ' item</span>';
@@ -1586,48 +2007,74 @@ $(document).ready(function() {
             if (hasItems) {
                 pek.items.forEach(function(item) {
                     const price = item.actual_price || item.unit_price;
-                    const ahspCoef = parseFloat(item.ahsp_coefficient) || 0;
-                    const sisaQty = parseFloat(item.sisa_qty) || 0;
-                    const rapQty = parseFloat(item.rap_qty) || 0;
-                    const usedQty = parseFloat(item.used_qty) || 0;
-                    const sisaVol = item.sisa_volume !== undefined ? parseFloat(item.sisa_volume) : (ahspCoef > 0 ? (sisaQty / ahspCoef) : 0);
-                    const sisaText = sisaQty > 0 ? sisaQty.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
-                    const sisaVolText = sisaVol > 0 ? sisaVol.toLocaleString('id-ID', {maximumFractionDigits: 4}) : '0';
                     const idx = globalItemIdx++;
                     
-                    html += '<tr class="item-check-row" data-subcat-id="' + pek.subcategory_id + '">';
+                    let qtyUnit = 'orang';
+                    let durUnit = 'Hr';
+                    let billingUnit = 'OH';
+                    if (isAlat) {
+                        qtyUnit = 'unit';
+                        durUnit = 'Hari';
+                        billingUnit = 'unit-hari';
+                    } else if (isMaterial) {
+                        qtyUnit = item.unit || 'ls';
+                        durUnit = '-';
+                        billingUnit = item.unit || 'ls';
+                    }
+                    
+                    html += '<tr class="item-check-row harian-item-row" data-subcat-id="' + pek.subcategory_id + '">';
                     html += '<td class="text-center">';
                     html += '<input type="checkbox" class="form-check-input item-checkbox" ';
+                    html += 'data-work-type="harian" ';
                     html += 'data-subcat-id="' + pek.subcategory_id + '" ';
                     html += 'data-subcat-code="' + escapeHtml(pek.subcat_code) + '" ';
                     html += 'data-subcat-name="' + escapeHtml(pek.subcat_name) + '" ';
+                    html += 'data-subcat-unit="' + escapeHtml(subcatUnit) + '" ';
+                    html += 'data-subcat-volume="' + subcatVol + '" ';
+                    html += 'data-sisa-volume="' + sisaVol + '" ';
+                    html += 'data-rap-unit-cost="' + rapUnitCost + '" ';
+                    html += 'data-rap-total-cost="' + rapTotalCost + '" ';
                     html += 'data-category-id="' + (pek.category_id || '') + '" ';
                     html += 'data-code="' + (item.item_code || '') + '" ';
                     html += 'data-name="' + escapeHtml(item.name) + '" ';
                     html += 'data-unit="' + escapeHtml(item.unit) + '" ';
                     html += 'data-price="' + price + '" ';
-                    html += 'data-ahsp-coef="' + ahspCoef + '" ';
-                    html += 'data-sisa-qty="' + sisaQty + '" ';
-                    html += 'data-sisa-volume="' + sisaVol + '" ';
-                    html += 'data-rap-qty="' + rapQty + '" ';
-                    html += 'data-used-qty="' + usedQty + '" ';
-                    html += 'data-item-type="' + item.item_type + '">';
+                    html += 'data-item-type="' + item.item_type + '" ';
+                    html += 'data-qty-unit="' + qtyUnit + '" ';
+                    html += 'data-dur-unit="' + durUnit + '" ';
+                    html += 'data-billing-unit="' + billingUnit + '">';
                     html += '</td>';
                     html += '<td><small class="text-muted">' + (item.item_code || '-') + '</small></td>';
-                    html += '<td class="ps-3">' + escapeHtml(item.name) + '</td>';
-                    html += '<td><small>' + escapeHtml(item.unit) + '</small></td>';
+                    html += '<td class="ps-2 fw-medium">' + escapeHtml(item.name) + '</td>';
                     
-                    if (isUpah) {
-                        html += '<td class="text-center"><small class="' + (sisaVol > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaVolText + '</small></td>';
-                        html += '<td class="text-center"><small class="fw-bold text-dark">' + ahspCoef.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 6}) + '</small></td>';
-                        html += '<td><input type="text" class="form-control form-control-sm text-end item-workplan-input" placeholder="0" data-idx="' + idx + '"></td>';
-                        html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
-                        html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
+                    // Vol.
+                    html += '<td><input type="text" class="form-control form-control-sm text-end item-harian-vol" ';
+                    html += 'data-subcat-id="' + pek.subcategory_id + '" data-max-sisa="' + sisaVol + '" ';
+                    html += 'value="' + (defaultWorkVol > 0 ? defaultWorkVol.toString().replace('.', ',') : '') + '" placeholder="0"></td>';
+                    
+                    // Satuan Pekerjaan
+                    html += '<td class="text-center"><small>' + escapeHtml(subcatUnit) + '</small></td>';
+                    
+                    // Jumlah
+                    html += '<td><input type="text" class="form-control form-control-sm text-end item-harian-qty" placeholder="0" data-idx="' + idx + '"></td>';
+                    
+                    // Hari (only for Upah & Alat, Material omits Frek./Hari)
+                    if (!isMaterial) {
+                        html += '<td><input type="text" class="form-control form-control-sm text-end item-harian-dur" placeholder="0" data-idx="' + idx + '"></td>';
                     } else {
-                        html += '<td class="text-center"><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaText + '</small></td>';
-                        html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
-                        html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
+                        html += '<input type="hidden" class="item-harian-dur" value="1" data-idx="' + idx + '">';
                     }
+                    
+                    // Satuan Tagihan
+                    html += '<td class="text-center"><small>' + escapeHtml(billingUnit) + '</small></td>';
+                    
+                    // Harga Satuan
+                    html += '<td><input type="text" class="form-control form-control-sm text-end item-harian-price" ';
+                    html += 'value="' + (price > 0 ? formatNumber(price) : '') + '" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-default-price="' + price + '" data-idx="' + idx + '"></td>';
+                    
+                    // Jml Harga
+                    html += '<td class="text-end fw-bold text-primary item-harian-total-cell">Rp 0</td>';
+                    
                     html += '</tr>';
                 });
             }
@@ -1637,14 +2084,14 @@ $(document).ready(function() {
         $('#itemCheckboxContainer').html(html);
     }
     
-    // Auto-format price inputs in the checkbox table
+    // Auto-format price inputs in the checkbox table (Borongan)
     $(document).on('input', '.item-price-input', function() {
         autoFormatInput($(this));
         updateRowJmlHarga($(this).closest('tr'));
         checkRowOnInput($(this));
     });
     
-    // Allow numbers and comma for workplan / coef inputs in the checkbox table
+    // Allow numbers and comma for workplan / coef inputs in the checkbox table (Borongan)
     $(document).on('input', '.item-workplan-input', function() {
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
@@ -1658,7 +2105,7 @@ $(document).ready(function() {
         checkRowOnInput($(this));
     });
 
-    // Helper to auto-check row checkbox when user types value
+    // Helper to auto-check row checkbox when user types value (Borongan)
     function checkRowOnInput(inputElem) {
         const row = inputElem.closest('tr');
         const cb = row.find('.item-checkbox');
@@ -1689,6 +2136,71 @@ $(document).ready(function() {
             }
             const jmlHarga = ahspCoef * workPlan * price;
             row.find('.item-total-price-cell').text(formatRupiah(jmlHarga));
+        }
+    }
+    
+    // Harian input handlers in Step 1 checkbox table
+    $(document).on('input', '.item-harian-vol', function() {
+        let valStr = $(this).val().replace(/[^\d,]/g, '');
+        $(this).val(valStr);
+        const subcatId = $(this).data('subcat-id');
+        // Auto-sync to all other .item-harian-vol inputs in the same subcategory
+        $('.item-harian-vol[data-subcat-id="' + subcatId + '"]').not(this).val(valStr);
+        
+        const maxSisa = parseFloat($(this).data('max-sisa')) || 0;
+        const currentVal = parseNumber(valStr);
+        if (maxSisa > 0 && currentVal > maxSisa) {
+            $('.item-harian-vol[data-subcat-id="' + subcatId + '"]').addClass('is-invalid');
+        } else {
+            $('.item-harian-vol[data-subcat-id="' + subcatId + '"]').removeClass('is-invalid');
+        }
+    });
+
+    $(document).on('input', '.item-harian-qty, .item-harian-dur', function() {
+        let val = $(this).val().replace(/[^\d,]/g, '');
+        $(this).val(val);
+        updateHarianRowJmlHarga($(this).closest('tr'));
+        checkRowOnInputHarian($(this));
+    });
+
+    $(document).on('input', '.item-harian-price', function() {
+        autoFormatInput($(this));
+        updateHarianRowJmlHarga($(this).closest('tr'));
+        checkRowOnInputHarian($(this));
+    });
+
+    function updateHarianRowJmlHarga(row) {
+        const qty = parseNumber(row.find('.item-harian-qty').val());
+        const durInput = row.find('.item-harian-dur');
+        const dur = durInput.length ? (parseNumber(durInput.val()) || 1) : 1;
+        let price = parseNumber(row.find('.item-harian-price').val());
+        if (price <= 0) {
+            price = parseFloat(row.find('.item-checkbox').data('price')) || 0;
+        }
+        const total = qty * dur * price;
+        row.find('.item-harian-total-cell').text(formatRupiah(total));
+    }
+
+    function checkRowOnInputHarian(inputElem) {
+        const row = inputElem.closest('tr');
+        const cb = row.find('.item-checkbox');
+        const qty = parseNumber(row.find('.item-harian-qty').val());
+        const durInput = row.find('.item-harian-dur');
+        const dur = durInput.length ? (parseNumber(durInput.val()) || 1) : 1;
+        const price = parseNumber(row.find('.item-harian-price').val()) || parseFloat(cb.data('price')) || 0;
+        
+        if (qty > 0 && dur > 0 && price > 0 && !cb.prop('checked')) {
+            cb.prop('checked', true);
+            row.addClass('selected');
+            const subId = cb.data('subcat-id');
+            const totalInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]').length;
+            const checkedInSub = $('.item-checkbox[data-subcat-id="' + subId + '"]:checked').length;
+            $('.subcat-group-check[data-subcat-id="' + subId + '"]').prop('checked', totalInSub > 0 && totalInSub === checkedInSub);
+            
+            const total = $('.item-checkbox').length;
+            const checked = $('.item-checkbox:checked').length;
+            $('#selectAllItems').prop('checked', total > 0 && total === checked);
+            updateSelectedItemCount();
         }
     }
     
@@ -1746,71 +2258,149 @@ $(document).ready(function() {
             return;
         }
         
+        const currentWorkType = $('input[name="work_type"]:checked').val() || 'borongan';
+        const isHarian = currentWorkType === 'harian';
+        
         let addedCount = 0;
         let errorCount = 0;
         
-        checkedItems.each(function() {
-            const cb = $(this);
-            const row = cb.closest('tr');
-            let price = parseNumber(row.find('.item-price-input').val());
-            if (price <= 0) {
-                price = parseFloat(cb.data('price')) || 0;
-            }
-            
-            const itemType = cb.data('item-type');
-            let actualCoef = 0;
-
-            if (itemType === 'upah') {
-                const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
-                const workPlan = parseNumber(row.find('.item-workplan-input').val());
-                if (price <= 0 || workPlan <= 0) {
+        if (isHarian) {
+            checkedItems.each(function() {
+                const cb = $(this);
+                const row = cb.closest('tr');
+                const itemType = cb.data('item-type') || '';
+                const workVol = parseNumber(row.find('.item-harian-vol').val());
+                const workQty = parseNumber(row.find('.item-harian-qty').val());
+                const durInput = row.find('.item-harian-dur');
+                const workDur = (itemType === 'material') ? 1 : (parseNumber(durInput.val()) || 1);
+                let price = parseNumber(row.find('.item-harian-price').val());
+                if (price <= 0) {
+                    price = parseFloat(cb.data('price')) || 0;
+                }
+                
+                if (workVol <= 0 || workQty <= 0 || workDur <= 0 || price <= 0) {
                     errorCount++;
                     row.addClass('table-danger');
                     return; // skip this item
                 }
-                actualCoef = ahspCoef * workPlan;
-            } else {
-                const inputVal = parseNumber(row.find('.item-coef-input').val());
-                if (price <= 0 || inputVal <= 0) {
-                    errorCount++;
-                    row.addClass('table-danger');
-                    return; // skip this item
-                }
-                actualCoef = inputVal;
-            }
-            row.removeClass('table-danger');
-            
-            const subcatId = cb.data('subcat-id');
-            const subcatCode = cb.data('subcat-code');
-            const subcatName = cb.data('subcat-name');
-            const categoryId = cb.data('category-id');
-            
-            addItemRow({
-                category_id: categoryId || null,
-                subcategory_id: subcatId,
-                subcat_code: subcatCode,
-                subcat_name: subcatName,
-                item_code: cb.data('code'),
-                item_type: itemType || '',
-                item_name: cb.data('name'),
-                unit: cb.data('unit'),
-                unit_price: price,
-                coefficient: actualCoef,
-                subcat_details: null,
-                rap_unit_price: parseFloat(cb.data('price')) || 0,
-                sisa_qty: parseFloat(cb.data('sisa-qty')) || 0,
-                is_readonly: true
+                row.removeClass('table-danger');
+                
+                const subcatId = cb.data('subcat-id');
+                const subcatCode = cb.data('subcat-code');
+                const subcatName = cb.data('subcat-name');
+                const subcatUnit = cb.data('subcat-unit') || "m'";
+                const categoryId = cb.data('category-id');
+                const itemCode = cb.data('code');
+                const itemName = cb.data('name');
+                const qtyUnit = cb.data('qty-unit') || (itemType === 'material' ? (cb.data('unit') || 'ls') : 'orang');
+                const durUnit = (itemType === 'material') ? '-' : (cb.data('dur-unit') || 'Hr');
+                const billingUnit = cb.data('billing-unit') || (itemType === 'material' ? qtyUnit : 'OH');
+                
+                const billableQty = workQty * workDur;
+                const totalPrice = billableQty * price;
+                
+                addItemRow({
+                    work_type: 'harian',
+                    category_id: categoryId || null,
+                    subcategory_id: subcatId,
+                    subcat_code: subcatCode,
+                    subcat_name: subcatName,
+                    subcat_unit: subcatUnit,
+                    subcat_volume: parseFloat(cb.data('subcat-volume')) || 0,
+                    sisa_volume: parseFloat(cb.data('sisa-volume')) || 0,
+                    rap_unit_cost: parseFloat(cb.data('rap-unit-cost')) || 0,
+                    rap_total_cost: parseFloat(cb.data('rap-total-cost')) || 0,
+                    item_code: itemCode,
+                    item_type: itemType || '',
+                    item_name: itemName,
+                    work_volume: workVol,
+                    work_unit: subcatUnit,
+                    work_quantity: workQty,
+                    work_quantity_unit: qtyUnit,
+                    work_duration: workDur,
+                    work_duration_unit: durUnit,
+                    work_billing_unit: billingUnit,
+                    unit: billingUnit,
+                    unit_price: price,
+                    quantity: billableQty,
+                    coefficient: billableQty,
+                    total_price: totalPrice,
+                    notes: '',
+                    is_readonly: true
+                });
+                
+                addedCount++;
+                cb.prop('checked', false);
+                row.removeClass('selected');
+                row.find('.item-harian-qty').val('');
+                if (itemType !== 'material') row.find('.item-harian-dur').val('');
+                row.find('.item-harian-total-cell').text('Rp 0');
             });
-            
-            addedCount++;
-            // Uncheck the added item and reset its inputs
-            cb.prop('checked', false);
-            row.removeClass('selected');
-            row.find('.item-price-input').val('');
-            row.find('.item-coef-input').val('');
-            row.find('.item-workplan-input').val('');
-            row.find('.item-total-price-cell').text('Rp 0');
-        });
+        } else {
+            // BORONGAN MODE (Existing unchanged)
+            checkedItems.each(function() {
+                const cb = $(this);
+                const row = cb.closest('tr');
+                let price = parseNumber(row.find('.item-price-input').val());
+                if (price <= 0) {
+                    price = parseFloat(cb.data('price')) || 0;
+                }
+                
+                const itemType = cb.data('item-type');
+                let actualCoef = 0;
+
+                if (itemType === 'upah') {
+                    const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
+                    const workPlan = parseNumber(row.find('.item-workplan-input').val());
+                    if (price <= 0 || workPlan <= 0) {
+                        errorCount++;
+                        row.addClass('table-danger');
+                        return; // skip this item
+                    }
+                    actualCoef = ahspCoef * workPlan;
+                } else {
+                    const inputVal = parseNumber(row.find('.item-coef-input').val());
+                    if (price <= 0 || inputVal <= 0) {
+                        errorCount++;
+                        row.addClass('table-danger');
+                        return; // skip this item
+                    }
+                    actualCoef = inputVal;
+                }
+                row.removeClass('table-danger');
+                
+                const subcatId = cb.data('subcat-id');
+                const subcatCode = cb.data('subcat-code');
+                const subcatName = cb.data('subcat-name');
+                const categoryId = cb.data('category-id');
+                
+                addItemRow({
+                    work_type: 'borongan',
+                    category_id: categoryId || null,
+                    subcategory_id: subcatId,
+                    subcat_code: subcatCode,
+                    subcat_name: subcatName,
+                    item_code: cb.data('code'),
+                    item_type: itemType || '',
+                    item_name: cb.data('name'),
+                    unit: cb.data('unit'),
+                    unit_price: price,
+                    coefficient: actualCoef,
+                    subcat_details: null,
+                    rap_unit_price: parseFloat(cb.data('price')) || 0,
+                    sisa_qty: parseFloat(cb.data('sisa-qty')) || 0,
+                    is_readonly: true
+                });
+                
+                addedCount++;
+                cb.prop('checked', false);
+                row.removeClass('selected');
+                row.find('.item-price-input').val('');
+                row.find('.item-coef-input').val('');
+                row.find('.item-workplan-input').val('');
+                row.find('.item-total-price-cell').text('Rp 0');
+            });
+        }
         
         // Update subcat group checkboxes & select all
         $('.subcat-group-check').each(function() {
@@ -1826,7 +2416,7 @@ $(document).ready(function() {
             showToast(addedCount + ' item berhasil ditambahkan', 'success');
         }
         if (errorCount > 0) {
-            showToast(errorCount + ' item dilewati (harga/volume/rencana kerja belum diisi)', 'warning');
+            showToast(errorCount + ' item dilewati (kolom wajib belum diisi lengkap)', 'warning');
         }
     });
     
@@ -1894,6 +2484,7 @@ $(document).ready(function() {
         const itemCoef = $(this).data('coef') || 1;
         
         addItemRow({
+            work_type: $('input[name="work_type"]:checked').val() || 'borongan',
             category_id: selectedCategoryId,
             subcategory_id: selectedSubcategoryId,
             item_code: itemCode,
@@ -1912,6 +2503,7 @@ $(document).ready(function() {
     // =====================================
     $('#addCustomItemBtn').click(function() {
         addItemRow({
+            work_type: $('input[name="work_type"]:checked').val() || 'borongan',
             category_id: selectedCategoryId,
             subcategory_id: selectedSubcategoryId,
             item_code: '',
@@ -1926,19 +2518,130 @@ $(document).ready(function() {
     });
     
     // =====================================
-    // ADD ITEM ROW TO TABLE
+    // ADD ITEM ROW TO TABLE (STEP 2)
     // =====================================
     function addItemRow(data) {
         itemIndex++;
         $('#emptyRow').hide();
         
+        const isHarianRow = (data.work_type === 'harian');
+        
+        if (isHarianRow) {
+            const isMaterial = (data.item_type === 'material');
+            const workVol = data.work_volume || 0;
+            const workUnit = data.work_unit || data.subcat_unit || "m'";
+            const workQty = data.work_quantity || 0;
+            const workQtyUnit = data.work_quantity_unit || (isMaterial ? (data.unit || 'ls') : 'orang');
+            const workDur = isMaterial ? 1 : (data.work_duration || 0);
+            const workDurUnit = isMaterial ? '-' : (data.work_duration_unit || 'Hr');
+            const billingUnit = data.work_billing_unit || data.unit || (isMaterial ? workQtyUnit : 'OH');
+            const unitPrice = data.unit_price || 0;
+            const billableQty = data.quantity || (workQty * workDur);
+            const totalPrice = data.total_price || (billableQty * unitPrice);
+            
+            const subcatBadge = data.subcat_code ? `<br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size: 0.72rem;" title="${escapeHtml(data.subcat_name || '')}"><i class="mdi mdi-briefcase-outline"></i> ${escapeHtml(data.subcat_code)}</span>` : '';
+            const subcatSubtitle = data.subcat_name ? `<div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> ${escapeHtml(data.subcat_code ? data.subcat_code + ' - ' : '')}${escapeHtml(data.subcat_name)}</div>` : '';
+            
+            const row = `
+                <tr class="item-row harian-item-row" data-index="${itemIndex}" data-work-type="harian" 
+                    data-item-type="${escapeHtml(data.item_type || '')}"
+                    data-subcat-id="${data.subcategory_id || ''}" 
+                    data-subcat-volume="${data.subcat_volume || 0}" 
+                    data-sisa-volume="${data.sisa_volume || 0}" 
+                    data-rap-unit-cost="${data.rap_unit_cost || 0}" 
+                    data-rap-total-cost="${data.rap_total_cost || 0}">
+                    <td class="text-center">${itemIndex}</td>
+                    <td>
+                        <small class="text-muted fw-semibold">${data.item_code || '<em>Custom</em>'}</small>
+                        ${subcatBadge}
+                        <input type="hidden" name="items[${itemIndex}][work_type]" value="harian">
+                        <input type="hidden" name="items[${itemIndex}][category_id]" value="${data.category_id || ''}">
+                        <input type="hidden" name="items[${itemIndex}][subcategory_id]" value="${data.subcategory_id || ''}">
+                        <input type="hidden" name="items[${itemIndex}][item_code]" value="${data.item_code || ''}">
+                        <input type="hidden" name="items[${itemIndex}][item_type]" value="${data.item_type || ''}">
+                        <input type="hidden" name="items[${itemIndex}][work_unit]" value="${escapeHtml(workUnit)}">
+                        <input type="hidden" name="items[${itemIndex}][work_quantity_unit]" value="${escapeHtml(workQtyUnit)}">
+                        <input type="hidden" name="items[${itemIndex}][work_duration_unit]" value="${escapeHtml(workDurUnit)}">
+                        <input type="hidden" name="items[${itemIndex}][work_billing_unit]" value="${escapeHtml(billingUnit)}">
+                        <input type="hidden" name="items[${itemIndex}][subcat_details]" value='${data.subcat_details ? JSON.stringify(data.subcat_details).replace(/'/g, "&#39;") : ""}'>
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][item_name]" value="${escapeHtml(data.item_name)}" 
+                               ${data.is_readonly ? 'readonly class="form-control form-control-sm readonly-field"' : 'class="form-control form-control-sm"'} placeholder="Nama Item" required>
+                        ${subcatSubtitle}
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][work_volume]" 
+                               value="${workVol > 0 ? workVol.toString().replace('.', ',') : ''}" 
+                               class="form-control form-control-sm text-end harian-row-vol" 
+                               data-subcat-id="${data.subcategory_id || ''}" placeholder="0" required>
+                    </td>
+                    <td class="text-center">
+                        <small class="fw-semibold">${escapeHtml(workUnit)}</small>
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][work_quantity]" 
+                               value="${workQty > 0 ? workQty.toString().replace('.', ',') : ''}" 
+                               class="form-control form-control-sm text-end harian-row-qty" 
+                               placeholder="0" required>
+                    </td>
+                    <td class="text-center">
+                        ${isMaterial ? 
+                            `<span class="text-muted">-</span><input type="hidden" name="items[${itemIndex}][work_duration]" class="harian-row-dur" value="1">` :
+                            `<input type="text" name="items[${itemIndex}][work_duration]" 
+                                   value="${workDur > 0 ? workDur.toString().replace('.', ',') : ''}" 
+                                   class="form-control form-control-sm text-end harian-row-dur" 
+                                   placeholder="0" required>`
+                        }
+                    </td>
+                    <td class="text-center">
+                        <small class="fw-semibold">${escapeHtml(billingUnit)}</small>
+                        <input type="hidden" name="items[${itemIndex}][unit]" value="${escapeHtml(billingUnit)}">
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][unit_price]" 
+                               value="${unitPrice > 0 ? formatNumber(unitPrice) : ''}" 
+                               class="form-control form-control-sm text-end harian-row-price price-input" 
+                               placeholder="0" required>
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][total_price]" 
+                               value="${formatNumber(totalPrice)}" 
+                               class="form-control form-control-sm text-end readonly-field total-price harian-row-total" readonly>
+                        <input type="hidden" name="items[${itemIndex}][quantity]" class="harian-hidden-qty" value="${billableQty.toFixed(4)}">
+                        <input type="hidden" name="items[${itemIndex}][coefficient]" class="harian-hidden-coef" value="${billableQty.toFixed(6)}">
+                    </td>
+                    <td>
+                        <input type="text" name="items[${itemIndex}][notes]" 
+                               value="${escapeHtml(data.notes || '')}" 
+                               class="form-control form-control-sm" placeholder="Catatan">
+                    </td>
+                    <td class="text-center harian-status-harga-cell status-harga-cell">
+                        <span class="badge bg-secondary">-</span>
+                    </td>
+                    <td class="text-center harian-status-sisa-cell status-qty-cell">
+                        <span class="badge bg-secondary">-</span>
+                    </td>
+                    <td class="text-center">
+                        <span class="remove-item-btn" title="Hapus"><i class="mdi mdi-close-circle" style="font-size: 1.3rem;"></i></span>
+                    </td>
+                </tr>
+            `;
+            
+            $('#itemsBody').append(row);
+            updateHarianSubcategoryStatus(data.subcategory_id);
+            updateItemCount();
+            calculateGrandTotal();
+            return;
+        }
+        
+        // BORONGAN MODE (Existing)
         const readonlyName = data.is_readonly ? 'readonly class="form-control form-control-sm readonly-field"' : 'class="form-control form-control-sm"';
         const readonlyUnit = data.is_readonly ? 'readonly class="form-control form-control-sm readonly-field"' : 'class="form-control form-control-sm"';
         
         const totalPrice = data.unit_price * data.coefficient;
         const coefDisplay = data.coefficient > 0 ? data.coefficient.toString().replace('.', ',') : '';
         
-        // Status Harga: compare unit_price (field) vs rap_unit_price
         let statusHargaHtml = '<span class="badge bg-secondary">-</span>';
         const rapUnitPrice = parseFloat(data.rap_unit_price) || 0;
         if (rapUnitPrice > 0 && data.unit_price > 0) {
@@ -1955,7 +2658,6 @@ $(document).ready(function() {
             }
         }
         
-        // Status Qty: compare coefficient vs sisa_qty
         let statusQtyHtml = '<span class="badge bg-secondary">-</span>';
         const sisaQty = parseFloat(data.sisa_qty) || 0;
         if (sisaQty > 0 || rapUnitPrice > 0) {
@@ -1973,12 +2675,13 @@ $(document).ready(function() {
         const subcatSubtitle = data.subcat_name ? `<div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> ${escapeHtml(data.subcat_code ? data.subcat_code + ' - ' : '')}${escapeHtml(data.subcat_name)}</div>` : '';
         
         const row = `
-            <tr class="item-row" data-index="${itemIndex}" data-item-type="${data.item_type || ''}" 
+            <tr class="item-row" data-index="${itemIndex}" data-work-type="borongan" data-item-type="${data.item_type || ''}" 
                 data-rap-unit-price="${rapUnitPrice}" data-sisa-qty="${sisaQty}">
                 <td class="text-center">${itemIndex}</td>
                 <td>
                     <small class="text-muted fw-semibold">${data.item_code || '<em>Custom</em>'}</small>
                     ${subcatBadge}
+                    <input type="hidden" name="items[${itemIndex}][work_type]" value="borongan">
                     <input type="hidden" name="items[${itemIndex}][category_id]" value="${data.category_id || ''}">
                     <input type="hidden" name="items[${itemIndex}][subcategory_id]" value="${data.subcategory_id || ''}">
                     <input type="hidden" name="items[${itemIndex}][item_code]" value="${data.item_code || ''}">
@@ -2029,13 +2732,118 @@ $(document).ready(function() {
         calculateGrandTotal();
     }
     
+    // Calculate & update Status Harga and Status Sisa Qty for Harian subcategory
+    function updateHarianSubcategoryStatus(subcatId) {
+        if (!subcatId) return;
+        const rows = $('#itemsBody tr.harian-item-row[data-subcat-id="' + subcatId + '"]');
+        if (rows.length === 0) return;
+        
+        let subcatTotalLapangan = 0;
+        rows.each(function() {
+            const rowTot = parseNumber($(this).find('.harian-row-total').val());
+            subcatTotalLapangan += rowTot;
+        });
+        
+        const firstRow = rows.first();
+        const workVol = parseNumber(firstRow.find('.harian-row-vol').val());
+        const workUnit = firstRow.find('input[name*="[work_unit]"]').val() || "m'";
+        const rapUnitCost = parseFloat(firstRow.data('rap-unit-cost')) || 0;
+        const rapTotalCost = parseFloat(firstRow.data('rap-total-cost')) || 0;
+        const sisaVol = parseFloat(firstRow.data('sisa-volume')) || 0;
+        
+        let effectiveRapTotal = 0;
+        if (rapUnitCost > 0 && workVol > 0) {
+            effectiveRapTotal = rapUnitCost * workVol;
+        } else if (rapTotalCost > 0) {
+            effectiveRapTotal = rapTotalCost;
+        }
+        
+        // Status Harga
+        let statusHargaBadge = '<span class="badge bg-secondary">-</span>';
+        if (effectiveRapTotal > 0 && subcatTotalLapangan > 0) {
+            const delta = effectiveRapTotal - subcatTotalLapangan;
+            const pctDelta = (delta / effectiveRapTotal) * 100;
+            
+            if (delta < 0) {
+                const pct = Math.abs(pctDelta).toFixed(2);
+                statusHargaBadge = '<span class="badge bg-danger" title="Over budget: Selisih Rp ' + formatNumber(delta) + '">lebih mahal -' + pct + '%</span>';
+            } else if (delta > 0) {
+                const pct = pctDelta.toFixed(2);
+                statusHargaBadge = '<span class="badge bg-success" title="Surplus: Hemat Rp ' + formatNumber(delta) + '">hemat +' + pct + '%</span>';
+            } else {
+                statusHargaBadge = '<span class="badge bg-success">aman 0.00%</span>';
+            }
+        }
+        
+        // Status Sisa Qty
+        let statusSisaBadge = '<span class="badge bg-secondary">-</span>';
+        if (sisaVol >= 0) {
+            const projectedSisa = sisaVol - workVol;
+            if (projectedSisa < 0) {
+                statusSisaBadge = '<span class="badge bg-danger">⚠️ OVER QTY</span><br><small class="text-danger">Sisa: ' + projectedSisa.toLocaleString('id-ID', {maximumFractionDigits: 2}) + ' ' + escapeHtml(workUnit) + '</small>';
+            } else if (projectedSisa === 0) {
+                statusSisaBadge = '<span class="badge bg-success">0 unt</span>';
+            } else {
+                statusSisaBadge = '<span class="badge bg-success">' + projectedSisa.toLocaleString('id-ID', {maximumFractionDigits: 2}) + ' ' + escapeHtml(workUnit) + '</span>';
+            }
+        }
+        
+        rows.find('.harian-status-harga-cell').html(statusHargaBadge);
+        rows.find('.harian-status-sisa-cell').html(statusSisaBadge);
+    }
+    
+    // Step 2 Harian row input handlers
+    $(document).on('input', '.harian-row-vol', function() {
+        let valStr = $(this).val().replace(/[^\d,]/g, '');
+        $(this).val(valStr);
+        const subcatId = $(this).data('subcat-id');
+        $('.harian-row-vol[data-subcat-id="' + subcatId + '"]').not(this).val(valStr);
+        updateHarianSubcategoryStatus(subcatId);
+    });
+
+    $(document).on('input', '.harian-row-qty, .harian-row-dur', function() {
+        let val = $(this).val().replace(/[^\d,]/g, '');
+        $(this).val(val);
+        calcHarianStep2Row($(this).closest('tr'));
+    });
+
+    $(document).on('input', '.harian-row-price', function() {
+        autoFormatInput($(this));
+        calcHarianStep2Row($(this).closest('tr'));
+    });
+
+    function calcHarianStep2Row(row) {
+        const isMaterial = (row.data('item-type') === 'material') || (row.find('input[name*="[item_type]"]').val() === 'material');
+        const qty = parseNumber(row.find('.harian-row-qty').val());
+        const dur = isMaterial ? 1 : (parseNumber(row.find('.harian-row-dur').val()) || 1);
+        const price = parseNumber(row.find('.harian-row-price').val());
+        const billableQty = qty * dur;
+        const total = billableQty * price;
+        
+        row.find('.harian-row-total').val(formatNumber(total));
+        row.find('.harian-hidden-qty').val(billableQty.toFixed(4));
+        row.find('.harian-hidden-coef').val(billableQty.toFixed(6));
+        
+        const subcatId = row.data('subcat-id');
+        updateHarianSubcategoryStatus(subcatId);
+        calculateGrandTotal();
+    }
+    
     // =====================================
     // REMOVE ITEM ROW
     // =====================================
     $(document).on('click', '.remove-item-btn', function() {
-        $(this).closest('tr').remove();
+        const row = $(this).closest('tr');
+        const isHarianRow = row.hasClass('harian-item-row');
+        const subcatId = row.data('subcat-id');
+        
+        row.remove();
         updateItemCount();
         calculateGrandTotal();
+        
+        if (isHarianRow && subcatId) {
+            updateHarianSubcategoryStatus(subcatId);
+        }
         
         if ($('#itemsBody tr.item-row').length === 0) {
             $('#emptyRow').show();
@@ -2043,18 +2851,18 @@ $(document).ready(function() {
     });
     
     // =====================================
-    // AUTO-FORMAT PRICE INPUT
+    // AUTO-FORMAT PRICE INPUT (BORONGAN)
     // =====================================
     $(document).on('input', '.price-input', function() {
+        if ($(this).hasClass('harian-row-price')) return;
         autoFormatInput($(this));
         calculateRowTotal($(this).closest('tr'));
     });
     
     // =====================================
-    // COEFFICIENT INPUT
+    // COEFFICIENT INPUT (BORONGAN)
     // =====================================
     $(document).on('input', '.coef-input', function() {
-        // Allow numbers and comma for decimal
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
         
@@ -2063,9 +2871,10 @@ $(document).ready(function() {
     });
     
     // =====================================
-    // CALCULATE ROW TOTAL
+    // CALCULATE ROW TOTAL (BORONGAN)
     // =====================================
     function calculateRowTotal(row) {
+        if (row.hasClass('harian-item-row')) return;
         const price = parseNumber(row.find('.price-input').val());
         const coefInput = row.find('.coef-input');
         const coef = parseNumber(coefInput.val());
@@ -2146,29 +2955,81 @@ $(document).ready(function() {
         
         itemRows.each(function() {
             const row = $(this);
-            const itemName = row.find('input[name*="[item_name]"]').val();
-            const unit = row.find('input[name*="[unit]"]').val();
-            const unitPrice = parseNumber(row.find('.price-input').val());
-            const coefInput = row.find('.coef-input');
-            const coefficient = parseNumber(coefInput.val());
+            const workType = row.data('work-type') || 'borongan';
             
-            if (!itemName || !unit || unitPrice <= 0 || coefficient <= 0) {
-                hasError = true;
-                row.addClass('table-danger');
+            if (workType === 'harian') {
+                const itemName = row.find('input[name*="[item_name]"]').val().trim();
+                const itemType = row.find('input[name*="[item_type]"]').val() || row.data('item-type') || '';
+                const isMaterial = (itemType === 'material');
+                const workVol = parseNumber(row.find('.harian-row-vol').val());
+                const workUnit = row.find('input[name*="[work_unit]"]').val() || "m'";
+                const workQty = parseNumber(row.find('.harian-row-qty').val());
+                const workQtyUnit = row.find('input[name*="[work_quantity_unit]"]').val() || (isMaterial ? (row.find('input[name*="[unit]"]').val() || 'ls') : 'orang');
+                let workDur = parseNumber(row.find('.harian-row-dur').val());
+                if (isMaterial && workDur <= 0) {
+                    workDur = 1;
+                }
+                const workDurUnit = isMaterial ? '-' : (row.find('input[name*="[work_duration_unit]"]').val() || 'Hr');
+                const billingUnit = row.find('input[name*="[work_billing_unit]"]').val() || (isMaterial ? workQtyUnit : 'OH');
+                const unitPrice = parseNumber(row.find('.harian-row-price').val());
+                
+                if (!itemName || workVol <= 0 || workQty <= 0 || workDur <= 0 || unitPrice <= 0) {
+                    hasError = true;
+                    row.addClass('table-danger');
+                } else {
+                    row.removeClass('table-danger');
+                    const billableQty = workQty * workDur;
+                    items.push({
+                        work_type: 'harian',
+                        category_id: row.find('input[name*="[category_id]"]').val(),
+                        subcategory_id: row.find('input[name*="[subcategory_id]"]').val(),
+                        item_code: row.find('input[name*="[item_code]"]').val(),
+                        item_type: row.find('input[name*="[item_type]"]').val(),
+                        item_name: itemName,
+                        work_volume: workVol,
+                        work_unit: workUnit,
+                        work_quantity: workQty,
+                        work_quantity_unit: workQtyUnit,
+                        work_duration: workDur,
+                        work_duration_unit: workDurUnit,
+                        work_billing_unit: billingUnit,
+                        unit: billingUnit,
+                        unit_price: unitPrice,
+                        quantity: billableQty,
+                        coefficient: billableQty,
+                        total_price: billableQty * unitPrice,
+                        notes: row.find('input[name*="[notes]"]').val(),
+                        subcat_details: row.find('input[name*="[subcat_details]"]').val()
+                    });
+                }
             } else {
-                row.removeClass('table-danger');
-                items.push({
-                    category_id: row.find('input[name*="[category_id]"]').val(),
-                    subcategory_id: row.find('input[name*="[subcategory_id]"]').val(),
-                    item_code: row.find('input[name*="[item_code]"]').val(),
-                    item_type: row.find('input[name*="[item_type]"]').val(),
-                    item_name: itemName,
-                    unit: unit,
-                    unit_price: unitPrice,
-                    coefficient: coefficient,
-                    notes: row.find('input[name*="[notes]"]').val(),
-                    subcat_details: row.find('input[name*="[subcat_details]"]').val()
-                });
+                const itemName = row.find('input[name*="[item_name]"]').val();
+                const unit = row.find('input[name*="[unit]"]').val();
+                const unitPrice = parseNumber(row.find('.price-input').val());
+                const coefInput = row.find('.coef-input');
+                const coefficient = parseNumber(coefInput.val());
+                
+                if (!itemName || !unit || unitPrice <= 0 || coefficient <= 0) {
+                    hasError = true;
+                    row.addClass('table-danger');
+                } else {
+                    row.removeClass('table-danger');
+                    items.push({
+                        work_type: 'borongan',
+                        category_id: row.find('input[name*="[category_id]"]').val(),
+                        subcategory_id: row.find('input[name*="[subcategory_id]"]').val(),
+                        item_code: row.find('input[name*="[item_code]"]').val(),
+                        item_type: row.find('input[name*="[item_type]"]').val(),
+                        item_name: itemName,
+                        unit: unit,
+                        unit_price: unitPrice,
+                        quantity: coefficient,
+                        coefficient: coefficient,
+                        total_price: coefficient * unitPrice,
+                        notes: row.find('input[name*="[notes]"]').val(),
+                        subcat_details: row.find('input[name*="[subcat_details]"]').val()
+                    });
+                }
             }
         });
         
@@ -2354,6 +3215,8 @@ $(document).ready(function() {
         formData.append('description', $('#description').val());
         formData.append('items', JSON.stringify(directItems));
         formData.append('non_rab_items', JSON.stringify(nonRabItems));
+        const selectedWorkType = $('input[name="work_type"]:checked').val() || 'borongan';
+        formData.append('work_type', selectedWorkType);
         
         if (stagedFiles && stagedFiles.length > 0) {
             const existingAtts = [];

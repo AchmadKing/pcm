@@ -251,7 +251,16 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h5 class="header-title mb-3">Informasi Pengajuan</h5>
                 <table class="table table-sm mb-0">
                     <tr><th>No. Request</th><td><?= sanitize($request['request_number']) ?></td></tr>
-                    <tr><th>Jenis Pengajuan</th><td><span class="badge <?= $isNonRab ? 'text-white' : 'bg-primary' ?>" <?= $isNonRab ? 'style="background-color: #6f42c1;"' : '' ?>><?= $isNonRab ? 'Biaya Lain-Lain / Non-RAB' : 'Direct Cost (RAB/RAP)' ?></span></td></tr>
+                    <tr><th>Jenis Pengajuan</th><td>
+                        <span class="badge <?= $isNonRab ? 'text-white' : 'bg-primary' ?>" <?= $isNonRab ? 'style="background-color: #6f42c1;"' : '' ?>><?= $isNonRab ? 'Biaya Lain-Lain / Non-RAB' : ($isMixed ? 'RAB + Non-RAB' : 'Direct Cost (RAB/RAP)') ?></span>
+                        <?php if (!$isNonRab): ?>
+                            <?php if (($request['work_type'] ?? 'borongan') === 'harian'): ?>
+                            <span class="badge bg-warning text-dark ms-1"><i class="mdi mdi-calendar-clock"></i> Harian</span>
+                            <?php else: ?>
+                            <span class="badge bg-info ms-1"><i class="mdi mdi-hammer-wrench"></i> Borongan</span>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </td></tr>
                     <?php if ($isNonRab): ?>
                     <tr><th>Tgl Nota / Kwitansi</th><td><strong><?= !empty($request['request_date']) ? formatDate($request['request_date']) : '-' ?></strong></td></tr>
                     <?php endif; ?>
@@ -421,8 +430,74 @@ require_once __DIR__ . '/../../includes/header.php';
         <?php if (!empty($directItems)): ?>
         <div class="card mb-3">
             <div class="card-body">
-                <h5 class="header-title mb-3"><i class="mdi mdi-calculator text-primary"></i> Daftar Item Biaya Langsung (RAP)</h5>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="header-title mb-0"><i class="mdi mdi-calculator text-primary"></i> Daftar Item Biaya Langsung (RAP)</h5>
+                    <span class="badge <?= ($request['work_type'] ?? 'borongan') === 'harian' ? 'bg-warning text-dark' : 'bg-info' ?>">
+                        Metode <?= ($request['work_type'] ?? 'borongan') === 'harian' ? 'Harian' : 'Borongan' ?>
+                    </span>
+                </div>
                 <div class="table-responsive">
+                    <?php if (($request['work_type'] ?? 'borongan') === 'harian'): ?>
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="90">Kode</th>
+                                <th>Uraian</th>
+                                <th width="110" class="text-end">Vol. Pek.</th>
+                                <th width="100" class="text-center">Jml Tenaga</th>
+                                <th width="90" class="text-center">Durasi</th>
+                                <th width="70" class="text-center">Satuan</th>
+                                <th width="120" class="text-end">Tarif Satuan</th>
+                                <th width="140" class="text-end">Jumlah</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($directItems as $item): ?>
+                            <tr>
+                                <td>
+                                    <code><?= sanitize($item['item_code'] ?: ($item['code'] ?? '-')) ?></code>
+                                    <?php if (!empty($item['code']) && !empty($item['item_code'])): ?>
+                                    <br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size:0.7rem;"><i class="mdi mdi-briefcase-outline"></i> <?= sanitize($item['code']) ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <strong><?= sanitize($item['item_name']) ?></strong>
+                                    <?php if (!empty($item['subcategory_name'])): ?>
+                                    <div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> <?= sanitize($item['code'] ? $item['code'] . ' - ' : '') ?><?= sanitize($item['subcategory_name']) ?></div>
+                                    <?php endif; ?>
+                                    <?php if ($item['notes']): ?>
+                                    <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end">
+                                    <?= formatVolume($item['work_volume']) ?> <?= sanitize($item['work_unit'] ?: "m'") ?>
+                                </td>
+                                <td class="text-center">
+                                    <?= formatVolume($item['work_quantity']) ?> <small class="text-muted"><?= sanitize($item['work_quantity_unit'] ?: 'orang') ?></small>
+                                </td>
+                                <td class="text-center">
+                                    <?php if (($item['item_type'] ?? '') === 'material'): ?>
+                                    <span class="text-muted">-</span>
+                                    <?php else: ?>
+                                    <?= formatVolume($item['work_duration']) ?> <small class="text-muted"><?= sanitize($item['work_duration_unit'] ?: 'Hr') ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark border"><?= sanitize($item['unit'] ?: ($item['work_billing_unit'] ?: 'OH')) ?></span>
+                                </td>
+                                <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
+                                <td class="text-end"><strong><?= formatRupiah($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), false) ?></strong></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-primary">
+                                <td colspan="7" class="text-end"><strong>SUBTOTAL BIAYA LANGSUNG (RAP)</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($subtotalDirect, false) ?></strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <?php else: ?>
                     <table class="table table-bordered align-middle">
                         <thead class="table-light">
                             <tr>
@@ -466,6 +541,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             </tr>
                         </tfoot>
                     </table>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

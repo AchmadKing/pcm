@@ -120,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Get all items of the approved request with subcat_details
                 $approvedItems = dbGetAll("
                     SELECT id, subcategory_id, subcat_details, item_code, item_type,
-                           unit_price, coefficient, quantity
+                           unit_price, coefficient, quantity, work_type, total_price
                     FROM request_items 
                     WHERE request_id = ?
                 ", [$reqId]);
@@ -133,6 +133,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // Non-RAB item in mixed request: does not write to weekly_progress table
                         continue;
                     }
+                    
+                    $itemWorkType = $item['work_type'] ?? ($currentReq['work_type'] ?? 'borongan');
+                    if ($itemWorkType === 'harian') {
+                        $subcatId = intval($item['subcategory_id']);
+                        if ($subcatId > 0) {
+                            $amount = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                            if (!isset($subcatAmounts[$subcatId])) {
+                                $subcatAmounts[$subcatId] = 0;
+                            }
+                            $subcatAmounts[$subcatId] += $amount;
+                        }
+                        continue;
+                    }
+                    
                     $itemCoef = floatval($item['coefficient']);
                     $itemPrice = floatval($item['unit_price']);
                     $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
@@ -440,6 +454,112 @@ if ($requestId) {
                     ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
                 ", $ids);
             }
+            
+            // If request is Harian, compute subcategory RAP benchmark & remaining physical volume
+            $harianSubcatStats = [];
+            if (($selectedRequest['work_type'] ?? 'borongan') === 'harian') {
+                foreach ($selectedItems as $si) {
+                    $subId = intval($si['subcategory_id'] ?? 0);
+                    $iType = trim($si['item_type'] ?? 'upah');
+                    if (!$subId) continue;
+                    $key = $subId . '_' . $iType;
+                    if (isset($harianSubcatStats[$key])) continue;
+                    
+                    $scRow = dbGetRow("
+                        SELECT rs.id, rs.code, rs.name, rs.unit, COALESCE(ri.volume, rs.volume, 0) as subcat_volume
+                        FROM rab_subcategories rs
+                        LEFT JOIN rap_items ri ON ri.subcategory_id = rs.id
+                        WHERE rs.id = ?
+                    ", [$subId]);
+                    
+                    $rapCostRow = dbGetRow("
+                        SELECT SUM(d.coefficient * COALESCE(d.unit_price, pir.price)) as rap_unit_cost
+                        FROM rab_subcategories rs
+                        JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+                        JOIN project_ahsp_rap par ON par.ahsp_code = pa.ahsp_code AND par.project_id = pa.project_id
+                        JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
+                        JOIN project_items_rap pir ON d.item_id = pir.id
+                        WHERE rs.id = ? AND pir.category = ?
+                    ", [$subId, $iType]);
+                    
+                    $rapUnitCost = floatval($rapCostRow['rap_unit_cost'] ?? 0);
+                    $subcatVol = floatval($scRow['subcat_volume'] ?? 0);
+                    $rapTotalCost = $rapUnitCost * $subcatVol;
+                    
+                    $subcatTotalLapangan = 0;
+                    $thisReqWorkVol = 0;
+                    foreach ($selectedItems as $si2) {
+                        if (intval($si2['subcategory_id'] ?? 0) === $subId && ($si2['item_type'] ?? 'upah') === $iType) {
+                            $subcatTotalLapangan += floatval($si2['total_price'] ?: ($si2['quantity'] * $si2['unit_price']));
+                            if (!empty($si2['work_volume'])) {
+                                $thisReqWorkVol = max($thisReqWorkVol, floatval($si2['work_volume']));
+                            }
+                        }
+                    }
+                    
+                    $boronganUsedItems = dbGetAll("
+                        SELECT d.coefficient as ahsp_coef,
+                               COALESCE((
+                                   SELECT SUM(reqi2.coefficient) 
+                                   FROM request_items reqi2 
+                                   JOIN requests r ON reqi2.request_id = r.id 
+                                   WHERE reqi2.item_code = pir.item_code 
+                                     AND reqi2.subcategory_id = ? 
+                                     AND (reqi2.work_type = 'borongan' OR reqi2.work_type IS NULL)
+                                     AND r.status IN ('pending', 'pm_approved', 'approved')
+                                     AND r.id != ?
+                               ), 0) as used_coef
+                        FROM rab_subcategories rs
+                        JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+                        JOIN project_ahsp_rap par ON par.ahsp_code = pa.ahsp_code AND par.project_id = pa.project_id
+                        JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
+                        JOIN project_items_rap pir ON d.item_id = pir.id
+                        WHERE rs.id = ? AND pir.category = ?
+                    ", [$subId, $requestId, $subId, $iType]);
+                    
+                    $maxBoronganVol = 0.0;
+                    foreach ($boronganUsedItems as $bItem) {
+                        $c = floatval($bItem['ahsp_coef']);
+                        if ($c > 0) {
+                            $v = floatval($bItem['used_coef']) / $c;
+                            if ($v > $maxBoronganVol) $maxBoronganVol = $v;
+                        }
+                    }
+                    
+                    $harianUsedRow = dbGetRow("
+                        SELECT COALESCE(SUM(h_vol), 0) as used_vol FROM (
+                            SELECT MAX(reqi.work_volume) as h_vol
+                            FROM request_items reqi
+                            JOIN requests r ON reqi.request_id = r.id
+                            WHERE reqi.subcategory_id = ? 
+                              AND reqi.work_type = 'harian'
+                              AND reqi.work_volume IS NOT NULL
+                              AND r.status IN ('pending', 'pm_approved', 'approved')
+                              AND r.id != ?
+                            GROUP BY r.id
+                        ) t
+                    ", [$subId, $requestId]);
+                    $usedHarianVol = floatval($harianUsedRow['used_vol'] ?? 0);
+                    
+                    $remainingVol = max(0, $subcatVol - $maxBoronganVol - $usedHarianVol - $thisReqWorkVol);
+                    
+                    $diff = $rapTotalCost - $subcatTotalLapangan;
+                    $pct = $rapTotalCost > 0 ? ($diff / $rapTotalCost) * 100 : 0;
+                    
+                    $harianSubcatStats[$key] = [
+                        'subcat_code' => $scRow['code'] ?? '',
+                        'subcat_name' => $scRow['name'] ?? '',
+                        'subcat_unit' => $scRow['unit'] ?: "m'",
+                        'subcat_volume' => $subcatVol,
+                        'rap_unit_cost' => $rapUnitCost,
+                        'rap_total_cost' => $rapTotalCost,
+                        'subcat_total_lapangan' => $subcatTotalLapangan,
+                        'diff' => $diff,
+                        'pct' => $pct,
+                        'remaining_vol' => $remainingVol
+                    ];
+                }
+            }
         }
     }
 }
@@ -571,6 +691,11 @@ require_once __DIR__ . '/../../includes/header.php';
                         <?php elseif ($isNonRab): ?>
                         <span class="badge bg-light text-dark fw-bold"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
                         <?php endif; ?>
+                        <?php if (($selectedRequest['work_type'] ?? 'borongan') === 'harian'): ?>
+                        <span class="badge bg-warning text-dark fw-bold"><i class="mdi mdi-calendar-clock"></i> HARIAN</span>
+                        <?php else: ?>
+                        <span class="badge bg-light text-primary fw-bold"><i class="mdi mdi-hammer-wrench"></i> BORONGAN</span>
+                        <?php endif; ?>
                         <?php if ($selectedRequest['status'] === 'pm_approved'): ?>
                         <span class="badge bg-light text-info">PM Approved</span>
                         <?php endif; ?>
@@ -623,7 +748,149 @@ require_once __DIR__ . '/../../includes/header.php';
                 </div>
                 <?php endif; ?>
                 
-                <h6 class="mb-3 text-primary"><i class="mdi mdi-calculator"></i> Analisis Item Biaya Langsung (RAP)</h6>
+                <h6 class="mb-3 text-primary"><i class="mdi mdi-calculator"></i> Analisis Item Biaya Langsung (RAP) <?= (($selectedRequest['work_type'] ?? 'borongan') === 'harian') ? '<span class="badge bg-warning text-dark ms-2">Metode Harian</span>' : '<span class="badge bg-info ms-2">Metode Borongan</span>' ?></h6>
+                
+                <?php if (($selectedRequest['work_type'] ?? 'borongan') === 'harian'): ?>
+                <!-- HARIAN TABLE (10 COLUMNS AS PER STEP 3 MOCKUP) -->
+                <div class="table-responsive mb-4">
+                    <table class="table table-bordered table-sm align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Kode</th>
+                                <th>Uraian</th>
+                                <th>Jenis Item</th>
+                                <th class="text-end">Vol.</th>
+                                <th class="text-center">Satuan</th>
+                                <th class="text-end">Harga Satuan</th>
+                                <th class="text-end">Total Lapangan</th>
+                                <th class="text-end">Harga RAP</th>
+                                <th class="text-center">Status Harga</th>
+                                <th class="text-center">Status Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php 
+                            $harianRapSubcatsAdded = [];
+                            $totalHarianRap = 0;
+                            foreach ($directItems as $item): 
+                                $subId = intval($item['subcategory_id'] ?? 0);
+                                $iType = trim($item['item_type'] ?? 'upah');
+                                $statKey = $subId . '_' . $iType;
+                                $stat = $harianSubcatStats[$statKey] ?? null;
+                                
+                                $itemTotalLap = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                                $totalReq += $itemTotalLap;
+                                
+                                $rapSubcatTotal = $stat ? $stat['rap_total_cost'] : 0;
+                                if (!isset($harianRapSubcatsAdded[$statKey])) {
+                                    $totalHarianRap += $rapSubcatTotal;
+                                    $harianRapSubcatsAdded[$statKey] = true;
+                                }
+                                
+                                $workVol = floatval($item['work_volume'] ?? 0);
+                                $workUnit = $item['work_unit'] ?: "m'";
+                                $satuan = $item['unit'] ?: ($item['work_billing_unit'] ?: 'OH');
+                            ?>
+                            <tr>
+                                <td>
+                                    <code><?= sanitize($item['item_code'] ?? '-') ?></code>
+                                    <?php if (!empty($item['code'])): ?>
+                                    <br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size:0.7rem;"><i class="mdi mdi-briefcase-outline"></i> <?= sanitize($item['code']) ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <strong><?= sanitize($item['item_name']) ?></strong>
+                                    <?php if (!empty($item['subcategory_name'])): ?>
+                                    <div class="text-muted small mt-1" style="font-size: 0.75rem;"><i class="mdi mdi-arrow-right-bottom text-primary"></i> <?= sanitize($item['code'] ? $item['code'] . ' - ' : '') ?><?= sanitize($item['subcategory_name']) ?></div>
+                                    <?php endif; ?>
+                                    <?php if (!empty($item['notes'])): ?>
+                                    <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark border text-capitalize"><?= sanitize($item['item_type'] ?: 'upah') ?></span>
+                                </td>
+                                <td class="text-end">
+                                    <?= formatVolume($workVol) ?> <?= sanitize($workUnit) ?>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-info-subtle text-info border"><?= sanitize($satuan) ?></span>
+                                </td>
+                                <td class="text-end">
+                                    <?= formatRupiah($item['unit_price'], false) ?>
+                                </td>
+                                <td class="text-end fw-bold">
+                                    <?= formatRupiah($itemTotalLap, false) ?>
+                                </td>
+                                <td class="text-end">
+                                    <?= $rapSubcatTotal > 0 ? formatRupiah($rapSubcatTotal, false) : '-' ?>
+                                </td>
+                                <td class="text-center">
+                                    <?php if ($stat && $rapSubcatTotal > 0): ?>
+                                        <?php if ($stat['diff'] < -0.01): ?>
+                                            <span class="badge bg-danger">lebih mahal <?= number_format($stat['pct'], 2, ',', '.') ?>%</span>
+                                        <?php elseif ($stat['diff'] > 0.01): ?>
+                                            <span class="badge bg-success">hemat +<?= number_format($stat['pct'], 2, ',', '.') ?>%</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-success">aman 0,00%</span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">-</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-center">
+                                    <?php if ($stat): ?>
+                                        <?php if ($stat['remaining_vol'] <= 0): ?>
+                                            <span class="badge bg-danger">0 <?= sanitize($stat['subcat_unit'] ?: 'unt') ?></span>
+                                        <?php else: ?>
+                                            <span class="badge bg-success"><?= formatVolume($stat['remaining_vol']) ?> <?= sanitize($stat['subcat_unit'] ?: 'unt') ?></span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">-</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-light">
+                                <td colspan="6" class="text-end"><strong>Total Pengajuan</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($totalReq) ?></strong></td>
+                                <td class="text-end"><strong><?= formatRupiah($totalHarianRap) ?></strong></td>
+                                <td colspan="2" class="text-center">
+                                    <?php 
+                                    $totalDiff = $totalHarianRap - $totalReq;
+                                    $totalPct = $totalHarianRap > 0 ? ($totalDiff / $totalHarianRap) * 100 : 0;
+                                    if ($totalHarianRap > 0):
+                                        if ($totalDiff < -0.01): ?>
+                                            <span class="text-danger fw-bold">Selisih: <?= formatRupiah($totalDiff) ?> (<?= number_format($totalPct, 2, ',', '.') ?>%)</span>
+                                        <?php elseif ($totalDiff > 0.01): ?>
+                                            <span class="text-success fw-bold">Selisih: +<?= formatRupiah($totalDiff) ?> (+<?= number_format($totalPct, 2, ',', '.') ?>%)</span>
+                                        <?php else: ?>
+                                            <span class="text-muted fw-bold">Selisih: 0 (0,00%)</span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php if ($availableRemaining['total'] > 0): ?>
+                            <tr class="table-success">
+                                <td colspan="6" class="text-end"><strong>Sisa Anggaran Tersedia</strong></td>
+                                <td class="text-end text-success"><strong>- <?= formatRupiah($availableRemaining['total']) ?></strong></td>
+                                <td colspan="3"></td>
+                            </tr>
+                            <tr class="table-warning">
+                                <td colspan="6" class="text-end"><strong>Nett yang Harus Dikirim (RAP)</strong></td>
+                                <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $availableRemaining['total'])) ?></strong></td>
+                                <td colspan="3"></td>
+                            </tr>
+                            <?php endif; ?>
+                        </tfoot>
+                    </table>
+                </div>
+                <?php else: ?>
+                <!-- BORONGAN TABLE (EXISTING, UNTOUCHED) -->
                 <div class="table-responsive mb-4">
                     <table class="table table-bordered table-sm">
                         <thead class="table-light">
@@ -745,6 +1012,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </tfoot>
                     </table>
                 </div>
+                <?php endif; ?>
 
                 <?php if ($availableRemaining['total'] > 0): ?>
                 <div class="alert alert-success mb-3">

@@ -323,6 +323,16 @@ $baseUrl = getBaseUrl();
                 <td><?= htmlspecialchars($request['project_name']) ?></td>
             </tr>
             <tr>
+                <td class="label">Metode / Jenis</td>
+                <td class="colon">:</td>
+                <td>
+                    <?= $isNonRab ? 'Biaya Lain-Lain (Non-RAB)' : ($isMixed ? 'RAB + Non-RAB' : 'Direct Cost (RAB/RAP)') ?>
+                    <?php if (!$isNonRab): ?>
+                        - <strong><?= strtoupper(htmlspecialchars($request['work_type'] ?? 'borongan')) ?></strong>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <tr>
                 <td class="label">Minggu Ke</td>
                 <td class="colon">:</td>
                 <td><?= htmlspecialchars($request['target_week'] ?? $request['week_number'] ?? '-') ?></td>
@@ -383,6 +393,60 @@ $baseUrl = getBaseUrl();
     </div>
     <?php endif; ?>
 
+    <?php if (($request['work_type'] ?? 'borongan') === 'harian'): ?>
+    <!-- HARIAN ITEMS TABLE -->
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th width="35">No</th>
+                <th width="85">Kode</th>
+                <th>Uraian Pekerjaan / Item</th>
+                <th width="90" class="text-end">Vol. Pek.</th>
+                <th width="85" class="text-center">Jml Tenaga</th>
+                <th width="70" class="text-center">Durasi</th>
+                <th width="110" class="text-end">Tarif Satuan</th>
+                <th width="125" class="text-end">Jumlah</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php 
+            $i = 1;
+            foreach ($items as $item): 
+            ?>
+            <tr>
+                <td class="text-center"><?= $i++ ?></td>
+                <td><code><?= htmlspecialchars($item['code'] ?? ($item['item_code'] ?: '-')) ?></code></td>
+                <td>
+                    <strong><?= htmlspecialchars($item['item_name']) ?></strong>
+                    <?php if (!empty($item['subcategory_name'])): ?>
+                    <br><small style="color: #555;"><?= htmlspecialchars($item['code'] ? $item['code'] . ' - ' : '') ?><?= htmlspecialchars($item['subcategory_name']) ?></small>
+                    <?php endif; ?>
+                    <?php if ($item['notes']): ?>
+                    <br><small style="color: #666; font-style: italic;">Note: <?= htmlspecialchars($item['notes']) ?></small>
+                    <?php endif; ?>
+                </td>
+                <td class="text-end"><?= formatVolume($item['work_volume']) ?> <?= htmlspecialchars($item['work_unit'] ?: "m'") ?></td>
+                <td class="text-center"><?= formatVolume($item['work_quantity']) ?> <?= htmlspecialchars($item['work_quantity_unit'] ?: 'orang') ?></td>
+                <td class="text-center">
+                    <?php if (($item['item_type'] ?? '') === 'material'): ?>
+                    -
+                    <?php else: ?>
+                    <?= formatVolume($item['work_duration']) ?> <?= htmlspecialchars($item['work_duration_unit'] ?: 'Hr') ?>
+                    <?php endif; ?>
+                </td>
+                <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?><br><small style="color: #555;">/ <?= htmlspecialchars($item['unit'] ?: ($item['work_billing_unit'] ?: 'OH')) ?></small></td>
+                <td class="text-end"><strong><?= number_format($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), 2, ',', '.') ?></strong></td>
+            </tr>
+            <?php endforeach; ?>
+            
+            <tr class="total-row">
+                <td colspan="7" class="text-end">TOTAL PENGAJUAN</td>
+                <td class="text-end"><?= number_format($totalAmount, 2, ',', '.') ?></td>
+            </tr>
+        </tbody>
+    </table>
+    <?php else: ?>
+    <!-- BORONGAN ITEMS TABLE (EXISTING) -->
     <table class="items-table">
         <thead>
             <tr>
@@ -405,6 +469,9 @@ $baseUrl = getBaseUrl();
                 <td><code><?= htmlspecialchars($item['code'] ?? ($item['item_code'] ?: '-')) ?></code></td>
                 <td>
                     <?= htmlspecialchars($item['item_name']) ?>
+                    <?php if (!empty($item['subcategory_name'])): ?>
+                    <br><small style="color: #555;"><?= htmlspecialchars($item['code'] ? $item['code'] . ' - ' : '') ?><?= htmlspecialchars($item['subcategory_name']) ?></small>
+                    <?php endif; ?>
                     <?php if ($item['notes']): ?>
                     <br><small style="color: #666; font-style: italic;">Note: <?= htmlspecialchars($item['notes']) ?></small>
                     <?php endif; ?>
@@ -422,6 +489,7 @@ $baseUrl = getBaseUrl();
             </tr>
         </tbody>
     </table>
+    <?php endif; ?>
 
     <?php if ($request['pm_notes'] || $request['admin_notes'] || $request['rejection_reason']): ?>
     <div class="notes-section">
