@@ -1732,8 +1732,8 @@ $actualBaseTotal = dbGetRow("
 $actualPpn = $actualBaseTotal * ($ppnPct / 100);
 $actualTotal = ceil(($actualBaseTotal + $actualPpn) / 10) * 10;
 
-// Pending Requests
-$pendingRequests = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status = 'pending'", [$projectId])['cnt'] ?? 0;
+// Pending Requests (pending PM review or pending final Admin approval)
+$pendingRequests = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status IN ('pending', 'pm_approved')", [$projectId])['cnt'] ?? 0;
 
 // Sisa Anggaran = RAP Total - Actual
 $sisaAnggaran = $rapTotal - $actualTotal;

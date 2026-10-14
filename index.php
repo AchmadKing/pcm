@@ -79,10 +79,11 @@ try {
     $stats['on_progress'] = (int)($projectCount['on_progress'] ?? 0);
 
     if (hasPermission('requests.approve')) {
-        $pendingCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE status = 'pending'");
+        $pendingWhere = hasPermission('projects.edit') ? "status IN ('pending', 'pm_approved')" : "status = 'pending'";
+        $pendingCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE $pendingWhere");
         $stats['pending_requests'] = $pendingCount['cnt'] ?? 0;
     } else {
-        $pendingCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE status = 'pending' AND created_by = ?", [getCurrentUserId()]);
+        $pendingCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE status IN ('pending', 'pm_approved') AND created_by = ?", [getCurrentUserId()]);
         $stats['pending_requests'] = $pendingCount['cnt'] ?? 0;
     }
 

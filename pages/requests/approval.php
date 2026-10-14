@@ -729,6 +729,19 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="alert alert-light mb-3"><strong>Keterangan:</strong> <?= sanitize($selectedRequest['description']) ?></div>
                 <?php endif; ?>
 
+                <?php if (!empty($selectedRequest['pm_approved_by_name'])): ?>
+                <div class="alert alert-info py-2 mb-3">
+                    <div class="d-flex align-items-center mb-1">
+                        <i class="mdi mdi-account-check fs-5 me-2 text-info"></i>
+                        <strong>Diverifikasi oleh PM: <?= sanitize($selectedRequest['pm_approved_by_name']) ?></strong>
+                        <span class="ms-auto text-muted small"><?= !empty($selectedRequest['pm_approved_at']) ? formatDateTime($selectedRequest['pm_approved_at'], true) : '' ?></span>
+                    </div>
+                    <?php if (!empty($selectedRequest['pm_notes'])): ?>
+                    <div class="small"><strong>Catatan PM:</strong> <?= nl2br(sanitize($selectedRequest['pm_notes'])) ?></div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
                 <?php 
                 $totalReq = 0;
                 $totalRap = 0;

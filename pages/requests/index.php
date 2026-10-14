@@ -151,7 +151,8 @@ if ($reqViewMode === 'all') {
                     <div class="col-md-3">
                         <select class="form-select form-select-sm" name="status" onchange="this.form.submit()">
                             <option value="">Semua Status</option>
-                            <option value="pending" <?= $statusFilter === 'pending' ? 'selected' : '' ?>>Pending</option>
+                            <option value="pending" <?= $statusFilter === 'pending' ? 'selected' : '' ?>>Pending (PM)</option>
+                            <option value="pm_approved" <?= $statusFilter === 'pm_approved' ? 'selected' : '' ?>>PM Approved (Menunggu Admin)</option>
                             <option value="approved" <?= $statusFilter === 'approved' ? 'selected' : '' ?>>Approved</option>
                             <option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option>
                         </select>
@@ -224,9 +225,9 @@ if ($reqViewMode === 'all') {
                                         <i class="mdi mdi-refresh"></i>
                                     </a>
                                     <?php endif; ?>
-                                    <?php if (hasPermission('requests.approve') && $req['status'] === 'pending'): ?>
-                                    <a href="approval.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="Review">
-                                        <i class="mdi mdi-check"></i>
+                                    <?php if (canApproveRequest($req)): ?>
+                                    <a href="approval.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review' ?>">
+                                        <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check' ?>"></i>
                                     </a>
                                     <?php endif; ?>
                                     <?php if (hasPermission('requests.delete')): ?>

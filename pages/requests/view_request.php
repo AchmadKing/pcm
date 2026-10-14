@@ -207,6 +207,12 @@ require_once __DIR__ . '/../../includes/header.php';
                         <span class="ms-3">Proyek: <strong><?= sanitize($request['project_name']) ?></strong></span>
                     </div>
                     <div class="d-flex gap-2">
+                        <?php if (canApproveRequest($request)): ?>
+                        <a href="approval.php?id=<?= $requestId ?>" class="btn btn-sm btn-success">
+                            <i class="mdi <?= $request['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check' ?>"></i> 
+                            <?= $request['status'] === 'pm_approved' ? 'Final Approve' : 'Review & Approve' ?>
+                        </a>
+                        <?php endif; ?>
                         <?php if ($request['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($request['project_id'])): ?>
                         <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>" class="btn btn-sm btn-warning">
                             <i class="mdi mdi-refresh"></i> Ajukan Ulang

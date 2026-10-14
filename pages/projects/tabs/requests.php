@@ -399,10 +399,10 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                             <i class="mdi mdi-refresh"></i>
                                         </a>
                                         <?php endif; ?>
-                                        <?php if ($req['status'] === 'pending' && hasPermission('requests.approve')): ?>
+                                        <?php if (canApproveRequest($req)): ?>
                                         <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>" 
-                                           class="btn btn-sm btn-outline-success py-0" title="Review & Approve">
-                                            <i class="mdi mdi-check-circle"></i>
+                                           class="btn btn-sm btn-outline-success py-0" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review & Approve' ?>">
+                                            <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check-circle' ?>"></i>
                                         </a>
                                         <?php endif; ?>
                                         <?php if (hasPermission('requests.delete')): ?>

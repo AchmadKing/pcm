@@ -304,6 +304,39 @@ function getNextCategoryCode($currentCode = null) {
 }
 
 /**
+ * Check if current user can approve/review a request based on role & request status
+ * - PM (requests.approve without projects.edit): can approve 'pending' requests
+ * - Admin (requests.approve with projects.edit): can approve 'pending' and 'pm_approved' requests
+ * 
+ * @param array|string $request (Request data array or status string)
+ * @return bool
+ */
+function canApproveRequest($request) {
+    if (!hasPermission('requests.approve')) {
+        return false;
+    }
+    
+    $status = is_array($request) ? ($request['status'] ?? '') : $request;
+    $projectId = is_array($request) ? ($request['project_id'] ?? null) : null;
+    
+    if ($projectId && !canAccessProject($projectId)) {
+        return false;
+    }
+    
+    $isAdmin = hasPermission('projects.edit');
+    
+    if ($status === 'pending') {
+        return true;
+    }
+    
+    if ($status === 'pm_approved' && $isAdmin) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
  * Get detailed status badge with PM & Admin PIC symbols and tooltips
  * @param array|string $request (Request data array or status string)
  * @return string HTML
