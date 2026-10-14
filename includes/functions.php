@@ -561,6 +561,20 @@ function generateRequestNumber($projectId) {
 }
 
 /**
+ * Generate a padded sort key for request numbers to ensure natural ordering
+ * (e.g. REQ-3-0001 -> REQ-0000000003-0000000001 so it sorts before REQ-10-0043)
+ * 
+ * @param string|null $reqNumber
+ * @return string
+ */
+function getRequestSortKey($reqNumber) {
+    if (empty($reqNumber)) return '';
+    return preg_replace_callback('/\d+/', function($m) {
+        return str_pad($m[0], 10, '0', STR_PAD_LEFT);
+    }, (string)$reqNumber);
+}
+
+/**
  * Generate weekly date ranges for a project
  * Week 1: start_date to nearest Sunday
  * Week 2+: Monday to Sunday

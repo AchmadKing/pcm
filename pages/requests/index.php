@@ -179,44 +179,59 @@ if ($reqViewMode === 'all') {
         <div class="card">
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover datatable">
+                    <table class="table table-hover datatable" id="tableRequests" data-order='[[2, "desc"]]'>
                         <thead>
                             <tr>
-                                <th>No. Request</th>
+                                <th width="150">No. Request</th>
                                 <th>Proyek</th>
-                                <th>Tanggal</th>
-                                <th class="text-end">Total Pengajuan</th>
-                                <th>Status</th>
+                                <th width="185">Tanggal</th>
+                                <th width="160" class="text-end">Total Pengajuan</th>
+                                <th width="140">Status</th>
                                 <?php if (hasPermission('requests.approve')): ?>
-                                <th>Dibuat Oleh</th>
+                                <th width="160">Dibuat Oleh</th>
                                 <?php endif; ?>
-                                <th width="100">Aksi</th>
+                                <th width="100" class="text-center no-sort" data-orderable="false">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($requests as $req): 
                                 $isNonRab = ($req['request_type'] ?? 'rab') === 'non_rab';
+                                $reqNumber = $req['request_number'] ?: ('REQ-' . $req['id']);
+                                $reqSortKey = getRequestSortKey($reqNumber);
+                                $projectName = $req['project_name'] ?? '-';
+                                $projectSortKey = strtolower(trim($projectName));
+                                $createdTimestamp = !empty($req['created_at']) ? strtotime($req['created_at']) : 0;
+                                $totalAmount = floatval($req['total_amount'] ?? 0);
+                                $statusRank = [
+                                    'pending' => 1,
+                                    'pm_approved' => 2,
+                                    'approved' => 3,
+                                    'rejected' => 4
+                                ];
+                                $statusKey = $statusRank[$req['status'] ?? ''] ?? 99;
+                                $createdByName = $req['created_by_name'] ?? '-';
+                                $createdByKey = strtolower(trim($createdByName));
                             ?>
                             <tr>
-                                <td>
-                                    <strong><?= sanitize($req['request_number']) ?></strong>
+                                <td data-order="<?= sanitize($reqSortKey) ?>" data-sort="<?= sanitize($reqSortKey) ?>">
+                                    <strong><?= sanitize($reqNumber) ?></strong>
                                     <?php if ($isNonRab): ?>
                                     <br><span class="badge text-white" style="background-color: #6f42c1; font-size: 0.7rem;"><i class="mdi mdi-receipt"></i> Biaya Lain-Lain</span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?= sanitize($req['project_name']) ?></td>
-                                <td>
+                                <td data-order="<?= sanitize($projectSortKey) ?>" data-sort="<?= sanitize($projectSortKey) ?>"><?= sanitize($projectName) ?></td>
+                                <td data-order="<?= $createdTimestamp ?>" data-sort="<?= $createdTimestamp ?>">
                                     <?= formatDateTime($req['created_at']) ?>
                                     <?php if ($isNonRab && !empty($req['request_date'])): ?>
                                     <br><small class="text-muted"><i class="mdi mdi-calendar"></i> Nota: <?= formatDate($req['request_date']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end"><?= formatRupiah($req['total_amount']) ?></td>
-                                <td><?= getDetailedStatusBadge($req) ?></td>
+                                <td class="text-end" data-order="<?= $totalAmount ?>" data-sort="<?= $totalAmount ?>"><?= formatRupiah($req['total_amount']) ?></td>
+                                <td data-order="<?= $statusKey ?>" data-sort="<?= $statusKey ?>"><?= getDetailedStatusBadge($req) ?></td>
                                 <?php if (hasPermission('requests.approve')): ?>
-                                <td><?= sanitize($req['created_by_name']) ?></td>
+                                <td data-order="<?= sanitize($createdByKey) ?>" data-sort="<?= sanitize($createdByKey) ?>"><?= sanitize($createdByName) ?></td>
                                 <?php endif; ?>
-                                <td>
+                                <td class="text-center">
                                     <a href="view_request.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat Detail">
                                         <i class="mdi mdi-eye"></i>
                                     </a>

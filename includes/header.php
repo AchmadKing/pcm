@@ -47,6 +47,37 @@ $hasSidebar = hasAnyPermission();
         .table th { white-space: nowrap; }
         .btn-action { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
         .required::after { content: ' *'; color: red; }
+        
+        /* DataTables Sorting & Header UX */
+        table.dataTable thead th {
+            vertical-align: middle;
+            user-select: none;
+        }
+        table.dataTable thead th.sorting,
+        table.dataTable thead th.sorting_asc,
+        table.dataTable thead th.sorting_desc {
+            cursor: pointer;
+            transition: background-color 0.15s ease-in-out;
+        }
+        table.dataTable thead th.sorting:hover,
+        table.dataTable thead th.sorting_asc:hover,
+        table.dataTable thead th.sorting_desc:hover {
+            background-color: rgba(85, 110, 230, 0.07);
+        }
+        table.dataTable thead th.sorting_asc:before,
+        table.dataTable thead th.sorting_desc:after {
+            opacity: 1 !important;
+            color: #556ee6 !important;
+            font-weight: bold !important;
+        }
+        table.dataTable thead th.no-sort:before,
+        table.dataTable thead th.no-sort:after {
+            display: none !important;
+        }
+        table.dataTable thead th.no-sort {
+            cursor: default !important;
+            padding-right: 0.75rem !important;
+        }
         <?php if (!$hasSidebar): ?>
         .main-content { margin-left: 0 !important; }
         .footer { left: 0 !important; }

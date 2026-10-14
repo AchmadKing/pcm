@@ -30,26 +30,59 @@
     
     <script>
         $(document).ready(function() {
+            // Natural sort extension for DataTables
+            if (typeof $.fn.dataTable !== 'undefined') {
+                $.fn.dataTable.ext.type.order['natural-asc'] = function(a, b) {
+                    return ('' + (a || '')).localeCompare(('' + (b || '')), undefined, { numeric: true, sensitivity: 'base' });
+                };
+                $.fn.dataTable.ext.type.order['natural-desc'] = function(a, b) {
+                    return ('' + (b || '')).localeCompare(('' + (a || '')), undefined, { numeric: true, sensitivity: 'base' });
+                };
+            }
+
             // Initialize DataTables
             if ($('.datatable').length) {
-                $('.datatable').DataTable({
-                    language: {
-                        search: "Cari:",
-                        lengthMenu: "Tampilkan _MENU_ entri",
-                        info: "Menampilkan _START_ sampai _END_ dari _TOTAL_ entri",
-                        infoEmpty: "Menampilkan 0 sampai 0 dari 0 entri",
-                        infoFiltered: "(disaring dari _MAX_ total entri)",
-                        zeroRecords: "Tidak ada data yang cocok ditemukan",
-                        emptyTable: "Tidak ada data di dalam tabel",
-                        paginate: {
-                            first: "Pertama",
-                            last: "Terakhir",
-                            next: "Sebelumnya",
-                            previous: "Selanjutnya"
+                $('.datatable').each(function() {
+                    var $table = $(this);
+                    if ($.fn.dataTable.isDataTable(this)) {
+                        return;
+                    }
+
+                    var defaultOrder = [[0, 'asc']];
+                    var rawOrder = $table.attr('data-order');
+                    if (rawOrder) {
+                        try {
+                            defaultOrder = JSON.parse(rawOrder);
+                        } catch(e) {
+                            console.warn('Invalid data-order JSON on table:', rawOrder);
                         }
-                    },
-                    pageLength: 25,
-                    responsive: true
+                    }
+
+                    var defaultPageLength = parseInt($table.attr('data-page-length')) || 25;
+
+                    $table.DataTable({
+                        order: defaultOrder,
+                        pageLength: defaultPageLength,
+                        responsive: true,
+                        columnDefs: [
+                            { targets: 'no-sort', orderable: false }
+                        ],
+                        language: {
+                            search: "Cari:",
+                            lengthMenu: "Tampilkan _MENU_ entri",
+                            info: "Menampilkan _START_ sampai _END_ dari _TOTAL_ entri",
+                            infoEmpty: "Menampilkan 0 sampai 0 dari 0 entri",
+                            infoFiltered: "(disaring dari _MAX_ total entri)",
+                            zeroRecords: "Tidak ada data yang cocok ditemukan",
+                            emptyTable: "Tidak ada data di dalam tabel",
+                            paginate: {
+                                first: "Pertama",
+                                last: "Terakhir",
+                                next: "Sebelumnya",
+                                previous: "Selanjutnya"
+                            }
+                        }
+                    });
                 });
             }
             

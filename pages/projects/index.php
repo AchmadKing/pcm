@@ -206,12 +206,12 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <th width="120">Kode Proyek</th>
                                 <th>Nama Proyek</th>
                                 <th>Wilayah</th>
-                                <th class="text-end">Total RAB</th>
+                                <th class="text-end" width="160">Total RAB</th>
                                 <th width="100">Status</th>
                                 <?php if (hasPermission('projects.edit')): ?>
                                 <th>Dibuat Oleh</th>
                                 <?php endif; ?>
-                                <th width="150">Aksi</th>
+                                <th width="150" class="text-center no-sort" data-orderable="false">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -226,7 +226,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($project['region_name']) ?></td>
-                                <td class="text-end"><?= formatRupiah($project['total_rab']) ?></td>
+                                <td class="text-end" data-order="<?= floatval($project['total_rab'] ?? 0) ?>" data-sort="<?= floatval($project['total_rab'] ?? 0) ?>"><?= formatRupiah($project['total_rab']) ?></td>
                                 <td>
                                     <?= getStatusBadge($project['status']) ?>
                                     <?php if (!empty($project['request_locked'])): ?>
@@ -236,7 +236,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <?php if (hasPermission('projects.edit')): ?>
                                 <td><?= sanitize($project['created_by_name']) ?></td>
                                 <?php endif; ?>
-                                <td>
+                                <td class="text-center">
                                     <a href="view.php?id=<?= $project['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat">
                                         <i class="mdi mdi-eye"></i>
                                     </a>
