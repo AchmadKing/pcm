@@ -2789,11 +2789,15 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                 $newReqItemId = dbInsert("
                     INSERT INTO request_items (
                         request_id, subcategory_id, subcat_details, category_id, item_name,
-                        item_code, item_type, unit, quantity, coefficient, unit_price, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        item_code, item_type, work_type, work_volume, work_unit, work_quantity,
+                        work_quantity_unit, work_duration, work_duration_unit, work_billing_unit,
+                        unit, quantity, coefficient, unit_price, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ", [
                     $newReqId, $newSubcatId, $ri['subcat_details'], $newCatId, $ri['item_name'],
-                    $ri['item_code'], $ri['item_type'], $ri['unit'], $ri['quantity'], $ri['coefficient'], $ri['unit_price'], $ri['notes']
+                    $ri['item_code'], $ri['item_type'], $ri['work_type'] ?? 'borongan', $ri['work_volume'] ?? null, $ri['work_unit'] ?? null, $ri['work_quantity'] ?? null,
+                    $ri['work_quantity_unit'] ?? null, $ri['work_duration'] ?? null, $ri['work_duration_unit'] ?? 'Hr', $ri['work_billing_unit'] ?? null,
+                    $ri['unit'], $ri['quantity'], $ri['coefficient'], $ri['unit_price'], $ri['notes']
                 ]);
                 $maps['request_items'][$ri['id']] = intval($newReqItemId);
             }

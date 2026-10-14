@@ -358,8 +358,8 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                             
                             $sOrder = 1;
                             foreach ($ahspDetails as $d) {
-                                dbInsert("INSERT INTO rab_snapshot_ahsp_details (snapshot_subcategory_id, item_id, category, coefficient, unit_price, total_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                    [$snapSubId, $d['item_id'], $d['category'], $d['coefficient'], $d['unit_price'], $d['coefficient'] * $d['unit_price'], $sOrder++]);
+                                dbInsert("INSERT INTO rab_snapshot_ahsp_details (snapshot_subcategory_id, item_id, category, coefficient, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                                    [$snapSubId, $d['item_id'], $d['category'], $d['coefficient'], $d['unit_price'], $sOrder++]);
                             }
                         }
                     }

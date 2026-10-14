@@ -806,8 +806,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         foreach ($validDirectItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ", [
                 $requestId, 
                 $vi['category_id'], 
@@ -828,7 +828,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $vi['unit_price'],
                 $vi['quantity'], 
                 $vi['coefficient'],
-                $vi['total_price'],
                 $vi['notes']
             ]);
         }
@@ -837,8 +836,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         foreach ($validNonRabItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, total_price, notes)
-                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', 'borongan', NULL, NULL, NULL, NULL, NULL, 'Hr', NULL, ?, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, notes)
+                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', 'borongan', NULL, NULL, NULL, NULL, NULL, 'Hr', NULL, ?, ?, ?, ?, ?, ?)
             ", [
                 $requestId,
                 $vi['item_name'],
@@ -846,7 +845,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $vi['unit_price'],
                 $vi['quantity'],
                 $vi['coefficient'],
-                $vi['total_price'],
                 $vi['notes']
             ]);
         }
