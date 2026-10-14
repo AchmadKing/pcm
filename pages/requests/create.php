@@ -1036,7 +1036,7 @@ require_once __DIR__ . '/../../includes/header.php';
 .readonly-field { background-color: #e9ecef !important; }
 .select2-container { width: 100% !important; }
 /* Multi-item checkbox styles */
-#itemCheckboxContainer { max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px; }
+#itemCheckboxContainer { max-height: 500px; overflow-x: auto; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px; }
 #itemCheckboxContainer table th,
 #itemCheckboxContainer table td { vertical-align: middle; font-size: 0.85rem; }
 #itemCheckboxContainer thead th { position: sticky; top: 0; z-index: 5; background-color: #f1f3f6 !important; }
@@ -2286,7 +2286,7 @@ $(document).ready(function() {
         
         if (!isHarian) {
             // BORONGAN MODE (Existing unchanged)
-            const colCount = isUpah ? 9 : 7;
+            const colCount = isUpah ? 9 : 8;
             let html = '<table class="table table-sm table-hover mb-0" id="itemSelectionTable">';
             html += '<thead class="table-secondary">';
             html += '<tr>';
@@ -2305,6 +2305,7 @@ $(document).ready(function() {
                 html += '<th width="80" class="text-center">Sisa</th>';
                 html += '<th width="120" class="text-center">Harga Satuan <span class="text-danger">*</span></th>';
                 html += '<th width="100" class="text-center">Volume <span class="text-danger">*</span></th>';
+                html += '<th width="120" class="text-center">Jml Harga</th>';
             }
             
             html += '</tr></thead><tbody>';
@@ -2380,6 +2381,7 @@ $(document).ready(function() {
                             html += '<td class="text-center"><small class="' + (sisaQty > 0 ? 'text-success' : 'text-danger') + ' fw-semibold">' + sisaText + '</small></td>';
                             html += '<td><input type="text" class="form-control form-control-sm text-end item-price-input" placeholder="' + (price > 0 ? formatNumber(price) : '0') + '" data-idx="' + idx + '"></td>';
                             html += '<td><input type="text" class="form-control form-control-sm text-end item-coef-input" placeholder="0" data-idx="' + idx + '"></td>';
+                            html += '<td class="text-end fw-bold text-primary item-total-price-cell">Rp 0</td>';
                         }
                         html += '</tr>';
                     });
@@ -2541,6 +2543,7 @@ $(document).ready(function() {
     $(document).on('input', '.item-coef-input', function() {
         let val = $(this).val().replace(/[^\d,]/g, '');
         $(this).val(val);
+        updateRowJmlHarga($(this).closest('tr'));
         checkRowOnInput($(this));
     });
 
@@ -2565,15 +2568,21 @@ $(document).ready(function() {
     }
 
     function updateRowJmlHarga(row) {
-        if ($('#itemTypeSelect').val() === 'upah') {
-            const cb = row.find('.item-checkbox');
+        const itemType = $('#itemTypeSelect').val();
+        const cb = row.find('.item-checkbox');
+        let price = parseNumber(row.find('.item-price-input').val());
+        if (price <= 0) {
+            price = parseFloat(cb.data('price')) || 0;
+        }
+
+        if (itemType === 'upah') {
             const ahspCoef = parseFloat(cb.attr('data-ahsp-coef')) || 0;
             const workPlan = parseNumber(row.find('.item-workplan-input').val());
-            let price = parseNumber(row.find('.item-price-input').val());
-            if (price <= 0) {
-                price = parseFloat(cb.data('price')) || 0;
-            }
             const jmlHarga = ahspCoef * workPlan * price;
+            row.find('.item-total-price-cell').text(formatRupiah(jmlHarga));
+        } else {
+            const volume = parseNumber(row.find('.item-coef-input').val());
+            const jmlHarga = volume * price;
             row.find('.item-total-price-cell').text(formatRupiah(jmlHarga));
         }
     }
