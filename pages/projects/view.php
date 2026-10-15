@@ -241,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
                 WHERE d.ahsp_id = ?
             ", [$ahspId])['total'];
             
-            dbExecute("UPDATE project_ahsp_rap SET unit_price = ? WHERE id = ?", [$total, $ahspId]);
+            dbExecute("UPDATE project_ahsp_rap SET unit_price = ? WHERE id = ?", [floatval($total ?? 0), $ahspId]);
         }
     }
 

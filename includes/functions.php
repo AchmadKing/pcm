@@ -1006,7 +1006,7 @@ function syncAhspCodeRabToRap($projectId, $ahspCode) {
     $existing = dbGetRow("SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
     if (!$existing) {
         $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, ?, ?)",
-            [$projectId, $ahspCode, $rabAhsp['work_name'], $rabAhsp['unit'], $rabAhsp['unit_price'], $rabAhsp['id']]);
+            [$projectId, $ahspCode, $rabAhsp['work_name'], $rabAhsp['unit'], floatval($rabAhsp['unit_price'] ?? 0), $rabAhsp['id']]);
         
         $rabDetails = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ?", [$rabAhsp['id']]);
         foreach ($rabDetails as $detail) {
@@ -1034,7 +1034,7 @@ function syncAhspCodeRapToRab($projectId, $ahspCode) {
     $existing = dbGetRow("SELECT id FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
     if (!$existing) {
         $rabAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, ?)",
-            [$projectId, $ahspCode, $rapAhsp['work_name'], $rapAhsp['unit'], $rapAhsp['unit_price']]);
+            [$projectId, $ahspCode, $rapAhsp['work_name'], $rapAhsp['unit'], floatval($rapAhsp['unit_price'] ?? 0)]);
         
         dbExecute("UPDATE project_ahsp_rap SET rab_ahsp_id = ? WHERE id = ?", [$rabAhspId, $rapAhsp['id']]);
         
@@ -1158,7 +1158,7 @@ function syncMasterAhspRapToRapTable($ahspRapId, $projectId) {
     if (empty($rapItems)) return;
     
     $masterDetails = dbGetAll("
-        SELECT d.*, pir.item_code
+        SELECT d.*, pir.item_code, pir.category, COALESCE(d.unit_price, pir.price, 0) as effective_unit_price
         FROM project_ahsp_details_rap d
         JOIN project_items_rap pir ON d.item_id = pir.id
         WHERE d.ahsp_id = ?
@@ -1180,12 +1180,19 @@ function syncMasterAhspRapToRapTable($ahspRapId, $projectId) {
                 WHERE rap_item_id = ? AND item_id = ?
             ", [$rapItemId, $rabItem['id']]);
             
+            $unitPrice = floatval($masterDetail['effective_unit_price']);
+            
             if ($existingDetail) {
                 dbExecute("
                     UPDATE rap_ahsp_details 
                     SET coefficient = ?, unit_price = ?, updated_at = NOW()
                     WHERE id = ?
-                ", [$masterDetail['coefficient'], $masterDetail['unit_price'], $existingDetail['id']]);
+                ", [$masterDetail['coefficient'], $unitPrice, $existingDetail['id']]);
+            } else {
+                dbInsert("
+                    INSERT INTO rap_ahsp_details (rap_item_id, item_id, category, coefficient, unit_price)
+                    VALUES (?, ?, ?, ?, ?)
+                ", [$rapItemId, $rabItem['id'], $masterDetail['category'], $masterDetail['coefficient'], $unitPrice]);
             }
         }
         
@@ -1195,7 +1202,7 @@ function syncMasterAhspRapToRapTable($ahspRapId, $projectId) {
             WHERE rap_item_id = ?
         ", [$rapItemId])['total'] ?? 0;
         
-        dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
+        dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [floatval($newUnitPrice), $rapItemId]);
     }
 }
 
