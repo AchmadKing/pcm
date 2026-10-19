@@ -274,7 +274,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <button type="submit" class="btn btn-primary">
                             <i class="mdi mdi-content-save"></i> Simpan & Lanjut ke RAB
                         </button>
-                        <a href="index.php" class="btn btn-secondary">Batal</a>
+                        <a href="index.php" class="btn btn-secondary btn-back" data-fallback="index.php">Batal</a>
                     </div>
                 </form>
             </div>

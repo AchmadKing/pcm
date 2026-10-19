@@ -12,6 +12,8 @@ require_once __DIR__ . '/../../config/database.php';
 requireLogin();
 
 $requestId = intval($_GET['id'] ?? 0);
+$returnUrl = $_GET['return_url'] ?? '';
+$backUrl = 'view_request.php?id=' . $requestId . ($returnUrl ? '&return_url=' . urlencode($returnUrl) : '');
 
 if (!$requestId) {
     header('Location: index.php');
@@ -245,7 +247,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         echo json_encode([
             'success' => true,
             'message' => 'Laporan aktual berhasil disimpan!',
-            'redirect' => 'view_request.php?id=' . $requestId
+            'redirect' => 'view_request.php?id=' . $requestId . ($returnUrl ? '&return_url=' . urlencode($returnUrl) : '')
         ]);
         exit;
         
@@ -315,7 +317,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <span class="ms-2">|</span>
                         <span class="ms-2">Oleh: <strong><?= sanitize($request['created_by_name']) ?></strong></span>
                     </div>
-                    <a href="view_request.php?id=<?= $requestId ?>" class="btn btn-sm btn-outline-dark">
+                    <a href="<?= htmlspecialchars($backUrl) ?>" class="btn btn-sm btn-outline-dark btn-back" data-fallback="<?= htmlspecialchars($backUrl) ?>">
                         <i class="mdi mdi-arrow-left"></i> Kembali ke Detail
                     </a>
                 </div>
@@ -565,7 +567,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     
                     <!-- Submit -->
                     <div class="d-flex justify-content-end gap-2">
-                        <a href="view_request.php?id=<?= $requestId ?>" class="btn btn-outline-secondary">
+                        <a href="<?= htmlspecialchars($backUrl) ?>" class="btn btn-outline-secondary btn-back" data-fallback="<?= htmlspecialchars($backUrl) ?>">
                             <i class="mdi mdi-close"></i> Batal
                         </a>
                         <button type="submit" class="btn btn-success" id="btnSubmit">
@@ -646,11 +648,11 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h5 class="mt-2" id="successMessage">Berhasil!</h5>
             </div>
             <div class="modal-footer justify-content-center py-2">
-                <a href="view_request.php?id=<?= $requestId ?>" class="btn btn-primary btn-sm">
+                <a href="<?= htmlspecialchars($backUrl) ?>" class="btn btn-primary btn-sm">
                     <i class="mdi mdi-eye"></i> Lihat Detail
                 </a>
-                <a href="../projects/view.php?id=<?= $request['project_id'] ?>&tab=actual" class="btn btn-success btn-sm">
-                    <i class="mdi mdi-chart-bar"></i> Tab Actual
+                <a href="<?= htmlspecialchars($returnUrl ?: ('../projects/view.php?id=' . $request['project_id'] . '&tab=actualization')) ?>" class="btn btn-success btn-sm">
+                    <i class="mdi mdi-cash-register"></i> Kembali ke Proyek
                 </a>
             </div>
         </div>
@@ -1084,7 +1086,7 @@ $('#actualizationForm').on('submit', function(e) {
     }
     
     $.ajax({
-        url: 'actualization.php?id=<?= $requestId ?>',
+        url: 'actualization.php?id=<?= $requestId ?><?= $returnUrl ? '&return_url=' . urlencode($returnUrl) : '' ?>',
         method: 'POST',
         data: formData,
         processData: false,

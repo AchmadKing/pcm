@@ -449,7 +449,7 @@ require_once __DIR__ . '/../../includes/header.php';
         </div>
     </div>
     <div class="card-footer">
-        <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary">
+        <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary btn-back" data-fallback="rab.php?id=<?= $projectId ?>">
             <i class="mdi mdi-arrow-left"></i> Kembali ke RAB
         </a>
         <a href="view.php?id=<?= $projectId ?>&tab=master&subtab=ahsp&ahsp_id=<?= $ahspId ?>" class="btn btn-outline-primary">

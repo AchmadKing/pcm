@@ -612,6 +612,92 @@ document.getElementById('confirmActionBtn').addEventListener('click', function()
         restoreScroll();
     });
 })();
+
+/* ==========================================================================
+   Universal Smart Back Button System
+   Ensures all "Kembali" buttons truly return to the user's previous page.
+   Prioritizes:
+   1. Explicit return_url parameter in current query string
+   2. document.referrer if from the same origin & not identical page
+   3. window.history.back() if history length > 1
+   4. Fallback URL on element (data-fallback or href)
+   ========================================================================== */
+window.goBackToPreviousPage = function(fallbackUrl, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    // 1. Explicit return_url in query string
+    try {
+        var params = new URLSearchParams(window.location.search);
+        var returnUrl = params.get('return_url');
+        if (returnUrl && returnUrl.trim() !== '') {
+            window.location.href = returnUrl;
+            return false;
+        }
+    } catch(e) {}
+
+    // 2. Same-origin document.referrer check
+    if (document.referrer) {
+        try {
+            var ref = new URL(document.referrer);
+            var curr = new URL(window.location.href);
+            // Must match host
+            if (ref.host === curr.host) {
+                // Must not be the exact same page
+                if (ref.pathname !== curr.pathname || ref.search !== curr.search) {
+                    if (window.history.length > 1) {
+                        window.history.back();
+                        return false;
+                    } else {
+                        window.location.href = document.referrer;
+                        return false;
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
+    // 3. Browser history back if available
+    if (window.history.length > 1) {
+        window.history.back();
+        return false;
+    }
+
+    // 4. Default fallback
+    if (fallbackUrl && fallbackUrl !== '#' && fallbackUrl.indexOf('javascript:') === -1) {
+        window.location.href = fallbackUrl;
+    } else {
+        window.location.href = '<?= $baseUrl ?>/index.php';
+    }
+    return false;
+};
+
+// Delegated click handler for any button/link with .btn-back or containing 'Kembali' / arrow-left
+$(document).on('click', '.btn-back, [data-btn-back], a:has(i.mdi-arrow-left):not([data-no-back])', function(e) {
+    // If middle click or modified click (Ctrl/Cmd/Shift), let native browser behavior happen
+    if (e.which === 2 || e.ctrlKey || e.metaKey || e.shiftKey) {
+        return;
+    }
+    var $el = $(this);
+    // Ignore modal toggles, explicit onclick, submit buttons, or disabled links
+    if ($el.attr('data-bs-toggle') || $el.attr('onclick') || $el.hasClass('disabled') || $el.attr('type') === 'submit') {
+        return;
+    }
+    var text = ($el.text() || '').trim().toLowerCase();
+    // Only handle if text contains 'kembali' or 'batal' or has explicit .btn-back
+    if (!$el.hasClass('btn-back') && text.indexOf('kembali') === -1 && text.indexOf('batal') === -1) {
+        return;
+    }
+    // Ignore action buttons like 'Buka Kembali' or 'Kembali ke Draft'
+    if (text.indexOf('draft') !== -1 || text.indexOf('buka kembali') !== -1) {
+        return;
+    }
+
+    var fallback = $el.attr('data-fallback') || $el.attr('href') || '';
+    return window.goBackToPreviousPage(fallback, e);
+});
 </script>
 
 </body>

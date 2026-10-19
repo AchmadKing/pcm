@@ -199,8 +199,8 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
 <body>
 
 <div class="no-print-toolbar">
-    <a href="dashboard.php" class="btn-action btn-secondary">
-        &larr; Kembali ke Dashboard
+    <a href="javascript:void(0);" onclick="if(document.referrer&&document.referrer.indexOf(window.location.host)!==-1){if(window.history.length>1){window.history.back();}else{window.location.href=document.referrer;}}else if(window.history.length>1){window.history.back();}else{window.location.href='dashboard.php';}" class="btn-action btn-secondary btn-back" data-fallback="dashboard.php">
+        &larr; Kembali
     </a>
     <button onclick="window.print()" class="btn-action">
         &#128424; Cetak / Simpan PDF

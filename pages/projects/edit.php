@@ -275,7 +275,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <button type="submit" class="btn btn-primary">
                             <i class="mdi mdi-content-save"></i> Simpan Perubahan
                         </button>
-                        <a href="view.php?id=<?= $projectId ?>" class="btn btn-secondary">Batal</a>
+                        <a href="view.php?id=<?= $projectId ?>" class="btn btn-secondary btn-back" data-fallback="view.php?id=<?= $projectId ?>">Batal</a>
                     </div>
                 </form>
             </div>

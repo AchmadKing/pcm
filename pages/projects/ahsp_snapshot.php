@@ -448,7 +448,7 @@ require_once __DIR__ . '/../../includes/header.php';
     
     <!-- Footer Actions -->
     <div class="card-footer">
-        <a href="<?= $backUrl ?>" class="btn btn-secondary">
+        <a href="<?= $backUrl ?>" class="btn btn-secondary btn-back" data-fallback="<?= $backUrl ?>">
             <i class="mdi mdi-arrow-left"></i> Kembali ke <?= sanitize($subcategory['snapshot_name']) ?>
         </a>
     </div>

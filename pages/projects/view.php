@@ -1576,6 +1576,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
+// Include Tab Approval handlers for POST actions
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['approve_request_tab', 'reject_request_tab'])) {
+    $projectId = $_GET['id'] ?? $_POST['project_id'] ?? null;
+    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+    if ($project && $projectId) {
+        include __DIR__ . '/tabs/approval_handlers.php';
+    }
+}
+
+// Include Tab Actualization handlers for POST actions & AJAX
+if (($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['save_actualization_tab', 'delete_actual_attachment_tab'])) || (isset($_GET['ajax']) && $_GET['ajax'] === 'get_actualization_data')) {
+    $projectId = $_GET['id'] ?? $_POST['project_id'] ?? null;
+    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+    if ($project && $projectId) {
+        include __DIR__ . '/tabs/actualization_handlers.php';
+    }
+}
+
 $projectId = $_GET['id'] ?? null;
 $activeTab = $_GET['tab'] ?? 'detail';
 
@@ -1734,6 +1752,8 @@ $actualTotal = ceil(($actualBaseTotal + $actualPpn) / 10) * 10;
 
 // Pending Requests (pending PM review or pending final Admin approval)
 $pendingRequests = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status IN ('pending', 'pm_approved')", [$projectId])['cnt'] ?? 0;
+// Unactualized approved requests count
+$unactualizedCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status = 'approved' AND (is_actualized = 0 OR is_actualized IS NULL) AND (request_type IN ('rab', 'mixed') OR request_type IS NULL)", [$projectId])['cnt'] ?? 0;
 
 // Sisa Anggaran = RAP Total - Actual
 $sisaAnggaran = $rapTotal - $actualTotal;
@@ -1933,20 +1953,37 @@ require_once __DIR__ . '/../../includes/header.php';
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (hasPermission('reports.view')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $activeTab == 'actual' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=actual">
-                    <i class="mdi mdi-cash-check"></i> Realisasi
-                </a>
-            </li>
-            <?php endif; ?>
             <?php if (hasPermission('requests.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'requests' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=requests">
                     <i class="mdi mdi-file-document-edit"></i> Pengajuan
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (hasPermission('requests.approve') || hasPermission('projects.edit')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'approval' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=approval">
+                    <i class="mdi mdi-clipboard-check-outline"></i> Approval
                     <?php if ($pendingRequests > 0): ?>
                     <span class="badge bg-warning"><?= $pendingRequests ?></span>
                     <?php endif; ?>
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (hasPermission('requests.view') || hasPermission('requests.approve')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'actualization' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=actualization">
+                    <i class="mdi mdi-cash-register"></i> Aktualisasi
+                    <?php if ($unactualizedCount > 0): ?>
+                    <span class="badge bg-danger"><?= $unactualizedCount ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (hasPermission('reports.view')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'actual' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=actual">
+                    <i class="mdi mdi-cash-check"></i> Realisasi
                 </a>
             </li>
             <?php endif; ?>
@@ -2005,18 +2042,32 @@ require_once __DIR__ . '/../../includes/header.php';
                     echo '<div class="alert alert-warning">Anda tidak memiliki akses ke RAP.</div>';
                 }
                 break;
-            case 'actual':
-                if (hasPermission('reports.view')) {
-                    include __DIR__ . '/tabs/actual.php';
-                } else {
-                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Realisasi.</div>';
-                }
-                break;
             case 'requests':
                 if (hasPermission('requests.view')) {
                     include __DIR__ . '/tabs/requests.php';
                 } else {
                     echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Pengajuan.</div>';
+                }
+                break;
+            case 'approval':
+                if (hasPermission('requests.approve') || hasPermission('projects.edit')) {
+                    include __DIR__ . '/tabs/approval.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Approval.</div>';
+                }
+                break;
+            case 'actualization':
+                if (hasPermission('requests.view') || hasPermission('requests.approve')) {
+                    include __DIR__ . '/tabs/actualization.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Aktualisasi.</div>';
+                }
+                break;
+            case 'actual':
+                if (hasPermission('reports.view')) {
+                    include __DIR__ . '/tabs/actual.php';
+                } else {
+                    echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Realisasi.</div>';
                 }
                 break;
             case 'documentation':

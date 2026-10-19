@@ -170,6 +170,29 @@ if ($isNonRab) {
     }
 }
 
+// Determine back/return URL
+$returnUrl = $_GET['return_url'] ?? '';
+if (empty($returnUrl) && !empty($_SERVER['HTTP_REFERER'])) {
+    $refUrl = $_SERVER['HTTP_REFERER'];
+    $refHost = parse_url($refUrl, PHP_URL_HOST);
+    $currHost = $_SERVER['HTTP_HOST'] ?? '';
+    if (explode(':', (string)$refHost)[0] === explode(':', (string)$currHost)[0]) {
+        $refPath = parse_url($refUrl, PHP_URL_PATH);
+        $currPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+        if ($refPath !== $currPath && strpos($refPath, 'actualization.php') === false) {
+            $returnUrl = $refUrl;
+        }
+    }
+}
+if (empty($returnUrl)) {
+    if (!empty($request['project_id'])) {
+        $tab = ($request['status'] === 'approved') ? 'actualization' : 'requests';
+        $returnUrl = $baseUrl . '/pages/projects/view.php?id=' . $request['project_id'] . '&tab=' . $tab;
+    } else {
+        $returnUrl = 'index.php';
+    }
+}
+
 // NOW include header (after all possible redirects)
 $pageTitle = 'Detail Pengajuan';
 require_once __DIR__ . '/../../includes/header.php';
@@ -214,7 +237,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </a>
                         <?php endif; ?>
                         <?php if ($request['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($request['project_id'])): ?>
-                        <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>" class="btn btn-sm btn-warning">
+                        <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>&return_url=<?= urlencode($returnUrl) ?>" class="btn btn-sm btn-warning">
                             <i class="mdi mdi-refresh"></i> Ajukan Ulang
                         </a>
                         <?php endif; ?>
@@ -223,7 +246,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             <i class="mdi mdi-delete"></i> Hapus Pengajuan
                         </button>
                         <?php endif; ?>
-                        <a href="index.php" class="btn btn-sm btn-outline-dark">
+                        <a href="<?= htmlspecialchars($returnUrl) ?>" class="btn btn-sm btn-outline-dark btn-back" data-fallback="<?= htmlspecialchars($returnUrl) ?>">
                             <i class="mdi mdi-arrow-left"></i> Kembali
                         </a>
                     </div>
@@ -241,7 +264,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <i class="mdi mdi-alert-circle-outline fs-5 me-2 text-warning align-middle"></i>
                 <span>Pengajuan ini berstatus <strong>Rejected</strong>. Anda dapat mengajukan ulang dengan memuat seluruh item dan lampiran yang sama secara otomatis.</span>
             </div>
-            <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>" class="btn btn-sm btn-warning text-nowrap ms-3">
+            <a href="create.php?project_id=<?= $request['project_id'] ?>&resubmit_id=<?= $requestId ?>&return_url=<?= urlencode($returnUrl) ?>" class="btn btn-sm btn-warning text-nowrap ms-3">
                 <i class="mdi mdi-refresh"></i> Ajukan Ulang Sekarang
             </a>
         </div>
@@ -657,7 +680,7 @@ require_once __DIR__ . '/../../includes/header.php';
         <div class="card border-success">
             <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
                 <h6 class="mb-0"><i class="mdi mdi-clipboard-check"></i> Laporan Aktual</h6>
-                <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $requestId ?>" class="btn btn-sm btn-light py-0">
+                <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $requestId ?>&return_url=<?= urlencode($returnUrl) ?>" class="btn btn-sm btn-light py-0">
                     <i class="mdi mdi-pencil"></i> Edit
                 </a>
             </div>
@@ -756,7 +779,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <div class="card-body py-3 text-center">
                 <i class="mdi mdi-alert-circle-outline text-warning" style="font-size: 2rem;"></i>
                 <p class="mt-2 mb-2">Pengajuan ini belum memiliki laporan aktual.</p>
-                <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $requestId ?>" class="btn btn-success btn-sm">
+                <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $requestId ?>&return_url=<?= urlencode($returnUrl) ?>" class="btn btn-success btn-sm">
                     <i class="mdi mdi-pencil-box-outline"></i> Buat Laporan Aktual
                 </a>
             </div>

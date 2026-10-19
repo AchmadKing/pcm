@@ -593,7 +593,7 @@ require_once __DIR__ . '/../../includes/header.php';
         </div>
     </div>
     <div class="card-footer">
-        <a href="rap.php?id=<?= $projectId ?>" class="btn btn-secondary">
+        <a href="rap.php?id=<?= $projectId ?>" class="btn btn-secondary btn-back" data-fallback="rap.php?id=<?= $projectId ?>">
             <i class="mdi mdi-arrow-left"></i> Kembali ke RAP
         </a>
     </div>

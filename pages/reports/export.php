@@ -531,8 +531,8 @@ require_once __DIR__ . '/../../includes/header.php';
 
                     <!-- Action Buttons -->
                     <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center pt-3 border-top">
-                        <a href="dashboard.php" class="btn btn-secondary">
-                            <i class="mdi mdi-arrow-left"></i> Kembali ke Dashboard
+                        <a href="dashboard.php" class="btn btn-secondary btn-back" data-fallback="dashboard.php">
+                            <i class="mdi mdi-arrow-left"></i> Kembali
                         </a>
                         <div class="d-flex gap-2">
                             <!-- Download CSV Button -->

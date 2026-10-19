@@ -236,31 +236,33 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <?php if (hasPermission('projects.edit')): ?>
                                 <td><?= sanitize($project['created_by_name']) ?></td>
                                 <?php endif; ?>
-                                <td class="text-center">
-                                    <a href="view.php?id=<?= $project['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat">
-                                        <i class="mdi mdi-eye"></i>
-                                    </a>
-                                    <?php if (hasPermission('projects.edit')): ?>
-                                    <a href="rab.php?id=<?= $project['id'] ?>" class="btn btn-sm btn-primary btn-action" title="Edit RAB">
-                                        <i class="mdi mdi-file-document-edit"></i>
-                                    </a>
-                                    <?php if ($project['status'] === 'draft' && hasPermission('projects.delete')): ?>
-                                    <a href="?action=delete&id=<?= $project['id'] ?>" class="btn btn-sm btn-danger btn-action btn-delete" title="Hapus">
-                                        <i class="mdi mdi-delete"></i>
-                                    </a>
-                                    <?php endif; ?>
-                                    <?php elseif (hasPermission('requests.create')): ?>
-                                    <?php if (empty($project['request_locked'])): ?>
-                                    <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $project['id'] ?>" 
-                                       class="btn btn-sm btn-success btn-action" title="Buat Pengajuan">
-                                        <i class="mdi mdi-plus"></i>
-                                    </a>
-                                    <?php else: ?>
-                                    <span class="btn btn-sm btn-secondary btn-action disabled" title="Pengajuan Terkunci">
-                                        <i class="mdi mdi-lock"></i>
-                                    </span>
-                                    <?php endif; ?>
-                                    <?php endif; ?>
+                                <td class="text-center text-nowrap" style="white-space: nowrap;">
+                                    <div class="d-inline-flex justify-content-center align-items-center gap-1 flex-nowrap">
+                                        <a href="view.php?id=<?= $project['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat">
+                                            <i class="mdi mdi-eye"></i>
+                                        </a>
+                                        <?php if (hasPermission('projects.edit')): ?>
+                                        <a href="rab.php?id=<?= $project['id'] ?>" class="btn btn-sm btn-primary btn-action" title="Edit RAB">
+                                            <i class="mdi mdi-file-document-edit"></i>
+                                        </a>
+                                        <?php if ($project['status'] === 'draft' && hasPermission('projects.delete')): ?>
+                                        <a href="?action=delete&id=<?= $project['id'] ?>" class="btn btn-sm btn-danger btn-action btn-delete" title="Hapus">
+                                            <i class="mdi mdi-delete"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php elseif (hasPermission('requests.create')): ?>
+                                        <?php if (empty($project['request_locked'])): ?>
+                                        <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $project['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
+                                           class="btn btn-sm btn-success btn-action" title="Buat Pengajuan">
+                                            <i class="mdi mdi-plus"></i>
+                                        </a>
+                                        <?php else: ?>
+                                        <span class="btn btn-sm btn-secondary btn-action disabled" title="Pengajuan Terkunci">
+                                            <i class="mdi mdi-lock"></i>
+                                        </span>
+                                        <?php endif; ?>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>

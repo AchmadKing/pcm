@@ -835,9 +835,9 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <td class="text-center weekly-col">
                     <?php if ($weekRealization > 0): ?>
                         <?php if (!empty($sub['is_non_rab'])): ?>
-                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $sub['request_id'] ?>" 
+                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $sub['request_id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
                            class="btn btn-sm btn-outline-primary py-0 px-1" 
-                           title="Lihat Pengajuan <?= sanitize($sub['request_number']) ?>" target="_blank">
+                           title="Lihat Pengajuan <?= sanitize($sub['request_number']) ?>">
                             <i class="mdi mdi-eye"></i>
                         </a>
                         <?php else: ?>

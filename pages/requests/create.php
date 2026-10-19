@@ -1503,7 +1503,29 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="card-body py-3">
                     <div class="row align-items-center">
                         <div class="col-md-6">
-                            <a href="<?= $baseUrl ?>/pages/projects/view.php?id=<?= $projectId ?>&tab=requests" class="btn btn-secondary">
+                            <?php
+                            $returnUrl = $_GET['return_url'] ?? '';
+                            if (empty($returnUrl) && !empty($_SERVER['HTTP_REFERER'])) {
+                                $refUrl = $_SERVER['HTTP_REFERER'];
+                                $refHost = parse_url($refUrl, PHP_URL_HOST);
+                                $currHost = $_SERVER['HTTP_HOST'] ?? '';
+                                if (explode(':', (string)$refHost)[0] === explode(':', (string)$currHost)[0]) {
+                                    $refPath = parse_url($refUrl, PHP_URL_PATH);
+                                    $currPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+                                    if ($refPath !== $currPath) {
+                                        $returnUrl = $refUrl;
+                                    }
+                                }
+                            }
+                            if (empty($returnUrl)) {
+                                if (!empty($projectId)) {
+                                    $returnUrl = $baseUrl . '/pages/projects/view.php?id=' . $projectId . '&tab=requests';
+                                } else {
+                                    $returnUrl = $baseUrl . '/pages/requests/index.php';
+                                }
+                            }
+                            ?>
+                            <a href="<?= htmlspecialchars($returnUrl) ?>" class="btn btn-secondary btn-back" data-fallback="<?= htmlspecialchars($returnUrl) ?>">
                                 <i class="mdi mdi-arrow-left"></i> Kembali
                             </a>
                         </div>

@@ -45,7 +45,8 @@ $hasSidebar = hasAnyPermission();
         .mm-active > a > .menu-arrow { transform: rotate(90deg); }
         .card { margin-bottom: 1.5rem; }
         .table th { white-space: nowrap; }
-        .btn-action { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
+        .table td.text-nowrap { white-space: nowrap; }
+        .btn-action { padding: 0.25rem 0.5rem; font-size: 0.875rem; display: inline-flex; align-items: center; justify-content: center; }
         .required::after { content: ' *'; color: red; }
         
         /* DataTables Sorting & Header UX */

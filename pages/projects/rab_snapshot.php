@@ -206,7 +206,7 @@ require_once __DIR__ . '/../../includes/header.php';
 <!-- Snapshot Info -->
 <div class="alert alert-info d-flex justify-content-between align-items-center">
     <div>
-        <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary btn-sm me-3">
+        <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary btn-sm me-3 btn-back" data-fallback="rab.php?id=<?= $projectId ?>">
             <i class="mdi mdi-arrow-left"></i> Kembali ke RAB
         </a>
         <i class="mdi mdi-content-copy me-1"></i>
@@ -356,7 +356,7 @@ require_once __DIR__ . '/../../includes/header.php';
     <div class="card-footer">
         <div class="d-flex justify-content-between align-items-center">
             <div>
-                <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary">
+                <a href="rab.php?id=<?= $projectId ?>" class="btn btn-secondary btn-back" data-fallback="rab.php?id=<?= $projectId ?>">
                     <i class="mdi mdi-arrow-left"></i> Kembali ke RAB
                 </a>
             </div>

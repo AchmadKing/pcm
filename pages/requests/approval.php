@@ -599,11 +599,39 @@ $pageTitle = 'Approval Center';
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
+<?php
+$returnUrl = $_GET['return_url'] ?? '';
+if (empty($returnUrl) && !empty($_SERVER['HTTP_REFERER'])) {
+    $refUrl = $_SERVER['HTTP_REFERER'];
+    $refHost = parse_url($refUrl, PHP_URL_HOST);
+    $currHost = $_SERVER['HTTP_HOST'] ?? '';
+    if (explode(':', (string)$refHost)[0] === explode(':', (string)$currHost)[0]) {
+        $refPath = parse_url($refUrl, PHP_URL_PATH);
+        $currPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+        if ($refPath !== $currPath) {
+            $returnUrl = $refUrl;
+        }
+    }
+}
+if (empty($returnUrl)) {
+    if (!empty($projectId)) {
+        $returnUrl = $baseUrl . '/pages/projects/view.php?id=' . $projectId . '&tab=approval';
+    } else {
+        $returnUrl = $baseUrl . '/pages/requests/index.php';
+    }
+}
+?>
+
 <!-- Page Title -->
 <div class="row">
     <div class="col-12">
         <div class="page-title-box d-sm-flex align-items-center justify-content-between">
-            <h4 class="mb-sm-0">Approval Center</h4>
+            <div class="d-flex align-items-center gap-2">
+                <a href="<?= htmlspecialchars($returnUrl) ?>" class="btn btn-sm btn-outline-dark btn-back" data-fallback="<?= htmlspecialchars($returnUrl) ?>">
+                    <i class="mdi mdi-arrow-left"></i> Kembali
+                </a>
+                <h4 class="mb-sm-0">Approval Center</h4>
+            </div>
             <div class="page-title-right">
                 <ol class="breadcrumb m-0">
                     <li class="breadcrumb-item"><a href="<?= $baseUrl ?>">PCC</a></li>

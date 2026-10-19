@@ -162,7 +162,7 @@ if ($reqViewMode === 'all') {
                             <i class="mdi mdi-calculator"></i> Kalkulator Tenaga Kerja
                         </button>
                         <?php if (!hasPermission('requests.approve')): ?>
-                        <a href="create.php" class="btn btn-primary btn-sm">
+                        <a href="create.php?return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? 'index.php') ?>" class="btn btn-primary btn-sm">
                             <i class="mdi mdi-plus"></i> Buat Pengajuan Baru
                         </a>
                         <?php endif; ?>
@@ -190,7 +190,7 @@ if ($reqViewMode === 'all') {
                                 <?php if (hasPermission('requests.approve')): ?>
                                 <th width="160">Dibuat Oleh</th>
                                 <?php endif; ?>
-                                <th width="100" class="text-center no-sort" data-orderable="false">Aksi</th>
+                                <th width="130" class="text-center no-sort text-nowrap" data-orderable="false" style="min-width: 125px; width: 130px;">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -211,6 +211,7 @@ if ($reqViewMode === 'all') {
                                 $statusKey = $statusRank[$req['status'] ?? ''] ?? 99;
                                 $createdByName = $req['created_by_name'] ?? '-';
                                 $createdByKey = strtolower(trim($createdByName));
+                                $currentRequestUri = $_SERVER['REQUEST_URI'] ?? 'index.php';
                             ?>
                             <tr>
                                 <td data-order="<?= sanitize($reqSortKey) ?>" data-sort="<?= sanitize($reqSortKey) ?>">
@@ -231,25 +232,27 @@ if ($reqViewMode === 'all') {
                                 <?php if (hasPermission('requests.approve')): ?>
                                 <td data-order="<?= sanitize($createdByKey) ?>" data-sort="<?= sanitize($createdByKey) ?>"><?= sanitize($createdByName) ?></td>
                                 <?php endif; ?>
-                                <td class="text-center">
-                                    <a href="view_request.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-info btn-action" title="Lihat Detail">
-                                        <i class="mdi mdi-eye"></i>
-                                    </a>
-                                    <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($req['project_id'])): ?>
-                                    <a href="create.php?project_id=<?= $req['project_id'] ?>&resubmit_id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="Ajukan Ulang">
-                                        <i class="mdi mdi-refresh"></i>
-                                    </a>
-                                    <?php endif; ?>
-                                    <?php if (canApproveRequest($req)): ?>
-                                    <a href="approval.php?id=<?= $req['id'] ?>" class="btn btn-sm btn-warning btn-action" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review' ?>">
-                                        <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check' ?>"></i>
-                                    </a>
-                                    <?php endif; ?>
-                                    <?php if (hasPermission('requests.delete')): ?>
-                                    <button type="button" class="btn btn-sm btn-danger btn-action" title="Hapus Pengajuan" onclick="confirmDeleteRequest(<?= $req['id'] ?>, '<?= addslashes(sanitize($req['request_number'] ?: 'REQ-' . $req['id'])) ?>')">
-                                        <i class="mdi mdi-delete"></i>
-                                    </button>
-                                    <?php endif; ?>
+                                <td class="text-center text-nowrap align-middle" style="white-space: nowrap;">
+                                    <div class="d-inline-flex justify-content-center align-items-center gap-1 flex-nowrap">
+                                        <a href="view_request.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($currentRequestUri) ?>" class="btn btn-sm btn-info btn-action" title="Lihat Detail">
+                                            <i class="mdi mdi-eye"></i>
+                                        </a>
+                                        <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($req['project_id'])): ?>
+                                        <a href="create.php?project_id=<?= $req['project_id'] ?>&resubmit_id=<?= $req['id'] ?>&return_url=<?= urlencode($currentRequestUri) ?>" class="btn btn-sm btn-warning btn-action" title="Ajukan Ulang">
+                                            <i class="mdi mdi-refresh"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php if (canApproveRequest($req)): ?>
+                                        <a href="approval.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($currentRequestUri) ?>" class="btn btn-sm btn-warning btn-action" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review' ?>">
+                                            <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check' ?>"></i>
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php if (hasPermission('requests.delete')): ?>
+                                        <button type="button" class="btn btn-sm btn-danger btn-action" title="Hapus Pengajuan" onclick="confirmDeleteRequest(<?= $req['id'] ?>, '<?= addslashes(sanitize($req['request_number'] ?: 'REQ-' . $req['id'])) ?>')">
+                                            <i class="mdi mdi-delete"></i>
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>

@@ -882,7 +882,7 @@ require_once '../../includes/header.php';
                         <h4 class="mb-0">
                             Import <?= ($importType === 'items' || $importType === 'items_rap') ? 'Items' : 'AHSP' ?> - <?= sanitize($project['name']) ?>
                         </h4>
-                        <a href="view.php?id=<?= $projectId ?>&tab=master" class="btn btn-secondary">
+                        <a href="view.php?id=<?= $projectId ?>&tab=master" class="btn btn-secondary btn-back" data-fallback="view.php?id=<?= $projectId ?>&tab=master">
                             <i class="mdi mdi-arrow-left"></i> Kembali
                         </a>
                     </div>
@@ -1259,7 +1259,7 @@ require_once '../../includes/header.php';
                 <div class="card-footer d-flex justify-content-between flex-wrap gap-2">
                     <div class="d-flex gap-2">
                         <?php if ($isViewingDraft ?? false): ?>
-                        <a href="import.php?project_id=<?= $projectId ?>&type=<?= $importType ?>" class="btn btn-secondary">
+                        <a href="import.php?project_id=<?= $projectId ?>&type=<?= $importType ?>" class="btn btn-secondary btn-back" data-fallback="import.php?project_id=<?= $projectId ?>&type=<?= $importType ?>">
                             <i class="mdi mdi-arrow-left"></i> Kembali
                         </a>
                         <?php else: ?>

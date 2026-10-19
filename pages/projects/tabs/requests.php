@@ -277,7 +277,7 @@ $canManageTeam = ($project['status'] === 'on_progress');
                         <i class="mdi mdi-calculator"></i> Kalkulator Tenaga Kerja
                     </button>
                     <?php if ($canMakeRequest && !$isLocked): ?>
-                    <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>" class="btn btn-sm btn-success py-0 px-2">
+                    <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" class="btn btn-sm btn-success py-0 px-2">
                         <i class="mdi mdi-plus"></i> Buat Pengajuan
                     </a>
                     <?php endif; ?>
@@ -339,7 +339,6 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                 <th class="text-end">Jumlah</th>
                                 <th class="text-center">Status</th>
                                 <th>Dibuat</th>
-                                <th class="text-center">Aktualisasi</th>
                                 <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
@@ -372,35 +371,19 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                 <td class="text-center"><?= getDetailedStatusBadge($req) ?></td>
                                 <td><?= sanitize($req['created_by_name']) ?></td>
                                 <td class="text-center">
-                                    <?php if ($req['status'] === 'approved'): ?>
-                                        <?php if ($isNonRab): ?>
-                                        <span class="badge text-white" style="background-color: #6f42c1;"><i class="mdi mdi-check"></i> Langsung</span>
-                                        <?php elseif (!empty($req['is_actualized'])): ?>
-                                        <span class="badge bg-success"><i class="mdi mdi-check"></i> Sudah</span>
-                                        <?php else: ?>
-                                        <a href="<?= $baseUrl ?>/pages/requests/actualization.php?id=<?= $req['id'] ?>" 
-                                           class="btn btn-sm btn-outline-success py-0" title="Buat Laporan Aktual">
-                                            <i class="mdi mdi-pencil-box-outline"></i>
-                                        </a>
-                                        <?php endif; ?>
-                                    <?php else: ?>
-                                        <span class="text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="text-center">
                                     <div class="d-flex justify-content-center gap-1">
-                                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $req['id'] ?>" 
+                                        <a href="<?= $baseUrl ?>/pages/requests/view_request.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
                                            class="btn btn-sm btn-outline-info py-0" title="Lihat Detail">
                                             <i class="mdi mdi-eye"></i>
                                         </a>
                                         <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && $canMakeRequest): ?>
-                                        <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>&resubmit_id=<?= $req['id'] ?>" 
+                                        <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>&resubmit_id=<?= $req['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
                                            class="btn btn-sm btn-outline-warning py-0" title="Ajukan Ulang Pengajuan">
                                             <i class="mdi mdi-refresh"></i>
                                         </a>
                                         <?php endif; ?>
                                         <?php if (canApproveRequest($req)): ?>
-                                        <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>" 
+                                        <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
                                            class="btn btn-sm btn-outline-success py-0" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review & Approve' ?>">
                                             <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check-circle' ?>"></i>
                                         </a>
