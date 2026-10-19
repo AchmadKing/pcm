@@ -35,6 +35,9 @@ if (!$request) {
     die('Pengajuan tidak ditemukan');
 }
 
+$isNonRab = ($request['request_type'] ?? 'rab') === 'non_rab';
+$isMixed = ($request['request_type'] ?? 'rab') === 'mixed';
+
 // Check access - creator or users with requests.view and project access
 $canView = false;
 if (hasPermission('projects.edit')) {
@@ -70,10 +73,21 @@ if ($includeReceipts) {
     // Request attachments
     $requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
     
-    // Actualization attachments
-    $actualData = dbGetRow("SELECT id FROM request_actuals WHERE request_id = ?", [$requestId]);
-    if ($actualData) {
-        $actualAttachments = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY created_at", [$actualData['id']]);
+    // Actualization attachments (all attachments linked to this request's actuals)
+    $actualAttachments = dbGetAll("
+        SELECT raa.* 
+        FROM request_actual_attachments raa 
+        JOIN request_actuals ra ON raa.request_actual_id = ra.id 
+        WHERE ra.request_id = ? 
+        ORDER BY raa.created_at ASC
+    ", [$requestId]);
+    
+    // Fallback if no JOIN match but request_actuals exists
+    if (empty($actualAttachments)) {
+        $actualData = dbGetRow("SELECT id FROM request_actuals WHERE request_id = ?", [$requestId]);
+        if ($actualData) {
+            $actualAttachments = dbGetAll("SELECT * FROM request_actual_attachments WHERE request_actual_id = ? ORDER BY created_at", [$actualData['id']]);
+        }
     }
 }
 
@@ -210,34 +224,181 @@ $baseUrl = getBaseUrl();
             text-decoration: underline;
         }
 
+        /* Attachments Section Styling */
         .attachments-section {
-            margin-top: 40px;
-            border-top: 1px dashed #000;
+            margin-top: 35px;
+            border-top: 2px dashed #000;
             padding-top: 20px;
             page-break-before: always;
+            break-before: page;
         }
         .attachments-title {
-            font-size: 12pt;
+            font-size: 13pt;
             font-weight: bold;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             text-transform: uppercase;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 8px;
+        }
+        .attachment-subgroup-title {
+            font-size: 11pt;
+            font-weight: bold;
+            margin-top: 20px;
+            margin-bottom: 15px;
+            color: #111;
+            border-left: 4px solid #0d6efd;
+            padding-left: 8px;
         }
         .attachment-item {
-            margin-bottom: 20px;
+            margin-bottom: 25px;
             text-align: center;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .attachment-img-wrapper {
+            display: inline-block;
+            max-width: 100%;
+            page-break-inside: avoid;
+            break-inside: avoid;
         }
         .attachment-image {
             max-width: 100%;
-            max-height: 200mm;
+            max-height: 220mm;
             border: 1px solid #ccc;
-            padding: 5px;
+            padding: 4px;
             border-radius: 4px;
+            background: #fff;
+            display: block;
+            margin: 0 auto;
+            object-fit: contain;
         }
         .attachment-label {
+            font-size: 9.5pt;
+            color: #444;
+            margin-top: 6px;
+            font-style: normal;
+        }
+
+        /* PDF Attachment Styles */
+        .attachment-pdf-item {
+            text-align: left;
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .attachment-pdf-header {
+            font-size: 10pt;
+            color: #222;
+            padding: 6px 10px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px 4px 0 0;
+            margin-bottom: 10px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .attachment-pdf-meta {
             font-size: 9pt;
             color: #666;
-            margin-top: 5px;
             font-style: italic;
+            margin-left: 6px;
+        }
+        .attachment-pdf-pages {
+            width: 100%;
+            text-align: center;
+        }
+        .attachment-pdf-page-wrapper {
+            margin-bottom: 20px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            text-align: center;
+        }
+        .attachment-pdf-page-badge {
+            font-size: 8.5pt;
+            color: #555;
+            margin-bottom: 4px;
+            text-align: right;
+            font-family: sans-serif;
+        }
+        .attachment-pdf-page-img {
+            max-width: 100%;
+            max-height: 220mm;
+            width: auto;
+            height: auto;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            background: #fff;
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            object-fit: contain;
+        }
+        .pdf-loading-placeholder {
+            padding: 18px;
+            background: #f8f9fa;
+            border: 1px dashed #ced4da;
+            border-radius: 4px;
+            color: #6c757d;
+            font-family: sans-serif;
+            font-size: 9.5pt;
+            text-align: center;
+            margin: 10px 0;
+        }
+        .pdf-fallback-box {
+            border: 1px solid #ffeeba;
+            background: #fff3cd;
+            color: #856404;
+            padding: 12px 16px;
+            border-radius: 4px;
+            text-align: left;
+            font-family: sans-serif;
+            font-size: 9.5pt;
+            margin: 10px 0;
+        }
+        .btn-fallback-download {
+            display: inline-block;
+            margin-top: 6px;
+            color: #0d6efd;
+            text-decoration: underline;
+            font-weight: bold;
+            font-size: 9pt;
+        }
+
+        /* Loading Spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(0,0,0,0.2);
+            border-radius: 50%;
+            border-top-color: #0d6efd;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 5px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Status Banner for PDF processing */
+        .status-banner {
+            padding: 8px 14px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-family: sans-serif;
+            font-size: 9.5pt;
+            text-align: left;
+        }
+        .status-banner-info {
+            background: #cff4fc;
+            border: 1px solid #b6effb;
+            color: #055160;
+        }
+        .status-banner-success {
+            background: #d1e7dd;
+            border: 1px solid #badbcc;
+            color: #0f5132;
         }
 
         .signature-container {
@@ -293,15 +454,39 @@ $baseUrl = getBaseUrl();
             .no-print {
                 display: none !important;
             }
+            .attachment-pdf-header {
+                background: transparent;
+                border-color: #999;
+            }
+            .attachment-pdf-page-img {
+                box-shadow: none;
+                border: 1px solid #aaa;
+            }
+        }
+
+        @media print and (orientation: landscape) {
+            .attachment-pdf-page-img, .attachment-image {
+                max-height: 175mm;
+            }
+        }
+        @media print and (orientation: portrait) {
+            .attachment-pdf-page-img, .attachment-image {
+                max-height: 240mm;
+            }
         }
     </style>
 </head>
 <body>
 
 <div class="no-print-container no-print">
-    <button onclick="window.print()" class="btn-print">
-        Cetak Laporan PDF
-    </button>
+    <div id="printStatusBanner" class="status-banner status-banner-info" style="display: none;">
+        <span class="loading-spinner"></span> <span id="printStatusText">Menyiapkan lampiran nota dokumen...</span>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px; align-items: center;">
+        <button onclick="window.print()" class="btn-print" id="btnPrintReport">
+            Cetak Laporan PDF
+        </button>
+    </div>
 </div>
 
 <div class="page-container">
@@ -578,49 +763,249 @@ $baseUrl = getBaseUrl();
         </table>
     </div>
 
+    <?php
+    /**
+     * Helper to render an attachment item in the print view
+     */
+    function renderAttachmentBlock($att, $folder = 'actuals') {
+        $filename = $att['filename'] ?? '';
+        $origName = !empty($att['original_name']) ? $att['original_name'] : $filename;
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        $origExt = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        $fileType = strtolower($att['file_type'] ?? '');
+        
+        $isPdf = ($fileType === 'application/pdf' || $ext === 'pdf' || $origExt === 'pdf');
+        $isImg = in_array($fileType, ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']) 
+                 || in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif']) 
+                 || in_array($origExt, ['jpg', 'jpeg', 'png', 'webp', 'gif']);
+        
+        $fileUrl = "../../uploads/{$folder}/" . rawurlencode($filename);
+        $filePath = __DIR__ . "/../../uploads/{$folder}/" . $filename;
+        $base64Data = '';
+        if ($isPdf && !empty($filename) && file_exists($filePath) && filesize($filePath) <= 15 * 1024 * 1024) {
+            $base64Data = base64_encode(file_get_contents($filePath));
+        }
+        ?>
+        <div class="attachment-item <?= $isPdf ? 'attachment-pdf-item' : ($isImg ? 'attachment-img-item' : 'attachment-other-item') ?>"
+             <?= $isPdf ? 'data-pdf-url="' . htmlspecialchars($fileUrl) . '" data-title="' . htmlspecialchars($origName) . '"' : '' ?>
+             <?= (!empty($base64Data)) ? 'data-pdf-base64="' . $base64Data . '"' : '' ?>>
+            
+            <?php if ($isPdf): ?>
+                <div class="attachment-pdf-header">
+                    <span style="font-size: 11pt; margin-right: 4px;">📄</span>
+                    <strong><?= htmlspecialchars($origName) ?></strong>
+                    <span class="attachment-pdf-meta">(Dokumen PDF - <span class="pdf-status-text">Menyiapkan halaman...</span>)</span>
+                </div>
+                <div class="attachment-pdf-pages">
+                    <div class="pdf-loading-placeholder no-print">
+                        <span class="loading-spinner"></span> Menyiapkan halaman PDF agar ikut tercetak...
+                    </div>
+                </div>
+            <?php elseif ($isImg): ?>
+                <div class="attachment-img-wrapper">
+                    <img src="<?= htmlspecialchars($fileUrl) ?>" class="attachment-image" alt="<?= htmlspecialchars($origName) ?>">
+                    <div class="attachment-label">
+                        📷 <strong><?= htmlspecialchars($origName) ?></strong>
+                        <?php if (!empty($att['file_size'])): ?>
+                            <small style="color: #777;">(<?= round($att['file_size'] / 1024, 1) ?> KB)</small>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div style="border: 1px solid #ccc; padding: 12px; background: #fafafa; display: inline-block; border-radius: 4px; text-align: left;">
+                    📎 <strong><?= htmlspecialchars($origName) ?></strong> (Berkas Lampiran)
+                </div>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+    ?>
+
     <?php if ($includeReceipts && (!empty($requestAttachments) || !empty($actualAttachments))): ?>
-    <div class="attachments-section no-print-section">
+    <div class="attachments-section">
         <div class="attachments-title">Lampiran Nota & Bukti Dukung</div>
         
         <?php if (!empty($requestAttachments)): ?>
-        <h4 style="font-size: 11pt; font-weight: bold; margin-bottom: 10px;">Lampiran saat Pengajuan:</h4>
+        <div class="attachment-subgroup-title">Lampiran saat Pengajuan:</div>
         <?php foreach ($requestAttachments as $att): ?>
-            <div class="attachment-item">
-                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'])): ?>
-                    <img src="../../uploads/receipts/<?= $att['filename'] ?>" class="attachment-image" alt="<?= htmlspecialchars($att['original_name']) ?>">
-                    <div class="attachment-label"><?= htmlspecialchars($att['original_name']) ?></div>
-                <?php else: ?>
-                    <div style="border: 1px solid #ccc; padding: 15px; background: #fdfdfd; display: inline-block; border-radius: 4px;">
-                        📄 <strong><?= htmlspecialchars($att['original_name']) ?></strong> (Dokumen PDF)
-                    </div>
-                <?php endif; ?>
-            </div>
+            <?php renderAttachmentBlock($att, 'receipts'); ?>
         <?php endforeach; ?>
         <?php endif; ?>
 
         <?php if (!empty($actualAttachments)): ?>
-        <h4 style="font-size: 11pt; font-weight: bold; margin-top: 25px; margin-bottom: 10px;">Lampiran Realisasi (Nota Aktual):</h4>
+        <div class="attachment-subgroup-title">Lampiran Realisasi (Nota Aktual):</div>
         <?php foreach ($actualAttachments as $att): ?>
-            <div class="attachment-item">
-                <?php if (in_array($att['file_type'], ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'])): ?>
-                    <img src="../../uploads/actuals/<?= $att['filename'] ?>" class="attachment-image" alt="<?= htmlspecialchars($att['original_name']) ?>">
-                    <div class="attachment-label"><?= htmlspecialchars($att['original_name']) ?></div>
-                <?php else: ?>
-                    <div style="border: 1px solid #ccc; padding: 15px; background: #fdfdfd; display: inline-block; border-radius: 4px;">
-                        📄 <strong><?= htmlspecialchars($att['original_name']) ?></strong> (Dokumen PDF)
-                    </div>
-                <?php endif; ?>
-            </div>
+            <?php renderAttachmentBlock($att, 'actuals'); ?>
         <?php endforeach; ?>
         <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>
 
+<!-- PDF.js library for rendering PDF attachments directly into print preview -->
+<script src="../../dist/assets/libs/pdfjs/pdf.min.js"></script>
 <script>
-    window.addEventListener('DOMContentLoaded', (event) => {
-        // Trigger browser print automatically
-        setTimeout(function() {
+    if (typeof pdfjsLib === 'undefined') {
+        document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>');
+    }
+</script>
+<script>
+    if (typeof pdfjsLib !== 'undefined') {
+        try {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '../../dist/assets/libs/pdfjs/pdf.worker.min.js';
+        } catch (e) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    }
+
+    async function renderPdfAttachment(item) {
+        const pdfBase64 = item.getAttribute('data-pdf-base64');
+        const pdfUrl = item.getAttribute('data-pdf-url');
+        const docTitle = item.getAttribute('data-title') || 'Dokumen PDF';
+        const pagesContainer = item.querySelector('.attachment-pdf-pages');
+        const statusSpan = item.querySelector('.pdf-status-text');
+        
+        if ((!pdfUrl && !pdfBase64) || !pagesContainer) return;
+        
+        try {
+            if (typeof pdfjsLib === 'undefined') {
+                throw new Error('Library PDF.js belum tersedia');
+            }
+            
+            let loadingTask;
+            if (pdfBase64 && pdfBase64.length > 0) {
+                const binaryStr = atob(pdfBase64);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) {
+                    bytes[i] = binaryStr.charCodeAt(i);
+                }
+                loadingTask = pdfjsLib.getDocument({
+                    data: bytes,
+                    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                    cMapPacked: true
+                });
+            } else {
+                const encodedUrl = encodeURI(decodeURI(pdfUrl));
+                loadingTask = pdfjsLib.getDocument({
+                    url: encodedUrl,
+                    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                    cMapPacked: true
+                });
+            }
+            
+            const pdf = await loadingTask.promise;
+            const totalPages = pdf.numPages;
+            
+            if (statusSpan) {
+                statusSpan.textContent = totalPages + ' Halaman';
+            }
+            
+            pagesContainer.innerHTML = '';
+            
+            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                
+                // High resolution scaling (2.0) for crisp printing
+                const scale = 2.0;
+                const viewport = page.getViewport({ scale: scale });
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const ctx = canvas.getContext('2d');
+                
+                await page.render({
+                    canvasContext: ctx,
+                    viewport: viewport
+                }).promise;
+                
+                // Convert canvas to image for rock-solid print fidelity
+                const img = document.createElement('img');
+                img.src = canvas.toDataURL('image/jpeg', 0.95);
+                img.className = 'attachment-pdf-page-img';
+                img.alt = `${docTitle} - Hal ${pageNum}`;
+                
+                const pageWrapper = document.createElement('div');
+                pageWrapper.className = 'attachment-pdf-page-wrapper';
+                
+                if (totalPages > 1) {
+                    const badge = document.createElement('div');
+                    badge.className = 'attachment-pdf-page-badge';
+                    badge.innerHTML = `<small>📄 ${docTitle} &bull; <strong>Halaman ${pageNum} dari ${totalPages}</strong></small>`;
+                    pageWrapper.appendChild(badge);
+                }
+                
+                pageWrapper.appendChild(img);
+                pagesContainer.appendChild(pageWrapper);
+            }
+        } catch (err) {
+            console.error('Gagal memuat PDF:', pdfUrl, err);
+            if (statusSpan) {
+                statusSpan.textContent = 'Gagal memuat otomatis';
+            }
+            pagesContainer.innerHTML = `
+                <div class="pdf-fallback-box">
+                    <div style="font-weight: bold; margin-bottom: 3px;">⚠️ Dokumen PDF tidak dapat dimuat otomatis pada cetakan.</div>
+                    <div style="font-size: 8.5pt; color: #555; margin-bottom: 6px;">Berkas: ${docTitle}</div>
+                    <a href="${pdfUrl}" target="_blank" class="no-print btn-fallback-download">
+                        📥 Klik di sini untuk membuka / mengunduh berkas
+                    </a>
+                </div>
+            `;
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+        const pdfItems = document.querySelectorAll('.attachment-pdf-item');
+        const statusBanner = document.getElementById('printStatusBanner');
+        const statusText = document.getElementById('printStatusText');
+        const btnPrint = document.getElementById('btnPrintReport');
+        
+        if (pdfItems.length > 0) {
+            if (statusBanner) statusBanner.style.display = 'block';
+            if (btnPrint) {
+                btnPrint.disabled = true;
+                btnPrint.style.opacity = '0.7';
+                btnPrint.innerHTML = '<span class="loading-spinner"></span> Menyiapkan Nota PDF...';
+            }
+            
+            let count = 0;
+            for (const item of pdfItems) {
+                count++;
+                const title = item.getAttribute('data-title') || 'Lampiran';
+                if (statusText) {
+                    statusText.innerHTML = `Menyiapkan halaman nota lampiran (${count}/${pdfItems.length}): <strong>${title}</strong>...`;
+                }
+                await renderPdfAttachment(item);
+            }
+            
+            if (statusBanner) {
+                statusBanner.className = 'status-banner status-banner-success';
+                statusBanner.innerHTML = '✓ Seluruh lampiran nota PDF berhasil disiapkan dan terpasang pada laporan.';
+                setTimeout(() => {
+                    statusBanner.style.display = 'none';
+                }, 3500);
+            }
+            
+            if (btnPrint) {
+                btnPrint.disabled = false;
+                btnPrint.style.opacity = '1';
+                btnPrint.innerHTML = 'Cetak Laporan PDF';
+            }
+        }
+        
+        // Wait for all images (including newly rendered canvas images) to load
+        const allImages = Array.from(document.images);
+        await Promise.all(allImages.map(img => {
+            if (img.complete) return Promise.resolve();
+            return new Promise(resolve => {
+                img.onload = resolve;
+                img.onerror = resolve;
+            });
+        }));
+        
+        // Buffer to ensure DOM paint before opening print preview
+        setTimeout(() => {
             window.print();
         }, 500);
     });
