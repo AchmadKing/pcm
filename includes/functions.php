@@ -29,6 +29,48 @@ function formatNumber($number, $decimals = 2) {
 }
 
 /**
+ * Parse Indonesian formatted number / currency string to float
+ * Handles e.g. "10.000.000", "1.234,56", "1000", 1234.56, "Rp 50.000"
+ * @param mixed $value
+ * @return float
+ */
+function parseNumber($value) {
+    if ($value === null || $value === '') {
+        return 0.0;
+    }
+    if (is_int($value) || is_float($value)) {
+        return floatval($value);
+    }
+    $str = trim((string)$value);
+    // Remove currency prefix if any
+    $str = preg_replace('/^[^\d\-]+/', '', $str);
+    
+    // If both dot and comma exist, e.g. "1.234.567,89"
+    if (strpos($str, '.') !== false && strpos($str, ',') !== false) {
+        $str = str_replace('.', '', $str);
+        $str = str_replace(',', '.', $str);
+    } elseif (strpos($str, '.') !== false) {
+        // Only dots. E.g. "1.000" or "10.000.000" or "100.5"
+        if (substr_count($str, '.') > 1) {
+            $str = str_replace('.', '', $str);
+        } else {
+            // Exactly one dot. If 3 digits follow, it's thousands separator (e.g. 5.000, 50.000)
+            if (preg_match('/^\d+\.\d{3}$/', $str)) {
+                $str = str_replace('.', '', $str);
+            }
+        }
+    } elseif (strpos($str, ',') !== false) {
+        // Only comma, e.g. "100,5" -> "100.5"
+        $str = str_replace(',', '.', $str);
+    }
+    return floatval($str);
+}
+
+function parseRupiah($value) {
+    return parseNumber($value);
+}
+
+/**
  * Format volume - up to 4 decimals with a minimum of 2 decimals (trim trailing zeros beyond 2 decimals)
  * Examples: 1,0000 → 1,00; 1,5000 → 1,50; 0,0500 → 0,05; 1,2340 → 1,234; 1,2345 → 1,2345
  * @param float|string|null $number
@@ -57,16 +99,7 @@ function formatVolume($number, $minDecimals = 2, $maxDecimals = 4) {
     return $formatted;
 }
 
-/**
- * Parse Indonesian formatted number to float
- * @param string $number
- * @return float
- */
-function parseNumber($number) {
-    $number = str_replace('.', '', $number);
-    $number = str_replace(',', '.', $number);
-    return floatval($number);
-}
+
 
 /**
  * Format date to Indonesian format
@@ -1880,44 +1913,8 @@ function calculateProjectRealtimeStats($projectId) {
         $ahspRapPrices[$r['ahsp_code']] = floatval($r['total']);
     }
 
-    // Pre-compute actualization adjustments per subcategory
+    // Actualization adjustments: batchGetActualSpendingBySubcategory already includes net actualization
     $actualizationAdjustments = [];
-    $actualizedRequests = dbGetAll("
-        SELECT r.id as request_id, 
-               GREATEST(ra.remaining_upah - ra.consumed_upah, 0) + 
-               GREATEST(ra.remaining_material - ra.consumed_material, 0) + 
-               GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
-        FROM requests r
-        JOIN request_actuals ra ON ra.request_id = r.id
-        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1
-        HAVING total_remaining > 0
-    ", [$projectId]);
-
-    foreach ($actualizedRequests as $ar) {
-        $totalRemaining = floatval($ar['total_remaining']);
-        if ($totalRemaining <= 0) continue;
-
-        $reqItems = dbGetAll("
-            SELECT reqi.subcategory_id, SUM(reqi.total_price) as subcat_total
-            FROM request_items reqi
-            WHERE reqi.request_id = ?
-            GROUP BY reqi.subcategory_id
-        ", [$ar['request_id']]);
-
-        $reqTotal = 0;
-        foreach ($reqItems as $ri) {
-            $reqTotal += floatval($ri['subcat_total']);
-        }
-
-        if ($reqTotal > 0) {
-            foreach ($reqItems as $ri) {
-                $subcatId = intval($ri['subcategory_id']);
-                $proportion = floatval($ri['subcat_total']) / $reqTotal;
-                $deduction = $totalRemaining * $proportion;
-                $actualizationAdjustments[$subcatId] = ($actualizationAdjustments[$subcatId] ?? 0) + $deduction;
-            }
-        }
-    }
 
     // Pre-load actual spending per subcategory
     $actualSpendingMap = batchGetActualSpendingBySubcategory($projectId);
@@ -2089,25 +2086,293 @@ function batchGetRapAhspComponentBreakdowns($projectId) {
 
 /**
  * Batch-load actual spending per subcategory for a project.
+/**
+ * Synchronize and recalculate weekly progress and actual spending for a project.
+ * Ensures weekly_progress table and actual spending are 100% mathematically consistent
+ * with approved requests and actualization reports (sisa anggaran).
+ *
+ * @param int $projectId
+ * @param bool $persistToDb Whether to update weekly_progress table in database (default true)
+ * @param bool $forceRefresh Whether to bypass in-memory static cache (default false)
+ * @return array ['spending' => array, 'breakdown' => array, 'weekly' => array]
+ */
+function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefresh = false) {
+    static $cache = [];
+    $projectId = intval($projectId);
+    if (!$projectId) {
+        return ['spending' => [], 'breakdown' => [], 'weekly' => []];
+    }
+
+    if (!$forceRefresh && isset($cache[$projectId])) {
+        return $cache[$projectId];
+    }
+
+    $project = dbGetRow("SELECT id, name, start_date, duration_days FROM projects WHERE id = ?", [$projectId]);
+    if (!$project) {
+        return ['spending' => [], 'breakdown' => [], 'weekly' => []];
+    }
+
+    $weeklyRanges = [];
+    if (!empty($project['start_date']) && !empty($project['duration_days'])) {
+        $weeklyRanges = generateWeeklyRanges($project['start_date'], $project['duration_days']);
+    }
+    $weekRangeMap = [];
+    foreach ($weeklyRanges as $wr) {
+        $weekRangeMap[$wr['week_number']] = $wr;
+    }
+
+    // 1. Get all approved requests
+    $requests = dbGetAll("
+        SELECT r.id, r.request_number, r.target_week, r.week_number, r.is_actualized,
+               ra.remaining_upah, ra.remaining_material, ra.remaining_alat
+        FROM requests r
+        LEFT JOIN request_actuals ra ON ra.request_id = r.id
+        WHERE r.project_id = ? AND r.status = 'approved' AND (r.request_type IN ('rab', 'mixed') OR r.request_type IS NULL)
+        ORDER BY r.id ASC
+    ", [$projectId]);
+
+    if (empty($requests)) {
+        if ($persistToDb) {
+            dbExecute("UPDATE weekly_progress SET realization_amount = 0, updated_at = NOW() WHERE project_id = ? AND realization_amount > 0", [$projectId]);
+        }
+        $cache[$projectId] = ['spending' => [], 'breakdown' => [], 'weekly' => []];
+        return $cache[$projectId];
+    }
+
+    $reqIds = array_column($requests, 'id');
+    $placeholders = implode(',', array_fill(0, count($reqIds), '?'));
+
+    // 2. Fetch all request items for all approved requests in ONE query
+    $allItems = dbGetAll("
+        SELECT reqi.id, reqi.request_id, reqi.subcategory_id, reqi.subcat_details, reqi.item_code, reqi.item_type,
+               reqi.unit_price, reqi.coefficient, reqi.quantity, reqi.work_type, reqi.total_price,
+               pi.category as pi_category
+        FROM request_items reqi
+        LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
+        WHERE reqi.request_id IN ($placeholders)
+        ORDER BY reqi.request_id ASC, reqi.id ASC
+    ", array_merge([$projectId], $reqIds));
+
+    $itemsByReq = [];
+    foreach ($allItems as $item) {
+        $itemsByReq[$item['request_id']][] = $item;
+    }
+
+    // 3. Valid subcategories for this project (protect against orphaned references in deleted subcategories)
+    $validSubcatRows = dbGetAll("
+        SELECT rs.id 
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rc.project_id = ?
+    ", [$projectId]);
+    $validSubcatMap = array_flip(array_column($validSubcatRows, 'id'));
+
+    $spendingBySubcat = [];
+    $breakdownBySubcat = [];
+    $weeklyBySubcat = [];
+    $usedByItemSubcat = [];
+
+    foreach ($requests as $req) {
+        $reqId = intval($req['id']);
+        $targetWeek = intval($req['target_week'] ?: ($req['week_number'] ?: 1));
+        $reqItems = $itemsByReq[$reqId] ?? [];
+
+        // Calculate gross per subcategory & component for this request
+        $reqSubcatGross = [];
+        $reqCompGross = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+
+        foreach ($reqItems as $item) {
+            if (empty($item['subcategory_id']) && empty($item['subcat_details'])) {
+                continue;
+            }
+
+            // Determine component
+            $comp = strtolower(trim($item['item_type'] ?? ''));
+            if (!in_array($comp, ['upah', 'material', 'alat'])) {
+                $comp = strtolower(trim($item['pi_category'] ?? ''));
+            }
+            if (!in_array($comp, ['upah', 'material', 'alat'])) {
+                $comp = 'material';
+            }
+
+            $itemWorkType = $item['work_type'] ?? 'borongan';
+            if ($itemWorkType === 'harian') {
+                $subId = intval($item['subcategory_id']);
+                if ($subId > 0 && isset($validSubcatMap[$subId])) {
+                    $amt = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                    $reqSubcatGross[$subId][$comp] = ($reqSubcatGross[$subId][$comp] ?? 0.0) + $amt;
+                    $reqCompGross[$comp] += $amt;
+                }
+                continue;
+            }
+
+            $itemCoef = floatval($item['coefficient'] ?: $item['quantity']);
+            $itemPrice = floatval($item['unit_price']);
+            $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
+
+            if (!empty($subcatDetails) && is_array($subcatDetails)) {
+                $remaining = $itemCoef;
+                $itemCode = $item['item_code'];
+
+                foreach ($subcatDetails as $sd) {
+                    if ($remaining <= 0) break;
+                    $subId = intval($sd['subcategory_id']);
+                    if (!isset($validSubcatMap[$subId])) continue;
+
+                    $rapQty = floatval($sd['rap_qty'] ?? 0);
+                    $usedAlready = $usedByItemSubcat[$itemCode][$subId] ?? 0.0;
+                    $actualSisa = max(0.0, $rapQty - $usedAlready);
+
+                    $fillAmount = min($remaining, $actualSisa);
+                    if ($fillAmount <= 0) continue;
+
+                    $amt = $fillAmount * $itemPrice;
+                    $reqSubcatGross[$subId][$comp] = ($reqSubcatGross[$subId][$comp] ?? 0.0) + $amt;
+                    $reqCompGross[$comp] += $amt;
+
+                    $usedByItemSubcat[$itemCode][$subId] = $usedAlready + $fillAmount;
+                    $remaining -= $fillAmount;
+                }
+
+                if ($remaining > 0 && !empty($subcatDetails)) {
+                    $lastSubcatId = intval(end($subcatDetails)['subcategory_id']);
+                    if (isset($validSubcatMap[$lastSubcatId])) {
+                        $amt = $remaining * $itemPrice;
+                        $reqSubcatGross[$lastSubcatId][$comp] = ($reqSubcatGross[$lastSubcatId][$comp] ?? 0.0) + $amt;
+                        $reqCompGross[$comp] += $amt;
+                        $usedByItemSubcat[$itemCode][$lastSubcatId] = ($usedByItemSubcat[$itemCode][$lastSubcatId] ?? 0.0) + $remaining;
+                    }
+                }
+            } else {
+                $subId = intval($item['subcategory_id']);
+                if ($subId > 0 && isset($validSubcatMap[$subId])) {
+                    $amt = floatval($item['total_price'] ?: ($itemCoef * $itemPrice));
+                    $reqSubcatGross[$subId][$comp] = ($reqSubcatGross[$subId][$comp] ?? 0.0) + $amt;
+                    $reqCompGross[$comp] += $amt;
+                }
+            }
+        }
+
+        // Apply actualization sisa for this request
+        $isActualized = intval($req['is_actualized'] ?? 0) === 1;
+        $sisa = [
+            'upah' => $isActualized ? floatval($req['remaining_upah'] ?? 0) : 0.0,
+            'material' => $isActualized ? floatval($req['remaining_material'] ?? 0) : 0.0,
+            'alat' => $isActualized ? floatval($req['remaining_alat'] ?? 0) : 0.0
+        ];
+
+        // Deductions per component
+        $compDeductions = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+        $leftoverSisa = 0.0;
+        foreach (['upah', 'material', 'alat'] as $c) {
+            $gross = $reqCompGross[$c];
+            $rem = $sisa[$c];
+            if ($rem <= $gross) {
+                $compDeductions[$c] = $rem;
+            } else {
+                $compDeductions[$c] = $gross;
+                $leftoverSisa += ($rem - $gross);
+            }
+        }
+
+        // If leftover sisa, distribute across other components with remaining positive gross
+        if ($leftoverSisa > 0) {
+            $otherGross = 0.0;
+            foreach (['upah', 'material', 'alat'] as $c) {
+                $remainingGross = $reqCompGross[$c] - $compDeductions[$c];
+                if ($remainingGross > 0) $otherGross += $remainingGross;
+            }
+            if ($otherGross > 0) {
+                $toDist = min($leftoverSisa, $otherGross);
+                foreach (['upah', 'material', 'alat'] as $c) {
+                    $remainingGross = $reqCompGross[$c] - $compDeductions[$c];
+                    if ($remainingGross > 0) {
+                        $ded = $toDist * ($remainingGross / $otherGross);
+                        $compDeductions[$c] += $ded;
+                    }
+                }
+            }
+        }
+
+        // Net calculation per subcat & component
+        foreach ($reqSubcatGross as $subId => $compAmts) {
+            foreach (['upah', 'material', 'alat'] as $c) {
+                $grossAmt = floatval($compAmts[$c] ?? 0.0);
+                if ($grossAmt <= 0) continue;
+
+                $compGrossTotal = $reqCompGross[$c];
+                $deduction = 0.0;
+                if ($compDeductions[$c] > 0 && $compGrossTotal > 0) {
+                    $deduction = min($grossAmt, $compDeductions[$c] * ($grossAmt / $compGrossTotal));
+                }
+                $netAmt = max(0.0, $grossAmt - $deduction);
+
+                // Accumulate to weekly
+                if (!isset($weeklyBySubcat[$subId][$targetWeek])) {
+                    $weeklyBySubcat[$subId][$targetWeek] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+                }
+                $weeklyBySubcat[$subId][$targetWeek][$c] += $netAmt;
+                $weeklyBySubcat[$subId][$targetWeek]['total'] += $netAmt;
+
+                // Accumulate to total
+                if (!isset($breakdownBySubcat[$subId])) {
+                    $breakdownBySubcat[$subId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                }
+                $breakdownBySubcat[$subId][$c] += $netAmt;
+                $spendingBySubcat[$subId] = ($spendingBySubcat[$subId] ?? 0.0) + $netAmt;
+            }
+        }
+    }
+
+    if ($persistToDb) {
+        $activePairs = [];
+        foreach ($weeklyBySubcat as $subId => $weeks) {
+            foreach ($weeks as $wNum => $data) {
+                $netTotal = round($data['total'], 2);
+                $wStart = $weekRangeMap[$wNum]['start'] ?? null;
+                $wEnd = $weekRangeMap[$wNum]['end'] ?? null;
+                $activePairs[] = $subId . '_' . $wNum;
+
+                dbExecute("
+                    INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE 
+                        realization_amount = VALUES(realization_amount),
+                        week_start = VALUES(week_start),
+                        week_end = VALUES(week_end),
+                        updated_at = NOW()
+                ", [$projectId, $subId, $wNum, $wStart, $wEnd, $netTotal]);
+            }
+        }
+
+        // Set realization_amount = 0 for any old entries not in activePairs
+        $existingWp = dbGetAll("SELECT id, subcategory_id, week_number, realization_amount FROM weekly_progress WHERE project_id = ?", [$projectId]);
+        foreach ($existingWp as $ewp) {
+            $key = $ewp['subcategory_id'] . '_' . $ewp['week_number'];
+            if (!in_array($key, $activePairs) && floatval($ewp['realization_amount']) > 0) {
+                dbExecute("UPDATE weekly_progress SET realization_amount = 0, updated_at = NOW() WHERE id = ?", [$ewp['id']]);
+            }
+        }
+    }
+
+    $cache[$projectId] = [
+        'weekly' => $weeklyBySubcat,
+        'spending' => $spendingBySubcat,
+        'breakdown' => $breakdownBySubcat
+    ];
+    return $cache[$projectId];
+}
+
+/**
+ * Batch-load actual spending per subcategory for a project.
  * Returns a lookup map: [subcategory_id => float total]
  *
  * @param int $projectId
  * @return array
  */
 function batchGetActualSpendingBySubcategory($projectId) {
-    $rows = dbGetAll("
-        SELECT reqi.subcategory_id, COALESCE(SUM(reqi.total_price), 0) as total
-        FROM request_items reqi
-        JOIN requests req ON reqi.request_id = req.id
-        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type IN ('rab', 'mixed') OR req.request_type IS NULL) AND reqi.subcategory_id IS NOT NULL
-        GROUP BY reqi.subcategory_id
-    ", [$projectId]);
-
-    $map = [];
-    foreach ($rows as $row) {
-        $map[$row['subcategory_id']] = floatval($row['total']);
-    }
-    return $map;
+    $synced = syncProjectWeeklyProgress($projectId);
+    return $synced['spending'];
 }
 
 /**
@@ -2118,92 +2383,21 @@ function batchGetActualSpendingBySubcategory($projectId) {
  * @return array
  */
 function batchGetActualBreakdownBySubcategory($projectId) {
-    $rows = dbGetAll("
-        SELECT reqi.subcategory_id, 
-               pi.category as item_category,
-               COALESCE(SUM(reqi.unit_price * reqi.coefficient), 0) as category_total
-        FROM request_items reqi
-        JOIN requests req ON reqi.request_id = req.id
-        JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = req.project_id
-        WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type IN ('rab', 'mixed') OR req.request_type IS NULL) AND reqi.subcategory_id IS NOT NULL
-        GROUP BY reqi.subcategory_id, pi.category
-    ", [$projectId]);
-
-    $map = [];
-    foreach ($rows as $row) {
-        $subId = $row['subcategory_id'];
-        if (!isset($map[$subId])) {
-            $map[$subId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-        }
-        $cat = $row['item_category'] ?? '';
-        if (isset($map[$subId][$cat])) {
-            $map[$subId][$cat] = floatval($row['category_total']);
-        }
-    }
-    return $map;
+    $synced = syncProjectWeeklyProgress($projectId);
+    return $synced['breakdown'];
 }
 
 /**
  * Batch-load actualization adjustments per subcategory.
  * Returns: [subcategory_id => float deduction_amount]
+ * Note: syncProjectWeeklyProgress already factors in actualization sisa directly,
+ * so no additional adjustment is needed. Returning empty array prevents double deduction.
  *
  * @param int $projectId
  * @return array
  */
 function batchGetActualizationAdjustments($projectId) {
-    // Get all actualized requests with remaining budget
-    $actualizedRequests = dbGetAll("
-        SELECT r.id as request_id, 
-               GREATEST(ra.remaining_upah - ra.consumed_upah, 0) + 
-               GREATEST(ra.remaining_material - ra.consumed_material, 0) + 
-               GREATEST(ra.remaining_alat - ra.consumed_alat, 0) as total_remaining
-        FROM requests r
-        JOIN request_actuals ra ON ra.request_id = r.id
-        WHERE r.project_id = ? AND r.status = 'approved' AND r.is_actualized = 1 AND (r.request_type IN ('rab', 'mixed') OR r.request_type IS NULL)
-        HAVING total_remaining > 0
-    ", [$projectId]);
-
-    if (empty($actualizedRequests)) {
-        return [];
-    }
-
-    // Get all request items grouped by request_id and subcategory in ONE query
-    $requestIds = array_column($actualizedRequests, 'request_id');
-    $placeholders = implode(',', array_fill(0, count($requestIds), '?'));
-    $allReqItems = dbGetAll("
-        SELECT reqi.request_id, reqi.subcategory_id, SUM(reqi.total_price) as subcat_total
-        FROM request_items reqi
-        WHERE reqi.request_id IN ($placeholders)
-        GROUP BY reqi.request_id, reqi.subcategory_id
-    ", $requestIds);
-
-    // Build lookup: [request_id => [subcategory_id => total, ...]]
-    $reqItemMap = [];
-    $reqTotals = [];
-    foreach ($allReqItems as $ri) {
-        $reqId = $ri['request_id'];
-        $reqItemMap[$reqId][$ri['subcategory_id']] = floatval($ri['subcat_total']);
-        $reqTotals[$reqId] = ($reqTotals[$reqId] ?? 0) + floatval($ri['subcat_total']);
-    }
-
-    // Calculate adjustments
-    $adjustments = [];
-    foreach ($actualizedRequests as $ar) {
-        $totalRemaining = floatval($ar['total_remaining']);
-        if ($totalRemaining <= 0) continue;
-
-        $reqId = $ar['request_id'];
-        $reqTotal = $reqTotals[$reqId] ?? 0;
-        if ($reqTotal <= 0) continue;
-
-        foreach (($reqItemMap[$reqId] ?? []) as $subcatId => $subcatTotal) {
-            $proportion = $subcatTotal / $reqTotal;
-            $deduction = $totalRemaining * $proportion;
-            $adjustments[$subcatId] = ($adjustments[$subcatId] ?? 0) + $deduction;
-        }
-    }
-
-    return $adjustments;
+    return [];
 }
 
 /**

@@ -70,7 +70,8 @@ if ($selectedReqId > 0) {
     $selectedRequest = dbGetRow("
         SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name,
                upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
-               ua.full_name as approved_by_name, ua.role as approved_by_role
+               ua.full_name as approved_by_name, ua.role as approved_by_role,
+               (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
         FROM requests req
         LEFT JOIN projects p ON req.project_id = p.id
         LEFT JOIN users u ON req.created_by = u.id
@@ -373,12 +374,21 @@ if (!empty($project['start_date']) && !empty($project['duration_days'])) {
 
                 <!-- Sisa Dana Lapangan Alert (if any) -->
                 <?php if ($availableSisaLapangan > 0 && $isAdmin): ?>
-                <div class="alert alert-success py-2 mb-3 d-flex justify-content-between align-items-center">
-                    <div>
-                        <i class="mdi mdi-cash-refund text-success fs-5 me-1"></i>
-                        <small>Tersedia <strong>Sisa Anggaran di Lapangan</strong> dari aktualisasi sebelumnya yang akan otomatis memotong realisasi pengajuan ini (FIFO):</small>
+                <div class="alert alert-success py-2 mb-3">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <i class="mdi mdi-cash-refund text-success fs-5 me-1"></i>
+                            <span class="fw-semibold">Tersedia Sisa Anggaran di Lapangan:</span>
+                            <span class="badge bg-success font-size-12 ms-1"><?= formatRupiah($availableSisaLapangan) ?></span>
+                        </div>
+                        <small class="text-muted">
+                            <?php if (!$isNonRab): ?>
+                            Akan memotong realisasi pengajuan ini secara otomatis (FIFO)
+                            <?php else: ?>
+                            Tidak memotong pengajuan ini (Biaya Lain-Lain / Non-RAB)
+                            <?php endif; ?>
+                        </small>
                     </div>
-                    <strong class="text-success ms-2 text-nowrap"><?= formatRupiah($availableSisaLapangan) ?></strong>
                 </div>
                 <?php endif; ?>
 
@@ -474,11 +484,82 @@ if (!empty($project['start_date']) && !empty($project['duration_days'])) {
                     <?php endif; ?>
                 <?php endif; ?>
 
-                <!-- Grand Total Box -->
-                <div class="d-flex justify-content-between align-items-center p-3 rounded bg-dark text-white mb-3">
-                    <span class="fs-6 fw-bold">TOTAL NILAI PENGAJUAN</span>
-                    <span class="fs-5 fw-bold text-warning"><?= formatRupiah($selectedRequest['total_amount'] ?? 0) ?></span>
+                <?php
+                // Calculate authoritative gross total matching the list
+                $calculatedGrossTotal = 0;
+                if ($isNonRab) {
+                    $calculatedGrossTotal = $totalNonRab ?? 0;
+                } elseif ($isMixed) {
+                    $calculatedGrossTotal = ($totalDirect ?? 0) + ($totalNonRab ?? 0);
+                } else {
+                    $calculatedGrossTotal = $totalDirect ?? 0;
+                }
+                if ($calculatedGrossTotal <= 0 && !empty($selectedRequest['total_amount'])) {
+                    $calculatedGrossTotal = floatval($selectedRequest['total_amount']);
+                }
+
+                // Sisa deduction applies to direct items (pure RAB or mixed direct portion)
+                $deductibleAmount = (!$isNonRab) ? ($totalDirect ?? $calculatedGrossTotal) : 0;
+                $potonganSisa = ($isAdmin && $availableSisaLapangan > 0) ? min($availableSisaLapangan, $deductibleAmount) : 0;
+                $totalNettTransfer = max(0, $calculatedGrossTotal - $potonganSisa);
+                $sisaSetelahnya = max(0, $availableSisaLapangan - $potonganSisa);
+                ?>
+
+                <!-- Grand Total & Calculation Box -->
+                <?php if ($potonganSisa > 0): ?>
+                <div class="card border border-warning shadow-sm mb-3">
+                    <div class="card-header bg-dark text-white py-2 d-flex justify-content-between align-items-center">
+                        <span class="fw-bold"><i class="mdi mdi-calculator me-1 text-warning"></i> RINCIAN PERHITUNGAN NILAI PENGAJUAN</span>
+                        <span class="badge bg-warning text-dark font-size-10"><i class="mdi mdi-information-outline"></i> Ada Pemotongan Sisa Lapangan</span>
+                    </div>
+                    <div class="card-body p-3 bg-light">
+                        <!-- 1. Total Pengajuan -->
+                        <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                            <div>
+                                <strong class="text-dark font-size-13">Total Nilai Pengajuan</strong>
+                                <small class="text-muted d-block font-size-11">
+                                    <?php if ($isMixed): ?>
+                                    Direct Cost (<?= formatRupiah($totalDirect ?? 0) ?>) + Biaya Lain-Lain (<?= formatRupiah($totalNonRab ?? 0) ?>)
+                                    <?php else: ?>
+                                    Total akumulasi dari seluruh item yang diajukan pada rincian di atas
+                                    <?php endif; ?>
+                                </small>
+                            </div>
+                            <span class="fs-6 fw-bold text-dark"><?= formatRupiah($calculatedGrossTotal) ?></span>
+                        </div>
+
+                        <!-- 2. Potongan Sisa Lapangan -->
+                        <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                            <div>
+                                <span class="fw-bold text-success font-size-13"><i class="mdi mdi-minus-circle-outline me-1"></i> Potongan Sisa Anggaran Lapangan (FIFO)</span>
+                                <small class="text-muted d-block font-size-11">
+                                    Dipotong dari total sisa anggaran riil lapangan (<?= formatRupiah($availableSisaLapangan) ?>)
+                                </small>
+                            </div>
+                            <span class="fs-6 fw-bold text-success">- <?= formatRupiah($potonganSisa) ?></span>
+                        </div>
+
+                        <!-- 3. Total Nett Ditransfer -->
+                        <div class="d-flex justify-content-between align-items-center p-3 mt-2 rounded bg-dark text-white">
+                            <div>
+                                <span class="fs-6 fw-bold text-warning text-uppercase d-block">TOTAL DANA DITRANSFER (NETT)</span>
+                                <small class="text-white-50">Dana kas baru yang perlu dicairkan ke lapangan untuk pengajuan ini</small>
+                            </div>
+                            <div class="text-end">
+                                <span class="fs-4 fw-bold text-warning"><?= formatRupiah($totalNettTransfer) ?></span>
+                                <small class="d-block text-white-50 font-size-11 mt-1">
+                                    Proyeksi sisa anggaran di lapangan setelah pengajuan ini: <strong class="<?= $sisaSetelahnya > 0 ? 'text-success' : 'text-white' ?>"><?= formatRupiah($sisaSetelahnya) ?></strong>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                <?php else: ?>
+                <div class="d-flex justify-content-between align-items-center p-3 rounded bg-dark text-white mb-3 shadow-sm">
+                    <span class="fs-6 fw-bold text-uppercase">TOTAL NILAI PENGAJUAN</span>
+                    <span class="fs-4 fw-bold text-warning"><?= formatRupiah($calculatedGrossTotal) ?></span>
+                </div>
+                <?php endif; ?>
 
                 <!-- Approval / Rejection Action Form -->
                 <div class="card border border-primary mt-3">

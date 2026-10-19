@@ -41,26 +41,16 @@ if ($project['status'] !== 'draft' || $hasWeeklyHistory) {
     }
 }
 
-// Get all weekly progress data for this project (for performance)
-$weeklyData = [];
-if ($showWeeklyColumns) {
-    $allWeeklyProgress = dbGetAll("
-        SELECT subcategory_id, week_number, realization_amount
-        FROM weekly_progress
-        WHERE project_id = ?
-    ", [$projectId]);
-    
-    foreach ($allWeeklyProgress as $wp) {
-        $weeklyData[$wp['subcategory_id']][$wp['week_number']] = $wp['realization_amount'];
-    }
-}
+// Synchronize and get weekly progress & actual spending data (guarantees consistency and self-heals)
+$syncedProgress = syncProjectWeeklyProgress($projectId, true);
+$batchActualSpending = $syncedProgress['spending'];
+$batchActualBreakdown = $syncedProgress['breakdown'];
+$weeklyData = $syncedProgress['weekly'];
 
 // Batch-load ALL data needed for subcategory calculations (instead of N queries per subcategory)
 $rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
 $rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
-$actualizationAdjustments = batchGetActualizationAdjustments($projectId);
-$batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
-$batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
+$actualizationAdjustments = []; // already factored into syncedProgress
 
 // Get Biaya Lain-Lain / Non-RAB data
 $nonRabTransactions = getProjectNonRabTransactions($projectId);
@@ -187,11 +177,17 @@ foreach ($categories as $cat) {
         if ($showWeeklyColumns) {
             foreach ($weeklyRanges as $week) {
                 $weekNum = $week['week_number'];
-                $weekRealization = $subWeeklyData[$weekNum] ?? 0;
-                if (!isset($catWeeklyTotals[$weekNum])) {
-                    $catWeeklyTotals[$weekNum] = 0;
+                $wData = $subWeeklyData[$weekNum] ?? ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                if (!is_array($wData)) {
+                    $wData = ['total' => floatval($wData), 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
                 }
-                $catWeeklyTotals[$weekNum] += $weekRealization;
+                if (!isset($catWeeklyTotals[$weekNum])) {
+                    $catWeeklyTotals[$weekNum] = ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                }
+                $catWeeklyTotals[$weekNum]['total'] += $wData['total'];
+                $catWeeklyTotals[$weekNum]['upah'] += $wData['upah'];
+                $catWeeklyTotals[$weekNum]['material'] += $wData['material'];
+                $catWeeklyTotals[$weekNum]['alat'] += $wData['alat'];
             }
         }
         
@@ -293,12 +289,19 @@ if (!empty($nonRabTransactions)) {
             foreach ($weeklyRanges as $week) {
                 $wNum = $week['week_number'];
                 $isTargetWeek = ($wNum === $txWeek);
-                $txWeekly[$wNum] = $isTargetWeek ? $txAmount : 0;
+                $wAmt = $isTargetWeek ? $txAmount : 0;
+                $txWeekly[$wNum] = [
+                    'total' => $wAmt,
+                    'upah' => 0.0,
+                    'material' => $wAmt,
+                    'alat' => 0.0
+                ];
                 if (!isset($nonRabWeeklyTotals[$wNum])) {
-                    $nonRabWeeklyTotals[$wNum] = 0;
+                    $nonRabWeeklyTotals[$wNum] = ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
                 }
                 if ($isTargetWeek) {
-                    $nonRabWeeklyTotals[$wNum] += $txAmount;
+                    $nonRabWeeklyTotals[$wNum]['total'] += $txAmount;
+                    $nonRabWeeklyTotals[$wNum]['material'] += $txAmount;
                 }
             }
         }
@@ -459,7 +462,7 @@ if (!empty($nonRabTransactions)) {
 
 <?php 
 // Calculate total columns for footer (base + weekly)
-$baseColCount = 9; // No, Uraian, RAP, Upah, Material, Alat, Total, Selisih, Progress
+$baseColCount = ($categoryFilter === 'all') ? 9 : 6; // No, Uraian, RAP, Upah, Material, Alat, Total, Selisih, Progress
 $weeklyColCount = $showWeeklyColumns ? count($weeklyRanges) * 3 : 0; // Each week has 3 columns
 $totalColCount = $baseColCount + $weeklyColCount;
 
@@ -509,7 +512,10 @@ $lastStickyRight = 1220; // Total width of sticky area
 /* Allow uraian column to wrap text normally */
 .actual-table .col-uraian {
     white-space: normal;
+    min-width: 220px;
     max-width: 220px;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 /* All thead th default styling */
@@ -555,12 +561,48 @@ $lastStickyRight = 1220; // Total width of sticky area
 .col-progress { min-width: 120px; max-width: 120px; }
 <?php endif; ?>
 
+/* Category Header Row (spans all columns) */
+.actual-table tr.cat-header-row td.cat-header-cell {
+    background-color: #cfe2ff !important;
+    border-color: #b6d4fe !important;
+    padding: 8px 12px !important;
+    white-space: normal !important;
+}
+
+.actual-table .cat-header-content {
+    position: sticky;
+    left: 12px;
+    display: inline-flex;
+    align-items: center;
+    white-space: normal;
+    word-break: break-word;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #052c65;
+}
+
+/* Colspan 2 label sticky (Col 0 + Col 1 = 270px) */
+.col-label-sticky {
+    left: 0px;
+    min-width: 270px;
+    max-width: 270px;
+    width: 270px;
+    box-sizing: border-box;
+    white-space: normal;
+    word-break: break-word;
+}
+
 /* Row background colors for sticky cells */
 .table-primary .sticky-col { background-color: #cfe2ff !important; }
 .table-secondary .sticky-col { background-color: #e2e3e5 !important; }
 .table-dark .sticky-col { background-color: #212529 !important; color: #fff !important; }
 .table-light .sticky-col { background-color: #f8f9fa !important; }
 .sub-row .sticky-col { background-color: #fff !important; }
+
+.table-secondary .col-label-sticky { background-color: #e2e3e5 !important; }
+.table-dark .col-label-sticky { background-color: #212529 !important; color: #fff !important; }
+.table-light .col-label-sticky { background-color: #f8f9fa !important; }
+.table-primary .col-label-sticky { background-color: #cfe2ff !important; }
 
 /* Weekly column styling */
 .weekly-col {
@@ -724,10 +766,17 @@ $lastStickyRight = 1220; // Total width of sticky area
                 if ($showWeeklyColumns) {
                     foreach ($weeklyRanges as $week) {
                         $weekNum = $week['week_number'];
-                        if (!isset($grandWeeklyTotals[$weekNum])) {
-                            $grandWeeklyTotals[$weekNum] = 0;
+                        $catWData = $data['weekly_totals'][$weekNum] ?? ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                        if (!is_array($catWData)) {
+                            $catWData = ['total' => floatval($catWData), 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
                         }
-                        $grandWeeklyTotals[$weekNum] += $data['weekly_totals'][$weekNum] ?? 0;
+                        if (!isset($grandWeeklyTotals[$weekNum])) {
+                            $grandWeeklyTotals[$weekNum] = ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                        }
+                        $grandWeeklyTotals[$weekNum]['total'] += $catWData['total'];
+                        $grandWeeklyTotals[$weekNum]['upah'] += $catWData['upah'];
+                        $grandWeeklyTotals[$weekNum]['material'] += $catWData['material'];
+                        $grandWeeklyTotals[$weekNum]['alat'] += $catWData['alat'];
                     }
                 }
                 
@@ -739,26 +788,12 @@ $lastStickyRight = 1220; // Total width of sticky area
                 }
             ?>
             <!-- Category Header -->
-            <tr class="table-primary">
-                <td colspan="2" class="sticky-col col-no" style="left: 0;">
-                    <strong><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
+            <tr class="table-primary cat-header-row">
+                <td colspan="<?= $totalColCount ?>" class="cat-header-cell">
+                    <div class="cat-header-content">
+                        <strong><?= sanitize($cat['code']) ?>. <?= sanitize($cat['name']) ?></strong>
+                    </div>
                 </td>
-                <td class="sticky-col col-rap"></td>
-                <?php if ($categoryFilter === 'all'): ?>
-                <td class="col-upah"></td>
-                <td class="col-material"></td>
-                <td class="col-alat"></td>
-                <td class="col-total"></td>
-                <?php else: ?>
-                <td class="col-upah"></td>
-                <?php endif; ?>
-                <td class="col-selisih"></td>
-                <td class="col-progress"></td>
-                <?php if ($showWeeklyColumns): ?>
-                <?php for ($i = 0; $i < count($weeklyRanges) * 3; $i++): ?>
-                <td class="weekly-col"></td>
-                <?php endfor; ?>
-                <?php endif; ?>
             </tr>
             
             <!-- Subcategory Items -->
@@ -823,8 +858,20 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
-                    $weekRealization = $sub['weekly'][$weekNum] ?? 0;
-                    $weekBobot = $sub['target_total'] > 0 ? ($weekRealization / $sub['target_total']) * 100 : 0;
+                    $wData = $sub['weekly'][$weekNum] ?? ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    if (!is_array($wData)) {
+                        $wData = ['total' => floatval($wData), 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    }
+                    if ($categoryFilter === 'all') {
+                        $weekRealization = $wData['total'];
+                    } elseif ($categoryFilter === 'upah') {
+                        $weekRealization = $wData['upah'];
+                    } elseif ($categoryFilter === 'material') {
+                        $weekRealization = $wData['material'];
+                    } else { // alat
+                        $weekRealization = $wData['alat'];
+                    }
+                    $weekBobot = $displayTarget > 0 ? ($weekRealization / $displayTarget) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <?= $weekRealization > 0 ? formatNumber($weekRealization, 0) : '<span class="text-muted">0</span>' ?>
@@ -880,7 +927,7 @@ $lastStickyRight = 1220; // Total width of sticky area
                 $catSelisihClass = $catDisplaySelisih < 0 ? 'text-danger' : 'text-success';
             ?>
             <tr class="table-secondary">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
+                <td colspan="2" class="text-end sticky-col col-label-sticky" style="left: 0;"><strong>JUMLAH <?= sanitize($cat['code']) ?></strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($catDisplayTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary col-upah"><strong><?= formatNumber($data['actual_upah'], 2) ?></strong></td>
@@ -910,8 +957,20 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
-                    $catWeekRealization = $data['weekly_totals'][$weekNum] ?? 0;
-                    $catWeekBobot = $data['target_total'] > 0 ? ($catWeekRealization / $data['target_total']) * 100 : 0;
+                    $catWData = $data['weekly_totals'][$weekNum] ?? ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    if (!is_array($catWData)) {
+                        $catWData = ['total' => floatval($catWData), 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    }
+                    if ($categoryFilter === 'all') {
+                        $catWeekRealization = $catWData['total'];
+                    } elseif ($categoryFilter === 'upah') {
+                        $catWeekRealization = $catWData['upah'];
+                    } elseif ($categoryFilter === 'material') {
+                        $catWeekRealization = $catWData['material'];
+                    } else { // alat
+                        $catWeekRealization = $catWData['alat'];
+                    }
+                    $catWeekBobot = $catDisplayTarget > 0 ? ($catWeekRealization / $catDisplayTarget) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <strong><?= $catWeekRealization > 0 ? formatNumber($catWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
@@ -971,7 +1030,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             ?>
             <!-- Grand Total Row -->
             <tr class="table-dark">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL<?= $categoryFilter !== 'all' ? ' (' . strtoupper($categoryFilter) . ')' : '' ?></strong></td>
+                <td colspan="2" class="text-end sticky-col col-label-sticky" style="left: 0;"><strong>JUMLAH TOTAL<?= $categoryFilter !== 'all' ? ' (' . strtoupper($categoryFilter) . ')' : '' ?></strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($grandDisplayTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="text-end text-primary col-upah"><strong><?= formatNumber($grandActualUpah, 2) ?></strong></td>
@@ -997,8 +1056,20 @@ $lastStickyRight = 1220; // Total width of sticky area
                 <?php if ($showWeeklyColumns): ?>
                 <?php foreach ($weeklyRanges as $week): 
                     $weekNum = $week['week_number'];
-                    $grandWeekRealization = $grandWeeklyTotals[$weekNum] ?? 0;
-                    $grandWeekBobot = $grandTarget > 0 ? ($grandWeekRealization / $grandTarget) * 100 : 0;
+                    $grandWData = $grandWeeklyTotals[$weekNum] ?? ['total' => 0.0, 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    if (!is_array($grandWData)) {
+                        $grandWData = ['total' => floatval($grandWData), 'upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
+                    }
+                    if ($categoryFilter === 'all') {
+                        $grandWeekRealization = $grandWData['total'];
+                    } elseif ($categoryFilter === 'upah') {
+                        $grandWeekRealization = $grandWData['upah'];
+                    } elseif ($categoryFilter === 'material') {
+                        $grandWeekRealization = $grandWData['material'];
+                    } else { // alat
+                        $grandWeekRealization = $grandWData['alat'];
+                    }
+                    $grandWeekBobot = $grandDisplayTarget > 0 ? ($grandWeekRealization / $grandDisplayTarget) * 100 : 0;
                 ?>
                 <td class="text-end weekly-col">
                     <strong><?= $grandWeekRealization > 0 ? formatNumber($grandWeekRealization, 0) : '<span class="text-muted">0</span>' ?></strong>
@@ -1014,7 +1085,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             </tr>
             <!-- PPN Row -->
             <tr class="table-light">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>PPN <?= number_format($ppnPercentage, 0) ?>%</strong></td>
+                <td colspan="2" class="text-end sticky-col col-label-sticky" style="left: 0;"><strong>PPN <?= number_format($ppnPercentage, 0) ?>%</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($ppnTarget, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>
@@ -1036,7 +1107,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             </tr>
             <!-- Total + PPN Row -->
             <tr class="table-light">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL (TERMASUK PPN)</strong></td>
+                <td colspan="2" class="text-end sticky-col col-label-sticky" style="left: 0;"><strong>JUMLAH TOTAL (TERMASUK PPN)</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatNumber($totalTargetWithPpn, 2) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>
@@ -1058,7 +1129,7 @@ $lastStickyRight = 1220; // Total width of sticky area
             </tr>
             <!-- Rounded Total Row -->
             <tr class="table-primary">
-                <td colspan="2" class="text-end sticky-col col-no" style="left: 0;"><strong>JUMLAH TOTAL DIBULATKAN</strong></td>
+                <td colspan="2" class="text-end sticky-col col-label-sticky" style="left: 0;"><strong>JUMLAH TOTAL DIBULATKAN</strong></td>
                 <td class="text-end sticky-col col-rap"><strong><?= formatRupiah($totalTargetRounded) ?></strong></td>
                 <?php if ($categoryFilter === 'all'): ?>
                 <td class="col-upah"></td>

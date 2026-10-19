@@ -349,7 +349,7 @@ $totalUnconsumedSisa = floatval($sisaData['total_unconsumed'] ?? 0);
                                 </div>
                                 <div class="card-body p-2">
                                     <label class="form-label small mb-1">Sisa Anggaran (Rp)</label>
-                                    <input type="number" class="form-control form-control-sm remaining-input" name="remaining_upah" id="inputSisaUpah" min="0" step="1" value="0">
+                                    <input type="text" inputmode="numeric" autocomplete="off" class="form-control form-control-sm remaining-input" name="remaining_upah" id="inputSisaUpah" value="0">
                                     <label class="form-label small mb-1 mt-2">Catatan Sisa Upah</label>
                                     <textarea class="form-control form-control-sm" name="notes_upah" id="notesUpah" rows="2" placeholder="Catatan jika ada sisa upah..."></textarea>
                                 </div>
@@ -364,7 +364,7 @@ $totalUnconsumedSisa = floatval($sisaData['total_unconsumed'] ?? 0);
                                 </div>
                                 <div class="card-body p-2">
                                     <label class="form-label small mb-1">Sisa Anggaran (Rp)</label>
-                                    <input type="number" class="form-control form-control-sm remaining-input" name="remaining_material" id="inputSisaMaterial" min="0" step="1" value="0">
+                                    <input type="text" inputmode="numeric" autocomplete="off" class="form-control form-control-sm remaining-input" name="remaining_material" id="inputSisaMaterial" value="0">
                                     <label class="form-label small mb-1 mt-2">Catatan Sisa Material</label>
                                     <textarea class="form-control form-control-sm" name="notes_material" id="notesMaterial" rows="2" placeholder="Catatan jika ada sisa material..."></textarea>
                                 </div>
@@ -379,7 +379,7 @@ $totalUnconsumedSisa = floatval($sisaData['total_unconsumed'] ?? 0);
                                 </div>
                                 <div class="card-body p-2">
                                     <label class="form-label small mb-1">Sisa Anggaran (Rp)</label>
-                                    <input type="number" class="form-control form-control-sm remaining-input" name="remaining_alat" id="inputSisaAlat" min="0" step="1" value="0">
+                                    <input type="text" inputmode="numeric" autocomplete="off" class="form-control form-control-sm remaining-input" name="remaining_alat" id="inputSisaAlat" value="0">
                                     <label class="form-label small mb-1 mt-2">Catatan Sisa Alat</label>
                                     <textarea class="form-control form-control-sm" name="notes_alat" id="notesAlat" rows="2" placeholder="Catatan jika ada sisa alat..."></textarea>
                                 </div>
@@ -475,21 +475,21 @@ function openActualModal(reqId, viewOnly = false) {
         $('#badgeMaxMaterial').text('Maks: Rp ' + currentModalMaxTotals.material.toLocaleString('id-ID'));
         $('#badgeMaxAlat').text('Maks: Rp ' + currentModalMaxTotals.alat.toLocaleString('id-ID'));
 
-        $('#inputSisaUpah').attr('max', currentModalMaxTotals.upah).prop('disabled', currentModalMaxTotals.upah <= 0);
-        $('#inputSisaMaterial').attr('max', currentModalMaxTotals.material).prop('disabled', currentModalMaxTotals.material <= 0);
-        $('#inputSisaAlat').attr('max', currentModalMaxTotals.alat).prop('disabled', currentModalMaxTotals.alat <= 0);
+        $('#inputSisaUpah').attr('data-max', currentModalMaxTotals.upah).prop('disabled', currentModalMaxTotals.upah <= 0);
+        $('#inputSisaMaterial').attr('data-max', currentModalMaxTotals.material).prop('disabled', currentModalMaxTotals.material <= 0);
+        $('#inputSisaAlat').attr('data-max', currentModalMaxTotals.alat).prop('disabled', currentModalMaxTotals.alat <= 0);
 
         if (res.actual) {
-            $('#inputSisaUpah').val(res.actual.remaining_upah || 0);
-            $('#inputSisaMaterial').val(res.actual.remaining_material || 0);
-            $('#inputSisaAlat').val(res.actual.remaining_alat || 0);
+            $('#inputSisaUpah').val(formatNumber(res.actual.remaining_upah || 0, 0));
+            $('#inputSisaMaterial').val(formatNumber(res.actual.remaining_material || 0, 0));
+            $('#inputSisaAlat').val(formatNumber(res.actual.remaining_alat || 0, 0));
             $('#notesUpah').val(res.actual.notes_upah || '');
             $('#notesMaterial').val(res.actual.notes_material || '');
             $('#notesAlat').val(res.actual.notes_alat || '');
         } else {
-            $('#inputSisaUpah').val(0);
-            $('#inputSisaMaterial').val(0);
-            $('#inputSisaAlat').val(0);
+            $('#inputSisaUpah').val('0');
+            $('#inputSisaMaterial').val('0');
+            $('#inputSisaAlat').val('0');
             $('#notesUpah').val('');
             $('#notesMaterial').val('');
             $('#notesAlat').val('');
@@ -525,9 +525,9 @@ function openActualModal(reqId, viewOnly = false) {
 }
 
 function recalculateLiveActualModal() {
-    const sUpah = Math.max(0, parseFloat($('#inputSisaUpah').val()) || 0);
-    const sMat = Math.max(0, parseFloat($('#inputSisaMaterial').val()) || 0);
-    const sAlat = Math.max(0, parseFloat($('#inputSisaAlat').val()) || 0);
+    const sUpah = Math.max(0, (typeof parseNumber === 'function' ? parseNumber($('#inputSisaUpah').val()) : parseFloat($('#inputSisaUpah').val().replace(/\./g, ''))) || 0);
+    const sMat = Math.max(0, (typeof parseNumber === 'function' ? parseNumber($('#inputSisaMaterial').val()) : parseFloat($('#inputSisaMaterial').val().replace(/\./g, ''))) || 0);
+    const sAlat = Math.max(0, (typeof parseNumber === 'function' ? parseNumber($('#inputSisaAlat').val()) : parseFloat($('#inputSisaAlat').val().replace(/\./g, ''))) || 0);
     const totalSisa = sUpah + sMat + sAlat;
     const dibelanjakan = Math.max(0, currentModalMaxTotals.grand - totalSisa);
 
@@ -536,10 +536,16 @@ function recalculateLiveActualModal() {
 }
 
 $(document).on('input', '.remaining-input', function() {
-    const maxVal = parseFloat($(this).attr('max')) || 0;
-    let curVal = parseFloat($(this).val()) || 0;
-    if (curVal > maxVal) {
-        $(this).val(maxVal);
+    const maxVal = parseFloat($(this).attr('data-max') || $(this).attr('max')) || 0;
+    
+    // Live format with thousands dots as user types
+    if (typeof formatRupiahInput === 'function') {
+        formatRupiahInput(this, false);
+    }
+    
+    let curVal = (typeof parseNumber === 'function' ? parseNumber($(this).val()) : parseFloat($(this).val().replace(/\./g, ''))) || 0;
+    if (maxVal > 0 && curVal > maxVal) {
+        $(this).val(typeof formatNumber === 'function' ? formatNumber(maxVal, 0) : maxVal.toLocaleString('id-ID'));
     }
     recalculateLiveActualModal();
 });
@@ -568,6 +574,14 @@ function submitActualModalForm() {
     const form = document.getElementById('actualModalForm');
     const formData = new FormData(form);
     const btn = $('#btnSaveActualModal');
+
+    // Make sure pure numeric unformatted values are sent
+    const cleanUpah = typeof parseNumber === 'function' ? parseNumber($('#inputSisaUpah').val()) : parseFloat($('#inputSisaUpah').val().replace(/\./g, '')) || 0;
+    const cleanMaterial = typeof parseNumber === 'function' ? parseNumber($('#inputSisaMaterial').val()) : parseFloat($('#inputSisaMaterial').val().replace(/\./g, '')) || 0;
+    const cleanAlat = typeof parseNumber === 'function' ? parseNumber($('#inputSisaAlat').val()) : parseFloat($('#inputSisaAlat').val().replace(/\./g, '')) || 0;
+    formData.set('remaining_upah', cleanUpah);
+    formData.set('remaining_material', cleanMaterial);
+    formData.set('remaining_alat', cleanAlat);
 
     btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Menyimpan...');
 

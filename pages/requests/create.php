@@ -848,6 +848,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $vi['notes']
             ]);
         }
+
+        // Ensure requests.total_amount matches the exact sum of inserted request_items
+        dbExecute("
+            UPDATE requests 
+            SET total_amount = (
+                SELECT COALESCE(SUM(CASE WHEN request_type = 'non_rab' THEN quantity * unit_price ELSE total_price END), 0)
+                FROM request_items 
+                WHERE request_id = ?
+            )
+            WHERE id = ?
+        ", [$requestId, $requestId]);
         
         // Ensure upload directory exists
         $uploadDir = __DIR__ . '/../../uploads/receipts/';
@@ -1797,17 +1808,24 @@ $(document).ready(function() {
     }
     
     function autoFormatInput(input) {
-        let val = input.val().replace(/[^\d,]/g, '');
-        let parts = val.split(',');
-        let intPart = parts[0].replace(/\./g, '');
-        if (intPart) {
-            intPart = parseInt(intPart).toLocaleString('id-ID');
+        if (typeof formatRupiahInput === 'function') {
+            formatRupiahInput(input, true);
+        } else {
+            let el = input instanceof jQuery ? input[0] : input;
+            if (!el) return;
+            let val = el.value.replace(/[^\d,]/g, '');
+            let parts = val.split(',');
+            let intPart = parts[0].replace(/\./g, '');
+            if (intPart.length > 1 && intPart.startsWith('0')) {
+                intPart = intPart.replace(/^0+/, '') || '0';
+            }
+            let formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            let result = formattedInt;
+            if (parts.length > 1) {
+                result += ',' + parts[1].substring(0, 2);
+            }
+            el.value = result;
         }
-        let result = intPart;
-        if (parts.length > 1) {
-            result += ',' + parts[1].substring(0, 2);
-        }
-        input.val(result);
     }
     
     // =====================================
@@ -3640,8 +3658,12 @@ $(document).ready(function() {
     }
 
     window.formatNonRabPriceInput = function(elem) {
-        let val = elem.value.replace(/[^0-9]/g, '');
-        elem.value = val ? parseInt(val, 10).toLocaleString('id-ID') : '';
+        if (typeof formatRupiahInput === 'function') {
+            formatRupiahInput(elem, false);
+        } else {
+            let val = elem.value.replace(/[^0-9]/g, '');
+            elem.value = val ? parseInt(val, 10).toLocaleString('id-ID') : '';
+        }
     };
 
     function parseFormattedPrice(str) {

@@ -1143,12 +1143,12 @@ require_once '../../includes/header.php';
                                                    value="<?= sanitize($row['unit'] ?? '') ?>" style="width:60px;">
                                         </td>
                                         <td>
-                                            <input type="text" class="form-control form-control-sm border-0 text-end edit-cell" 
+                                            <input type="text" class="form-control form-control-sm border-0 text-end edit-cell format-rupiah" 
                                                    data-idx="<?= $idx ?>" data-field="price"
                                                    value="<?= number_format($row['price'] ?? 0, 0, ',', '.') ?>" style="width:100px;">
                                         </td>
                                         <td>
-                                            <input type="text" class="form-control form-control-sm border-0 text-end edit-cell" 
+                                            <input type="text" class="form-control form-control-sm border-0 text-end edit-cell format-rupiah" 
                                                    data-idx="<?= $idx ?>" data-field="actual_price"
                                                    value="<?= ($row['actual_price'] ?? null) ? number_format($row['actual_price'], 0, ',', '.') : '' ?>" style="width:100px;">
                                         </td>

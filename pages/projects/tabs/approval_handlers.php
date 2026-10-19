@@ -123,8 +123,8 @@ try {
 
         if ($reqType === 'non_rab') {
             dbExecute(
-                "UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
-                [$newStatus, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
+                "UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
+                [$newStatus, $reqTotal, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
             );
             $pdo->commit();
             setFlash('success', 'Pengajuan Biaya Lain-Lain (' . formatRupiah($reqTotal) . ') berhasil disetujui.');
@@ -134,8 +134,8 @@ try {
 
         // DIRECT COST (RAB/RAP) OR MIXED FLOW
         dbExecute(
-            "UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
-            [$newStatus, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
+            "UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
+            [$newStatus, $reqTotal, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
         );
 
         // Insert realization into weekly_progress using sequential filling & FIFO sisa deduction
@@ -287,23 +287,8 @@ try {
                 $remainToConsume -= $consumeFromRow;
             }
 
-            // Insert/update weekly_progress per subcategory
-            foreach ($subcatAmounts as $subcatId => $totalAmt) {
-                if ($totalAmt <= 0) continue;
-
-                $netAmount = $totalAmt;
-                if ($totalDeduction > 0 && $totalRequestAmount > 0) {
-                    $proportion = $totalAmt / $totalRequestAmount;
-                    $deductionForSubcat = $totalDeduction * $proportion;
-                    $netAmount = max(0, $totalAmt - $deductionForSubcat);
-                }
-
-                dbExecute("
-                    INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE realization_amount = realization_amount + VALUES(realization_amount)
-                ", [$projId, $subcatId, $reqTargetWeek, $weekStart, $weekEnd, $netAmount, getCurrentUserId()]);
-            }
+            // Sync weekly_progress and actual spending for the project
+            syncProjectWeeklyProgress($projId, true, true);
         }
 
         $pdo->commit();

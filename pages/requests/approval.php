@@ -85,8 +85,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($reqType === 'non_rab') {
                 // Update request status
-                dbExecute("UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                    [$newStatus, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+                dbExecute("UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                    [$newStatus, $reqTotal, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
                 
                 setFlash('success', 'Pengajuan Biaya Lain-Lain (' . formatRupiah($reqTotal) . ') berhasil disetujui!');
                 $_SESSION['approved_project_id'] = $projId;
@@ -97,8 +97,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // DIRECT COST (RAB/RAP) OR MIXED FLOW
             // Update request status with target_week, week_number and approved_amount
-            dbExecute("UPDATE requests SET status = ?, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                [$newStatus, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+            dbExecute("UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                [$newStatus, $reqTotal, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
             
             // Insert realization into weekly_progress using sequential filling
             // Get project info for weekly ranges
@@ -261,24 +261,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $remainToConsume -= $consumeFromRow;
                 }
                 
-                // Insert/update weekly_progress per subcategory (with total sisa deduction)
-                foreach ($subcatAmounts as $subcatId => $totalAmount) {
-                    if ($totalAmount <= 0) continue;
-                    
-                    // Proportionally deduct total sisa across all subcategories
-                    $netAmount = $totalAmount;
-                    if ($totalDeduction > 0 && $totalRequestAmount > 0) {
-                        $proportion = $totalAmount / $totalRequestAmount;
-                        $deductionForSubcat = $totalDeduction * $proportion;
-                        $netAmount = max(0, $totalAmount - $deductionForSubcat);
-                    }
-                    
-                    dbExecute("
-                        INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ON DUPLICATE KEY UPDATE realization_amount = realization_amount + VALUES(realization_amount)
-                    ", [$projId, $subcatId, $targetWeek, $weekStart, $weekEnd, $netAmount, getCurrentUserId()]);
-                }
+                // Sync weekly_progress and actual spending for the project
+                syncProjectWeeklyProgress($projId, true, true);
             }
             
             $deductionMsg = (isset($totalDeduction) && $totalDeduction > 0) ? ' (dipotong sisa anggaran ' . number_format($totalDeduction, 0, ',', '.') . ')' : '';
@@ -352,7 +336,8 @@ if ($requestId) {
     $selectedRequest = dbGetRow("
         SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name,
                upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
-               ua.full_name as approved_by_name, ua.role as approved_by_role
+               ua.full_name as approved_by_name, ua.role as approved_by_role,
+               (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
         FROM requests req
         LEFT JOIN projects p ON req.project_id = p.id
         LEFT JOIN users u ON req.created_by = u.id
@@ -915,16 +900,19 @@ if (empty($returnUrl)) {
                                     <?php endif; ?>
                                 </td>
                             </tr>
-                            <?php if ($availableRemaining['total'] > 0): ?>
+                            <?php if ($availableRemaining['total'] > 0): 
+                                $potonganHarian = min($totalReq, $availableRemaining['total']);
+                                $sisaHarianSetelahnya = max(0, $availableRemaining['total'] - $potonganHarian);
+                            ?>
                             <tr class="table-success">
-                                <td colspan="6" class="text-end"><strong>Sisa Anggaran Tersedia</strong></td>
-                                <td class="text-end text-success"><strong>- <?= formatRupiah($availableRemaining['total']) ?></strong></td>
-                                <td colspan="3"></td>
+                                <td colspan="6" class="text-end"><strong>Potongan Sisa Anggaran Lapangan (FIFO)</strong></td>
+                                <td class="text-end text-success"><strong>- <?= formatRupiah($potonganHarian) ?></strong></td>
+                                <td colspan="3"><small class="text-muted">(Dari sisa tersedia <?= formatRupiah($availableRemaining['total']) ?>)</small></td>
                             </tr>
                             <tr class="table-warning">
                                 <td colspan="6" class="text-end"><strong>Nett yang Harus Dikirim (RAP)</strong></td>
-                                <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $availableRemaining['total'])) ?></strong></td>
-                                <td colspan="3"></td>
+                                <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $potonganHarian)) ?></strong></td>
+                                <td colspan="3"><small class="text-muted">Proyeksi sisa anggaran tersisa: <?= formatRupiah($sisaHarianSetelahnya) ?></small></td>
                             </tr>
                             <?php endif; ?>
                         </tfoot>
@@ -1038,16 +1026,19 @@ if (empty($returnUrl)) {
                                     <?php endif; ?>
                                 </td>
                             </tr>
-                            <?php if ($availableRemaining['total'] > 0): ?>
+                            <?php if ($availableRemaining['total'] > 0): 
+                                $potonganBorongan = min($totalReq, $availableRemaining['total']);
+                                $sisaBoronganSetelahnya = max(0, $availableRemaining['total'] - $potonganBorongan);
+                            ?>
                             <tr class="table-success">
-                                <td colspan="4" class="text-end"><strong>Sisa Anggaran Tersedia</strong></td>
-                                <td class="text-end text-success"><strong>- <?= formatRupiah($availableRemaining['total']) ?></strong></td>
-                                <td colspan="3"></td>
+                                <td colspan="4" class="text-end"><strong>Potongan Sisa Anggaran Lapangan (FIFO)</strong></td>
+                                <td class="text-end text-success"><strong>- <?= formatRupiah($potonganBorongan) ?></strong></td>
+                                <td colspan="3"><small class="text-muted">(Dari sisa tersedia <?= formatRupiah($availableRemaining['total']) ?>)</small></td>
                             </tr>
                             <tr class="table-warning">
                                 <td colspan="4" class="text-end"><strong>Nett yang Harus Dikirim (RAP)</strong></td>
-                                <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $availableRemaining['total'])) ?></strong></td>
-                                <td colspan="3"></td>
+                                <td class="text-end"><strong><?= formatRupiah(max(0, $totalReq - $potonganBorongan)) ?></strong></td>
+                                <td colspan="3"><small class="text-muted">Proyeksi sisa anggaran tersisa: <?= formatRupiah($sisaBoronganSetelahnya) ?></small></td>
                             </tr>
                             <?php endif; ?>
                         </tfoot>

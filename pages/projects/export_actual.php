@@ -49,28 +49,23 @@ if ($project['status'] !== 'draft' || $hasWeeklyHistory) {
     }
 }
 
-// Weekly progress data
+// Synchronize and load progress & actual spending data
+$syncedProgress = syncProjectWeeklyProgress($projectId, true);
+$batchActualSpending = $syncedProgress['spending'];
+$batchActualBreakdown = $syncedProgress['breakdown'];
 $weeklyData = [];
 if ($showWeeklyColumns) {
-    $allWeeklyProgress = dbGetAll("
-        SELECT subcategory_id, week_number, realization_amount
-        FROM weekly_progress
-        WHERE project_id = ?
-    ", [$projectId]);
-    
-    foreach ($allWeeklyProgress as $wp) {
-        $weeklyData[$wp['subcategory_id']][$wp['week_number']] = floatval($wp['realization_amount']);
+    foreach ($syncedProgress['weekly'] as $sId => $wks) {
+        foreach ($wks as $wNum => $wInfo) {
+            $weeklyData[$sId][$wNum] = floatval($wInfo['total']);
+        }
     }
 }
-
-// Actualization adjustments - batch loaded
-$actualizationAdjustments = batchGetActualizationAdjustments($projectId);
+$actualizationAdjustments = [];
 
 // Batch-load all data needed (instead of per-subcategory queries)
 $rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
 $rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
-$batchActualSpending = batchGetActualSpendingBySubcategory($projectId);
-$batchActualBreakdown = batchGetActualBreakdownBySubcategory($projectId);
 
 // Get categories
 $categories = dbGetAll("

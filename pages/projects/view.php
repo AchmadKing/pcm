@@ -35,10 +35,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'weekly_detail') {
         WHERE req.project_id = ? 
           AND req.status = 'approved'
           AND (req.target_week = ? OR (req.target_week IS NULL AND req.week_number = ?))
-          AND reqi.subcategory_id = ?
+          AND (reqi.subcategory_id = ? OR reqi.subcat_details LIKE ?)
         GROUP BY req.id
         ORDER BY req.created_at ASC
-    ", [$pId, $weekNum, $weekNum, $subId]);
+    ", [$pId, $weekNum, $weekNum, $subId, '%"subcategory_id":' . $subId . '%']);
     
     // For each request, get items, actuals, and attachments
     foreach ($requests as &$req) {

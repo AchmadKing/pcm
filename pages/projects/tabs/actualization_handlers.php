@@ -228,9 +228,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             elseif ($cat === 'alat') $totalAlat = floatval($row['total']);
         }
 
-        $remainingUpah = max(0, floatval($_POST['remaining_upah'] ?? 0));
-        $remainingMaterial = max(0, floatval($_POST['remaining_material'] ?? 0));
-        $remainingAlat = max(0, floatval($_POST['remaining_alat'] ?? 0));
+        $remainingUpah = max(0, parseNumber($_POST['remaining_upah'] ?? 0));
+        $remainingMaterial = max(0, parseNumber($_POST['remaining_material'] ?? 0));
+        $remainingAlat = max(0, parseNumber($_POST['remaining_alat'] ?? 0));
         $notesUpah = trim($_POST['notes_upah'] ?? '');
         $notesMaterial = trim($_POST['notes_material'] ?? '');
         $notesAlat = trim($_POST['notes_alat'] ?? '');
@@ -269,6 +269,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         // Mark request as actualized
         dbExecute("UPDATE requests SET is_actualized = 1 WHERE id = ? AND project_id = ?", [$reqId, $projectId]);
+
+        // Sync weekly_progress and actual spending for the project
+        syncProjectWeeklyProgress($projectId, true, true);
 
         $uploadDir = __DIR__ . '/../../../uploads/actuals/';
         if (!is_dir($uploadDir)) {

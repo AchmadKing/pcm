@@ -93,16 +93,36 @@
                 });
             }
             
-            // Format currency input
-            $('input.currency').on('blur', function() {
+            // Global live currency / nominal input formatting with thousand separators (dots)
+            const globalCurrencySelector = 'input.currency, input.format-rupiah, input.price-input, input.remaining-input, input[data-type="currency"], input.item-price, input.item-actual-price, input.item-price-rap, input.item-actual-price-rap, input.non-rab-item-price, input.item-harian-price, input.item-price-input';
+
+            // Real-time thousand separator as user types
+            $(document).on('input', globalCurrencySelector, function() {
+                const allowDecimal = $(this).data('allow-decimal') !== false && !$(this).hasClass('remaining-input');
+                formatRupiahInput(this, allowDecimal);
+            });
+
+            // Handle Backspace gracefully when cursor is right after a dot
+            $(document).on('keydown', globalCurrencySelector, function(e) {
+                if (e.key === 'Backspace' && this.selectionStart === this.selectionEnd && this.selectionStart > 0) {
+                    if (this.value[this.selectionStart - 1] === '.') {
+                        e.preventDefault();
+                        const pos = this.selectionStart;
+                        this.value = this.value.slice(0, pos - 2) + this.value.slice(pos - 1);
+                        try {
+                            this.setSelectionRange(pos - 2, pos - 2);
+                        } catch (err) {}
+                        $(this).trigger('input');
+                    }
+                }
+            });
+
+            // Ensure clean formatting on blur
+            $(document).on('blur', globalCurrencySelector, function() {
                 let val = $(this).val();
                 if (val) {
-                    let numericVal = parseFloat(val.replace(/\./g, '').replace(',', '.')) || 0;
-                    if (val.indexOf(',') !== -1) {
-                        $(this).val(formatNumber(numericVal, 2));
-                    } else {
-                        $(this).val(formatNumber(numericVal, 0));
-                    }
+                    const allowDecimal = $(this).data('allow-decimal') !== false && !$(this).hasClass('remaining-input');
+                    formatRupiahInput(this, allowDecimal);
                 }
             });
             
@@ -178,6 +198,71 @@
             if (!str) return 0;
             return parseFloat(str.toString().replace(/\./g, '').replace(',', '.')) || 0;
         }
+        window.parseFormattedNumber = parseFormattedNumber;
+        window.parseNumber = parseFormattedNumber;
+        window.parseRupiah = parseFormattedNumber;
+
+        // Real-time currency input formatter with cursor position preservation
+        function formatRupiahInput(elem, allowDecimal) {
+            if (typeof allowDecimal === 'undefined') allowDecimal = true;
+            const el = elem instanceof HTMLElement ? elem : (elem && elem[0] ? elem[0] : null);
+            if (!el) return;
+
+            let originalVal = el.value || '';
+            let originalCursor = el.selectionStart;
+
+            // Count numeric digits before cursor
+            let digitsBeforeCursor = (originalVal.slice(0, originalCursor).match(/\d/g) || []).length;
+            let hadCommaBeforeCursor = originalVal.slice(0, originalCursor).includes(',');
+
+            // Clean input: digits and optionally comma
+            let clean = allowDecimal ? originalVal.replace(/[^\d,]/g, '') : originalVal.replace(/\D/g, '');
+            let parts = clean.split(',');
+            let intPart = parts[0].replace(/\./g, '');
+
+            // Trim leading zeroes if more than 1 digit
+            if (intPart.length > 1 && intPart.startsWith('0')) {
+                intPart = intPart.replace(/^0+/, '') || '0';
+            }
+
+            // Add thousand separator dots
+            let formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+            let formatted = formattedInt;
+            if (allowDecimal && parts.length > 1) {
+                formatted += ',' + parts[1].slice(0, 2);
+            }
+
+            if (el.value !== formatted) {
+                el.value = formatted;
+                
+                // Restore cursor position smoothly
+                if (originalCursor !== null) {
+                    let newCursor = 0;
+                    let digitsCounted = 0;
+                    for (let i = 0; i < formatted.length; i++) {
+                        if (/\d/.test(formatted[i])) {
+                            digitsCounted++;
+                        }
+                        if (digitsCounted === digitsBeforeCursor) {
+                            newCursor = i + 1;
+                            if (hadCommaBeforeCursor && formatted[i + 1] === ',') {
+                                newCursor = i + 2;
+                            }
+                            break;
+                        }
+                    }
+                    if (digitsBeforeCursor === 0) {
+                        newCursor = (formatted.length > 0 && formatted[0] === '0') ? 1 : 0;
+                    }
+                    try {
+                        el.setSelectionRange(newCursor, newCursor);
+                    } catch (err) {}
+                }
+            }
+        }
+        window.formatRupiahInput = formatRupiahInput;
+        window.formatCurrencyInput = formatRupiahInput;
         
         function inlineEditInit() {
             $(document).on('focus', '.inline-ajax', function() {

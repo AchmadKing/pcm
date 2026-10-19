@@ -106,9 +106,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo = getDB();
         $pdo->beginTransaction();
         
-        $remainingUpah = floatval($_POST['remaining_upah'] ?? 0);
-        $remainingMaterial = floatval($_POST['remaining_material'] ?? 0);
-        $remainingAlat = floatval($_POST['remaining_alat'] ?? 0);
+        $remainingUpah = parseNumber($_POST['remaining_upah'] ?? 0);
+        $remainingMaterial = parseNumber($_POST['remaining_material'] ?? 0);
+        $remainingAlat = parseNumber($_POST['remaining_alat'] ?? 0);
         $notesUpah = trim($_POST['notes_upah'] ?? '');
         $notesMaterial = trim($_POST['notes_material'] ?? '');
         $notesAlat = trim($_POST['notes_alat'] ?? '');
@@ -144,6 +144,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         
         // Mark request as actualized
         dbExecute("UPDATE requests SET is_actualized = 1 WHERE id = ?", [$requestId]);
+        
+        // Sync weekly_progress and actual spending for the project
+        syncProjectWeeklyProgress($request['project_id'], true, true);
         
         $uploadDir = __DIR__ . '/../../uploads/actuals/';
         if (!is_dir($uploadDir)) {
@@ -398,9 +401,8 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <label class="form-label small mb-1">Jumlah Sisa (Rp)</label>
                                     <div class="input-group">
                                         <span class="input-group-text">Rp</span>
-                                        <input type="number" class="form-control remaining-input" name="remaining_upah" 
-                                               value="<?= $existingActual ? $existingActual['remaining_upah'] : 0 ?>"
-                                               min="0" max="<?= $totalUpah ?>" step="1" 
+                                        <input type="text" inputmode="numeric" autocomplete="off" class="form-control remaining-input" name="remaining_upah" 
+                                               value="<?= $existingActual ? formatNumber($existingActual['remaining_upah'], 0) : '0' ?>"
                                                data-max="<?= $totalUpah ?>" data-category="upah"
                                                <?= $totalUpah <= 0 ? 'disabled' : '' ?>>
                                     </div>
@@ -409,7 +411,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <div class="col-md-7">
                                     <label class="form-label small mb-1">Catatan</label>
                                     <textarea class="form-control" name="notes_upah" rows="2" 
-                                              placeholder="Contoh: 2 pekerja tidak masuk 2 hari"><?= sanitize($existingActual['notes_upah'] ?? '') ?></textarea>
+                                               placeholder="Contoh: 2 pekerja tidak masuk 2 hari"><?= sanitize($existingActual['notes_upah'] ?? '') ?></textarea>
                                 </div>
                             </div>
                         </div>
@@ -431,9 +433,8 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <label class="form-label small mb-1">Jumlah Sisa (Rp)</label>
                                     <div class="input-group">
                                         <span class="input-group-text">Rp</span>
-                                        <input type="number" class="form-control remaining-input" name="remaining_material" 
-                                               value="<?= $existingActual ? $existingActual['remaining_material'] : 0 ?>"
-                                               min="0" max="<?= $totalMaterial ?>" step="1"
+                                        <input type="text" inputmode="numeric" autocomplete="off" class="form-control remaining-input" name="remaining_material" 
+                                               value="<?= $existingActual ? formatNumber($existingActual['remaining_material'], 0) : '0' ?>"
                                                data-max="<?= $totalMaterial ?>" data-category="material"
                                                <?= $totalMaterial <= 0 ? 'disabled' : '' ?>>
                                     </div>
@@ -442,7 +443,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <div class="col-md-7">
                                     <label class="form-label small mb-1">Catatan</label>
                                     <textarea class="form-control" name="notes_material" rows="2" 
-                                              placeholder="Contoh: Semen hanya terpakai 6 dari 10 sak"><?= sanitize($existingActual['notes_material'] ?? '') ?></textarea>
+                                               placeholder="Contoh: Semen hanya terpakai 6 dari 10 sak"><?= sanitize($existingActual['notes_material'] ?? '') ?></textarea>
                                 </div>
                             </div>
                         </div>
@@ -464,9 +465,8 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <label class="form-label small mb-1">Jumlah Sisa (Rp)</label>
                                     <div class="input-group">
                                         <span class="input-group-text">Rp</span>
-                                        <input type="number" class="form-control remaining-input" name="remaining_alat" 
-                                               value="<?= $existingActual ? $existingActual['remaining_alat'] : 0 ?>"
-                                               min="0" max="<?= $totalAlat ?>" step="1"
+                                        <input type="text" inputmode="numeric" autocomplete="off" class="form-control remaining-input" name="remaining_alat" 
+                                               value="<?= $existingActual ? formatNumber($existingActual['remaining_alat'], 0) : '0' ?>"
                                                data-max="<?= $totalAlat ?>" data-category="alat"
                                                <?= $totalAlat <= 0 ? 'disabled' : '' ?>>
                                     </div>
@@ -682,13 +682,23 @@ function showToast(message, type) {
 
 // Update summary on input change
 document.querySelectorAll('.remaining-input').forEach(function(input) {
-    input.addEventListener('input', updateSummary);
+    input.addEventListener('input', function() {
+        if (typeof formatRupiahInput === 'function') {
+            formatRupiahInput(this, false);
+        }
+        var maxVal = parseFloat(this.getAttribute('data-max')) || 0;
+        var curVal = (typeof parseNumber === 'function' ? parseNumber(this.value) : parseFloat(this.value.replace(/\./g, ''))) || 0;
+        if (maxVal > 0 && curVal > maxVal) {
+            this.value = (typeof formatNumber === 'function') ? formatNumber(maxVal, 0) : maxVal.toLocaleString('id-ID');
+        }
+        updateSummary();
+    });
 });
 
 function updateSummary() {
-    var sisaUpah = parseFloat(document.querySelector('[name="remaining_upah"]').value) || 0;
-    var sisaMaterial = parseFloat(document.querySelector('[name="remaining_material"]').value) || 0;
-    var sisaAlat = parseFloat(document.querySelector('[name="remaining_alat"]').value) || 0;
+    var sisaUpah = (typeof parseNumber === 'function' ? parseNumber(document.querySelector('[name="remaining_upah"]').value) : parseFloat(document.querySelector('[name="remaining_upah"]').value.replace(/\./g, ''))) || 0;
+    var sisaMaterial = (typeof parseNumber === 'function' ? parseNumber(document.querySelector('[name="remaining_material"]').value) : parseFloat(document.querySelector('[name="remaining_material"]').value.replace(/\./g, ''))) || 0;
+    var sisaAlat = (typeof parseNumber === 'function' ? parseNumber(document.querySelector('[name="remaining_alat"]').value) : parseFloat(document.querySelector('[name="remaining_alat"]').value.replace(/\./g, ''))) || 0;
     
     var totalSisa = sisaUpah + sisaMaterial + sisaAlat;
     var totalAktual = totalPengajuan - totalSisa;
@@ -1056,9 +1066,9 @@ $('#actualizationForm').on('submit', function(e) {
     
     var formData = new FormData();
     formData.append('action', 'save_actualization');
-    formData.append('remaining_upah', $('[name="remaining_upah"]').val());
-    formData.append('remaining_material', $('[name="remaining_material"]').val());
-    formData.append('remaining_alat', $('[name="remaining_alat"]').val());
+    formData.append('remaining_upah', typeof parseNumber === 'function' ? parseNumber($('[name="remaining_upah"]').val()) : $('[name="remaining_upah"]').val().replace(/\./g, ''));
+    formData.append('remaining_material', typeof parseNumber === 'function' ? parseNumber($('[name="remaining_material"]').val()) : $('[name="remaining_material"]').val().replace(/\./g, ''));
+    formData.append('remaining_alat', typeof parseNumber === 'function' ? parseNumber($('[name="remaining_alat"]').val()) : $('[name="remaining_alat"]').val().replace(/\./g, ''));
     formData.append('notes_upah', $('[name="notes_upah"]').val());
     formData.append('notes_material', $('[name="notes_material"]').val());
     formData.append('notes_alat', $('[name="notes_alat"]').val());
