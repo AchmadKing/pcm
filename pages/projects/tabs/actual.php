@@ -1365,7 +1365,7 @@ function renderRequestDetail(index) {
     html += '<div class="col-lg-8">';
     html += '<div class="card border-0 shadow-sm mb-3">';
     html += '<div class="card-body">';
-    html += '<h6 class="header-title mb-3"><i class="mdi mdi-format-list-bulleted text-primary"></i> Daftar Item</h6>';
+    html += '<h6 class="header-title mb-3"><i class="mdi mdi-format-list-bulleted text-primary"></i> Daftar Item Pengajuan</h6>';
     html += '<div class="table-responsive">';
     html += '<table class="table table-bordered table-sm mb-0">';
     html += '<thead class="table-light">';
@@ -1426,7 +1426,7 @@ function renderRequestDetail(index) {
         
         html += '<div class="card border-success mb-3">';
         html += '<div class="card-header bg-success text-white py-2">';
-        html += '<h6 class="mb-0"><i class="mdi mdi-clipboard-check"></i> Laporan Aktual</h6>';
+        html += '<h6 class="mb-0"><i class="mdi mdi-clipboard-check"></i> Laporan Aktualisasi</h6>';
         html += '</div>';
         html += '<div class="card-body">';
         html += '<div class="table-responsive">';
@@ -1496,7 +1496,7 @@ function renderRequestDetail(index) {
         
         if (act.actual_created_by_name) {
             html += '<div class="mt-2"><small class="text-muted">Diaktualisasi oleh: ' + 
-                    escapeHtml(act.actual_created_by_name) + ' pada ' + formatDateId(act.created_at || '') + '</small></div>';
+                    escapeHtml(act.actual_created_by_name) + ' pada ' + formatDateTimeJs(act.created_at || '') + '</small></div>';
         }
         
         html += '</div></div>';
@@ -1562,7 +1562,8 @@ function formatNumberJs(number, decimals) {
 
 function formatDateTimeJs(dateTimeStr) {
     if (!dateTimeStr) return '-';
-    var parts = dateTimeStr.split(' ');
+    var cleanStr = dateTimeStr.replace('T', ' ');
+    var parts = cleanStr.split(' ');
     var datePart = parts[0];
     var timePart = parts.length > 1 ? parts[1] : '';
     

@@ -224,7 +224,7 @@ $hasSidebar = hasAnyPermission();
                                 </li>
                                 <?php if (hasPermission('reports.export')): ?>
                                 <li class="<?= $currentPage == 'export' ? 'mm-active' : '' ?>">
-                                    <a href="<?= $baseUrl ?>/pages/reports/export.php">Export RAB</a>
+                                    <a href="<?= $baseUrl ?>/pages/reports/export.php">Export Laporan</a>
                                 </li>
                                 <?php endif; ?>
                             </ul>

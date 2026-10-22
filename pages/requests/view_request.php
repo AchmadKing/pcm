@@ -770,7 +770,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
                 
                 <div class="mt-2">
-                    <small class="text-muted">Diaktualisasi oleh: <?= sanitize($actualData['created_by_name']) ?> pada <?= formatDate($actualData['created_at'], true) ?></small>
+                    <small class="text-muted">Diaktualisasi oleh: <?= sanitize($actualData['created_by_name']) ?> pada <?= formatDateTime($actualData['created_at'], true) ?></small>
                 </div>
             </div>
         </div>
