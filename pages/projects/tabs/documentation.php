@@ -427,24 +427,24 @@ if (!function_exists('getDocTypeInfo')) {
                             </a>
 
                             <div class="dropdown flex-shrink-0">
-                                <button class="btn btn-sm btn-light text-muted p-1 rounded-circle" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="width: 30px; height: 30px;">
+                                <button class="btn btn-sm btn-light text-muted p-1 rounded-circle" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="width: 30px; height: 30px;" onclick="event.stopPropagation();">
                                     <i class="mdi mdi-dots-vertical font-size-16"></i>
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
                                     <li>
-                                        <a class="dropdown-item font-size-13 py-2" href="?id=<?= $projectId ?>&tab=documentation&folder_id=<?= $f['id'] ?>">
+                                        <a class="dropdown-item font-size-13 py-2" href="?id=<?= $projectId ?>&tab=documentation&folder_id=<?= $f['id'] ?>" onclick="event.stopPropagation();">
                                             <i class="mdi mdi-folder-open-outline me-2 text-primary"></i> Buka Folder
                                         </a>
                                     </li>
                                     <?php if (hasPermission('documentation.upload')): ?>
                                     <li>
-                                        <a class="dropdown-item font-size-13 py-2" href="javascript:void(0);" onclick="openRenameFolderModal(<?= $f['id'] ?>, '<?= sanitize(addslashes($f['name'])) ?>')">
+                                        <a class="dropdown-item font-size-13 py-2" href="javascript:void(0);" onclick="event.stopPropagation(); openRenameFolderModal(<?= $f['id'] ?>, '<?= sanitize(addslashes($f['name'])) ?>')">
                                             <i class="mdi mdi-pencil-outline me-2 text-info"></i> Ubah Nama
                                         </a>
                                     </li>
                                     <li><hr class="dropdown-divider my-1"></li>
                                     <li>
-                                        <a class="dropdown-item font-size-13 py-2 text-danger" href="javascript:void(0);" onclick="openDeleteFolderModal(<?= $f['id'] ?>, '<?= sanitize(addslashes($f['name'])) ?>', <?= $f['file_count'] + $f['subfolder_count'] ?>)">
+                                        <a class="dropdown-item font-size-13 py-2 text-danger" href="javascript:void(0);" onclick="event.stopPropagation(); openDeleteFolderModal(<?= $f['id'] ?>, '<?= sanitize(addslashes($f['name'])) ?>', <?= $f['file_count'] + $f['subfolder_count'] ?>)">
                                             <i class="mdi mdi-trash-can-outline me-2"></i> Hapus Folder
                                         </a>
                                     </li>
@@ -481,7 +481,7 @@ if (!function_exists('getDocTypeInfo')) {
                      data-description="<?= strtolower(sanitize($doc['description'] ?? '')) ?>"
                      data-uploader="<?= strtolower(sanitize($doc['uploaded_by_name'] ?? '')) ?>">
                     
-                    <div class="card border fm-file-card h-100 shadow-none mb-0 transition-all bg-white position-relative overflow-hidden">
+                    <div class="card border fm-file-card h-100 shadow-none mb-0 transition-all bg-white position-relative">
                         
                         <!-- Top Type Accent Stripe -->
                         <div class="fm-file-accent" style="height: 3px; background-color: <?= $typeInfo['color'] ?>;"></div>
@@ -499,20 +499,20 @@ if (!function_exists('getDocTypeInfo')) {
                                     </div>
 
                                     <div class="dropdown">
-                                        <button class="btn btn-sm btn-light text-muted p-1 rounded-circle" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="width: 28px; height: 28px;">
+                                        <button class="btn btn-sm btn-light text-muted p-1 rounded-circle" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="width: 28px; height: 28px;" onclick="event.stopPropagation();">
                                             <i class="mdi mdi-dots-vertical font-size-16"></i>
                                         </button>
                                         <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
                                             <?php if ($typeInfo['can_preview']): ?>
                                             <li>
                                                 <a class="dropdown-item font-size-13 py-2" href="javascript:void(0);" 
-                                                   onclick="openDocPreview(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['original_name'])) ?>', '<?= $previewUrl ?>', <?= $typeInfo['is_image'] ? 'true' : 'false' ?>, <?= $typeInfo['is_pdf'] ? 'true' : 'false' ?>)">
+                                                   onclick="event.stopPropagation(); openDocPreview(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['original_name'])) ?>', '<?= $previewUrl ?>', <?= $typeInfo['is_image'] ? 'true' : 'false' ?>, <?= $typeInfo['is_pdf'] ? 'true' : 'false' ?>)">
                                                     <i class="mdi mdi-eye-outline me-2 text-primary"></i> Pratinjau
                                                 </a>
                                             </li>
                                             <?php endif; ?>
                                             <li>
-                                                <a class="dropdown-item font-size-13 py-2" href="<?= $downloadUrl ?>" download>
+                                                <a class="dropdown-item font-size-13 py-2" href="<?= $downloadUrl ?>" download onclick="event.stopPropagation();">
                                                     <i class="mdi mdi-download-outline me-2 text-success"></i> Unduh File
                                                 </a>
                                             </li>
@@ -520,13 +520,13 @@ if (!function_exists('getDocTypeInfo')) {
                                             <li><hr class="dropdown-divider my-1"></li>
                                             <li>
                                                 <a class="dropdown-item font-size-13 py-2" href="javascript:void(0);" 
-                                                   onclick="openEditDocModal(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['description'] ?? '')) ?>')">
+                                                   onclick="event.stopPropagation(); openEditDocModal(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['description'] ?? '')) ?>')">
                                                     <i class="mdi mdi-pencil-outline me-2 text-info"></i> Ubah Nama / Catatan
                                                 </a>
                                             </li>
                                             <li>
                                                 <a class="dropdown-item font-size-13 py-2 text-danger" href="javascript:void(0);" 
-                                                   onclick="openDeleteDocModal(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['original_name'])) ?>')">
+                                                   onclick="event.stopPropagation(); openDeleteDocModal(<?= $doc['id'] ?>, '<?= sanitize(addslashes($doc['title'])) ?>', '<?= sanitize(addslashes($doc['original_name'])) ?>')">
                                                     <i class="mdi mdi-trash-can-outline me-2"></i> Hapus File
                                                 </a>
                                             </li>
@@ -1167,16 +1167,58 @@ if (!function_exists('getDocTypeInfo')) {
 /* ---------------------------------------------------- */
 /* FILE MANAGER CARDS & ITEMS                           */
 /* ---------------------------------------------------- */
+/* Stacking Context fixes for Folder & File Manager Grid */
+#fmFolderGridSection {
+    position: relative;
+    z-index: 20;
+}
+#fmFileGridSection {
+    position: relative;
+    z-index: 10;
+}
+#fmFolderGridSection.has-dropdown-open,
+#fmFileGridSection.has-dropdown-open {
+    z-index: 1050 !important;
+}
+
+.fm-item-folder,
+.fm-item-file {
+    position: relative;
+    z-index: 1;
+}
+.fm-item-folder:hover,
+.fm-item-file:hover {
+    z-index: 5;
+}
+.fm-item-folder.has-dropdown-open,
+.fm-item-file.has-dropdown-open,
+.fm-item-folder:has(.dropdown-menu.show),
+.fm-item-file:has(.dropdown-menu.show) {
+    position: relative;
+    z-index: 1050 !important;
+}
+
 .fm-folder-card {
     border-radius: 10px;
     border: 1px solid #e2e8f0 !important;
     transition: all 0.2s ease-in-out;
+    position: relative;
+    z-index: 1;
 }
 .fm-folder-card:hover {
     border-color: #f59e0b !important;
     transform: translateY(-2px);
     box-shadow: 0 4px 15px rgba(245, 158, 11, 0.12) !important;
+    z-index: 5;
 }
+.fm-folder-card.has-dropdown-open,
+.fm-folder-card:has(.dropdown-menu.show) {
+    border-color: #f59e0b !important;
+    z-index: 1050 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.18) !important;
+}
+
 .fm-folder-icon-box {
     line-height: 1;
     transition: transform 0.2s ease;
@@ -1184,21 +1226,51 @@ if (!function_exists('getDocTypeInfo')) {
 .fm-folder-card:hover .fm-folder-icon-box {
     transform: scale(1.08);
 }
+
 .fm-file-card {
     border-radius: 10px;
     border: 1px solid #e2e8f0 !important;
     transition: all 0.2s ease-in-out;
+    position: relative;
+    z-index: 1;
+    overflow: visible !important;
 }
 .fm-file-card:hover {
     border-color: #556ee6 !important;
     transform: translateY(-2px);
     box-shadow: 0 6px 18px rgba(85, 110, 230, 0.12) !important;
+    z-index: 5;
 }
+.fm-file-card.has-dropdown-open,
+.fm-file-card:has(.dropdown-menu.show) {
+    border-color: #556ee6 !important;
+    z-index: 1050 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(85, 110, 230, 0.18) !important;
+}
+
+.fm-file-accent {
+    border-top-left-radius: 9px;
+    border-top-right-radius: 9px;
+}
+
 .fm-file-icon-box {
     transition: transform 0.2s ease;
 }
 .fm-file-icon-box:hover {
     transform: scale(1.06);
+}
+
+/* Dropdown menus inside grid cards: ensure they are elevated and interactive */
+.fm-folder-card .dropdown-menu,
+.fm-file-card .dropdown-menu {
+    z-index: 1060 !important;
+    pointer-events: auto !important;
+}
+.fm-folder-card .dropdown-item,
+.fm-file-card .dropdown-item {
+    cursor: pointer;
+    pointer-events: auto !important;
 }
 .fm-breadcrumb-item {
     font-size: 13px;
@@ -1871,6 +1943,29 @@ $(document).ready(function() {
     if (savedView === 'table') {
         switchDocView('table');
     }
+
+    // Ensure dropdown menus in Grid View always stay on top of other cards/sections below
+    $(document).on('show.bs.dropdown', '#fmGridView .dropdown', function() {
+        var $dropdown = $(this);
+        var $card = $dropdown.closest('.fm-folder-card, .fm-file-card');
+        var $col = $dropdown.closest('.fm-item-folder, .fm-item-file');
+        var $section = $dropdown.closest('#fmFolderGridSection, #fmFileGridSection');
+        
+        $card.addClass('has-dropdown-open');
+        $col.addClass('has-dropdown-open');
+        $section.addClass('has-dropdown-open');
+    });
+
+    $(document).on('hidden.bs.dropdown', '#fmGridView .dropdown', function() {
+        var $dropdown = $(this);
+        var $card = $dropdown.closest('.fm-folder-card, .fm-file-card');
+        var $col = $dropdown.closest('.fm-item-folder, .fm-item-file');
+        var $section = $dropdown.closest('#fmFolderGridSection, #fmFileGridSection');
+        
+        $card.removeClass('has-dropdown-open');
+        $col.removeClass('has-dropdown-open');
+        $section.removeClass('has-dropdown-open');
+    });
 
     // Bind Drag & Drop listeners on dropzoneBox
     const dropzone = document.getElementById('dropzoneBox');
