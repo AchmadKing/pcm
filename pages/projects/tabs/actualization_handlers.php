@@ -58,7 +58,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_actualization_data') {
     $itemsByType = dbGetAll("
         SELECT 
             COALESCE(pi.category, reqi.item_type, 'other') as item_category,
-            SUM(reqi.total_price) as total
+            SUM(" . sqlRequestItemTotalExpr('reqi') . ") as total
         FROM request_items reqi
         LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
         WHERE reqi.request_id = ?
@@ -211,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $itemsByType = dbGetAll("
             SELECT 
                 COALESCE(pi.category, reqi.item_type, 'other') as item_category,
-                SUM(reqi.total_price) as total
+                SUM(" . sqlRequestItemTotalExpr('reqi') . ") as total
             FROM request_items reqi
             LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
             WHERE reqi.request_id = ?

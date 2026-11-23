@@ -25,7 +25,7 @@ $approvedRequests = dbGetAll("
            ra.notes_upah, ra.notes_material, ra.notes_alat,
            ra.created_at as actualized_at, ra.updated_at as actualized_updated_at,
            uact.full_name as actualized_by_name,
-           (SELECT COALESCE(SUM(CASE WHEN r.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount,
+           (SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('reqi') . "), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount,
            (SELECT COUNT(*) FROM request_actual_attachments raa WHERE raa.request_actual_id = ra.id) as attachment_count
     FROM requests r
     LEFT JOIN users u ON r.created_by = u.id

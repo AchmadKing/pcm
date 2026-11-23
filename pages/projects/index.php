@@ -138,7 +138,7 @@ if (!empty($projects)) {
 
     // Batch load subcategories
     $subcatRows = dbGetAll("
-        SELECT rc.project_id, rs.volume, rs.unit_price, rs.ahsp_id
+        SELECT rc.project_id, rs.volume, rs.ahsp_id
         FROM rab_subcategories rs
         JOIN rab_categories rc ON rs.category_id = rc.id
         WHERE rc.project_id IN ($placeholders)
@@ -150,7 +150,7 @@ if (!empty($projects)) {
         $vol = floatval($s['volume']);
         $unitPrice = ($s['ahsp_id'] && isset($ahspPrices[$s['ahsp_id']])) 
             ? $ahspPrices[$s['ahsp_id']] 
-            : floatval($s['unit_price']);
+            : 0.0;
         $projectBaseRab[$pid] = ($projectBaseRab[$pid] ?? 0) + ($vol * $unitPrice);
     }
 

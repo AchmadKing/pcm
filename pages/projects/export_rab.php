@@ -60,10 +60,11 @@ fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 ensureRabHeadSubsTableExists();
 
 if ($snapshot) {
+    $snapPrices = batchGetSnapshotSubcatUnitPrices($snapshotId);
     $rabItems = dbGetAll("
         SELECT 
+            ss.id as sub_id,
             ss.volume,
-            ss.unit_price,
             ss.code as sub_code, ss.name as sub_name, ss.unit,
             sc.code as cat_code, sc.name as cat_name,
             hs.code as hs_code, hs.name as hs_name,
@@ -76,11 +77,13 @@ if ($snapshot) {
         ORDER BY COALESCE(hs.sort_order, 99999), hs.id, sc.sort_order, LENGTH(sc.code), sc.code, ss.sort_order, LENGTH(ss.code), ss.code
     ", [$snapshotId]);
 } else {
+    $rabBreakdowns = batchGetAhspComponentBreakdowns($projectId);
     // Get RAB data with AHSP codes and Head-Sub info
     $rabItems = dbGetAll("
         SELECT 
+            rs.id as sub_id,
+            rs.ahsp_id,
             rs.volume,
-            rs.unit_price,
             rs.code as sub_code, rs.name as sub_name, rs.unit,
             rc.code as cat_code, rc.name as cat_name,
             hs.code as hs_code, hs.name as hs_name,
@@ -189,7 +192,10 @@ if ($format === 'import') {
         
         $itemNum++;
         
-        $unitPrice = $item['unit_price'] * (1 + ($overheadPct / 100));
+        $baseUnitPrice = $snapshot 
+            ? floatval($snapPrices[$item['sub_id']]['total'] ?? 0.0)
+            : floatval($rabBreakdowns[$item['ahsp_id']]['total'] ?? 0.0);
+        $unitPrice = $baseUnitPrice * (1 + ($overheadPct / 100));
         $totalPrice = $item['volume'] * $unitPrice;
         
         $catTotal += $totalPrice;

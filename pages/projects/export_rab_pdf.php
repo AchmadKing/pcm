@@ -64,26 +64,10 @@ $headSubs = dbGetAll("SELECT * FROM rab_head_subs WHERE project_id = ? ORDER BY 
 if ($snapshot) {
     // Get Snapshot Categories & Subcategories
     $categories = dbGetAll("SELECT * FROM rab_snapshot_categories WHERE snapshot_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$snapshotId]);
-    
-    // Batch AHSP details for snapshot
-    $ahspSnapRaw = dbGetAll("
-        SELECT d.snapshot_subcategory_id, d.category, SUM(d.coefficient * d.unit_price) as total_cat
-        FROM rab_snapshot_ahsp_details d
-        JOIN rab_snapshot_subcategories ss ON d.snapshot_subcategory_id = ss.id
-        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
-        WHERE sc.snapshot_id = ?
-        GROUP BY d.snapshot_subcategory_id, d.category
-    ", [$snapshotId]);
-    
-    $snapAhspMap = [];
-    foreach ($ahspSnapRaw as $r) {
-        $sId = $r['snapshot_subcategory_id'];
-        if (!isset($snapAhspMap[$sId])) $snapAhspMap[$sId] = ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
-        $snapAhspMap[$sId][$r['category']] = floatval($r['total_cat']);
-        $snapAhspMap[$sId]['total'] += floatval($r['total_cat']);
-    }
+    $snapAhspMap = batchGetSnapshotSubcatUnitPrices($snapshotId);
 } else {
     $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, LENGTH(code), code, id", [$projectId]);
+    $rabBreakdowns = batchGetAhspComponentBreakdowns($projectId);
 }
 
 $headSubMap = [];
@@ -111,10 +95,9 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         if ($snapshot) {
             $comp = $snapAhspMap[$sub['id']] ?? null;
-            $baseUnitPrice = ($comp && $comp['total'] > 0) ? $comp['total'] : floatval($sub['unit_price']);
+            $baseUnitPrice = floatval($comp['total'] ?? 0.0);
         } else {
-            $components = getAhspBreakdownForPdf($sub['ahsp_id']);
-            $baseUnitPrice = $components['total'];
+            $baseUnitPrice = floatval($rabBreakdowns[$sub['ahsp_id']]['total'] ?? 0.0);
         }
         
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
@@ -288,8 +271,10 @@ $reportDocTitle = $snapshot ? ('Laporan Salinan RAB (' . sanitize($snapshot['nam
             }
             
             .rab-table { page-break-inside: auto; }
-            .rab-table tr { page-break-inside: avoid; }
+            .rab-table tr { page-break-inside: avoid; break-inside: avoid; }
             .rab-table thead { display: table-header-group; }
+            .rab-table tfoot { display: table-row-group !important; }
+            .rab-table tbody.summary-section { page-break-inside: avoid; break-inside: avoid; }
         }
     </style>
 </head>
@@ -419,7 +404,7 @@ $reportDocTitle = $snapshot ? ('Laporan Salinan RAB (' . sanitize($snapshot['nam
             <?php endif; ?>
 
         </tbody>
-        <tfoot>
+        <tbody class="summary-section">
             <!-- Grand Total -->
             <tr class="grand-total">
                 <td colspan="5" class="text-end">JUMLAH TOTAL</td>
@@ -440,7 +425,7 @@ $reportDocTitle = $snapshot ? ('Laporan Salinan RAB (' . sanitize($snapshot['nam
                 <td colspan="5" class="text-end">JUMLAH TOTAL DIBULATKAN</td>
                 <td class="text-end"><?= number_format($totalRounded, 0, ',', '.') ?></td>
             </tr>
-        </tfoot>
+        </tbody>
     </table>
 </div>
 

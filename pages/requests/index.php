@@ -91,7 +91,7 @@ $requests = dbGetAll("
     SELECT req.*, p.name as project_name, u.full_name as created_by_name,
         upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
         ua.full_name as approved_by_name, ua.role as approved_by_role,
-        (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
+        (SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('reqi') . "), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -240,11 +240,6 @@ if ($reqViewMode === 'all') {
                                         <?php if ($req['status'] === 'rejected' && hasPermission('requests.create') && canAccessProject($req['project_id'])): ?>
                                         <a href="create.php?project_id=<?= $req['project_id'] ?>&resubmit_id=<?= $req['id'] ?>&return_url=<?= urlencode($currentRequestUri) ?>" class="btn btn-sm btn-warning btn-action" title="Ajukan Ulang">
                                             <i class="mdi mdi-refresh"></i>
-                                        </a>
-                                        <?php endif; ?>
-                                        <?php if (canApproveRequest($req)): ?>
-                                        <a href="approval.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($currentRequestUri) ?>" class="btn btn-sm btn-warning btn-action" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review' ?>">
-                                            <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check' ?>"></i>
                                         </a>
                                         <?php endif; ?>
                                         <?php if (hasPermission('requests.delete')): ?>

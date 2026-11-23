@@ -756,8 +756,8 @@ function initRapMasterData($projectId) {
         $existing = dbGetRow("SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", 
             [$projectId, $ahsp['ahsp_code']]);
         if (!$existing) {
-            $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, ?, ?)",
-                [$projectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $ahsp['id']]);
+            $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, rab_ahsp_id) VALUES (?, ?, ?, ?, ?)",
+                [$projectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['id']]);
             
             $rabDetails = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ?", [$ahsp['id']]);
             foreach ($rabDetails as $detail) {
@@ -1038,8 +1038,8 @@ function syncAhspCodeRabToRap($projectId, $ahspCode) {
     
     $existing = dbGetRow("SELECT id FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
     if (!$existing) {
-        $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, ?, ?)",
-            [$projectId, $ahspCode, $rabAhsp['work_name'], $rabAhsp['unit'], floatval($rabAhsp['unit_price'] ?? 0), $rabAhsp['id']]);
+        $rapAhspId = dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, rab_ahsp_id) VALUES (?, ?, ?, ?, ?)",
+            [$projectId, $ahspCode, $rabAhsp['work_name'], $rabAhsp['unit'], $rabAhsp['id']]);
         
         $rabDetails = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ?", [$rabAhsp['id']]);
         foreach ($rabDetails as $detail) {
@@ -1066,8 +1066,8 @@ function syncAhspCodeRapToRab($projectId, $ahspCode) {
     
     $existing = dbGetRow("SELECT id FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$projectId, $ahspCode]);
     if (!$existing) {
-        $rabAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, ?)",
-            [$projectId, $ahspCode, $rapAhsp['work_name'], $rapAhsp['unit'], floatval($rapAhsp['unit_price'] ?? 0)]);
+        $rabAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit) VALUES (?, ?, ?, ?)",
+            [$projectId, $ahspCode, $rapAhsp['work_name'], $rapAhsp['unit']]);
         
         dbExecute("UPDATE project_ahsp_rap SET rab_ahsp_id = ? WHERE id = ?", [$rabAhspId, $rapAhsp['id']]);
         
@@ -1086,8 +1086,9 @@ function syncAhspCodeRapToRab($projectId, $ahspCode) {
 }
 
 /**
- * Recalculate RAP AHSP price from its components
+ * Dynamically calculate RAP AHSP unit price from its components (no stored unit_price write)
  * @param int $ahspId AHSP ID in project_ahsp_rap table
+ * @return float
  */
 function recalculateRapAhspPrice($ahspId) {
     $total = dbGetRow("
@@ -1097,10 +1098,7 @@ function recalculateRapAhspPrice($ahspId) {
         WHERE d.ahsp_id = ?
     ", [$ahspId]);
     
-    $unitPrice = $total['total'] ?? 0;
-    dbExecute("UPDATE project_ahsp_rap SET unit_price = ? WHERE id = ?", [$unitPrice, $ahspId]);
-    
-    return $unitPrice;
+    return floatval($total['total'] ?? 0);
 }
 
 /**
@@ -1228,14 +1226,6 @@ function syncMasterAhspRapToRapTable($ahspRapId, $projectId) {
                 ", [$rapItemId, $rabItem['id'], $masterDetail['category'], $masterDetail['coefficient'], $unitPrice]);
             }
         }
-        
-        $newUnitPrice = dbGetRow("
-            SELECT COALESCE(SUM(coefficient * unit_price), 0) as total 
-            FROM rap_ahsp_details 
-            WHERE rap_item_id = ?
-        ", [$rapItemId])['total'] ?? 0;
-        
-        dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [floatval($newUnitPrice), $rapItemId]);
     }
 }
 
@@ -1303,8 +1293,9 @@ function syncRapTableToMasterAhspRap($rapItemId, $projectId) {
 // ============================================
 
 /**
- * Recalculate RAB AHSP price from its components
+ * Dynamically calculate RAB AHSP unit price from its components (no stored unit_price write)
  * @param int $ahspId AHSP ID in project_ahsp table
+ * @return float
  */
 function recalculateAhspPrice($ahspId) {
     $total = dbGetRow("
@@ -1312,34 +1303,27 @@ function recalculateAhspPrice($ahspId) {
         FROM project_ahsp_details d
         JOIN project_items i ON d.item_id = i.id
         WHERE d.ahsp_id = ?
-    ", [$ahspId])['total'];
+    ", [$ahspId])['total'] ?? 0;
     
-    dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$total, $ahspId]);
-    
-    // Sync to RAB subcategories that use this AHSP
+    // Sync non-calculated metadata (name, unit) to RAB subcategories that use this AHSP
     syncAhspToRab($ahspId);
+    
+    return floatval($total);
 }
 
 /**
- * Sync AHSP changes to RAB subcategories
+ * Sync AHSP metadata changes (work_name, unit) to RAB subcategories (unit_price is calculated dynamically)
  * @param int $ahspId
  */
 function syncAhspToRab($ahspId) {
-    $ahsp = dbGetRow("SELECT work_name, unit, unit_price FROM project_ahsp WHERE id = ?", [$ahspId]);
+    $ahsp = dbGetRow("SELECT work_name, unit FROM project_ahsp WHERE id = ?", [$ahspId]);
     if (!$ahsp) return;
     
     dbExecute("
         UPDATE rab_subcategories 
-        SET name = ?, unit = ?, unit_price = ?
+        SET name = ?, unit = ?
         WHERE ahsp_id = ?
-    ", [$ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $ahspId]);
-    
-    dbExecute("
-        UPDATE rap_items rap
-        JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-        SET rap.unit_price = rs.unit_price
-        WHERE rs.ahsp_id = ? AND rap.is_locked = 0
-    ", [$ahspId]);
+    ", [$ahsp['work_name'], $ahsp['unit'], $ahspId]);
 }
 
 /**
@@ -1872,6 +1856,271 @@ function formatOverheadProfitLabel($project, $scope = null) {
 
 /**
  * Calculate real-time RAB, RAP, and Actual statistics for a single project.
+// ============================================
+// CENTRALIZED DYNAMIC CALCULATION HELPERS
+// Single Source of Truth — zero stored formula dependency
+// ============================================
+
+/**
+ * Return SQL expression for effective request_items quantity.
+ * - Harian: COALESCE(work_quantity, 0) * COALESCE(work_duration, 1)
+ * - Borongan / Non-RAB: COALESCE(quantity, 0)
+ *
+ * @param string $alias Table alias (e.g. 'reqi', 'reqi2', 'ri', or '' for unaliased)
+ * @return string
+ */
+function sqlRequestItemQtyExpr($alias = 'reqi') {
+    $alias = trim((string)$alias);
+    if ($alias !== '') {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $alias)) {
+            $alias = 'reqi';
+        }
+        $p = $alias . '.';
+    } else {
+        $p = '';
+    }
+    return "CASE WHEN {$p}work_type = 'harian' THEN COALESCE({$p}work_quantity, 0) * COALESCE({$p}work_duration, 1) ELSE COALESCE({$p}quantity, 0) END";
+}
+
+/**
+ * Return SQL expression for dynamic request_items line total (effective_qty * unit_price).
+ *
+ * @param string $alias Table alias (e.g. 'reqi', 'reqi2', 'ri', or '' for unaliased)
+ * @return string
+ */
+function sqlRequestItemTotalExpr($alias = 'reqi') {
+    $alias = trim((string)$alias);
+    if ($alias !== '') {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $alias)) {
+            $alias = 'reqi';
+        }
+        $p = $alias . '.';
+    } else {
+        $p = '';
+    }
+    $qtyExpr = sqlRequestItemQtyExpr($alias);
+    return "(({$qtyExpr}) * COALESCE({$p}unit_price, 0))";
+}
+
+/**
+ * PHP equivalent of sqlRequestItemQtyExpr() for a request_items row array.
+ *
+ * @param array $item
+ * @return float
+ */
+function getRequestItemEffectiveQty(array $item) {
+    $workType = $item['work_type'] ?? 'borongan';
+    if ($workType === 'harian') {
+        $wq = floatval($item['work_quantity'] ?? 0);
+        $wd = (isset($item['work_duration']) && $item['work_duration'] !== null && $item['work_duration'] !== '')
+            ? floatval($item['work_duration'])
+            : 1.0;
+        return $wq * $wd;
+    }
+    return floatval($item['quantity'] ?? 0);
+}
+
+/**
+ * PHP equivalent of sqlRequestItemTotalExpr() for a request_items row array.
+ *
+ * @param array $item
+ * @return float
+ */
+function getRequestItemTotal(array $item) {
+    return getRequestItemEffectiveQty($item) * floatval($item['unit_price'] ?? 0);
+}
+
+/**
+ * Batch-load dynamic RAP component breakdown & base unit price per subcategory_id.
+ * Preserves existing PCM business-rule priority without reading stale rap_items.unit_price:
+ *   1. project_ahsp_details_rap (Master Data RAP AHSP — authoritative source)
+ *   2. rap_ahsp_details (per-RAP-item detail fallback if Master Data RAP AHSP has no components)
+ *   3. project_ahsp_details (Master Data RAB AHSP fallback if neither RAP detail source has components)
+ *   4. 0.0 if no valid component details exist
+ *
+ * @param int $projectId
+ * @return array [subcategory_id => ['upah' => float, 'material' => float, 'alat' => float, 'total' => float]]
+ */
+function batchGetRapItemBreakdowns($projectId) {
+    $projectId = intval($projectId);
+    if ($projectId <= 0) {
+        return [];
+    }
+
+    $rapMasterByCode = batchGetRapAhspComponentBreakdowns($projectId);
+    $rabMasterByAhspId = batchGetAhspComponentBreakdowns($projectId);
+
+    // Load per-RAP-item rap_ahsp_details breakdown in 1 batch query
+    $rapItemDetailRows = dbGetAll("
+        SELECT ri.subcategory_id, rad.category,
+               COALESCE(SUM(rad.coefficient * COALESCE(rad.unit_price, 0)), 0) as total
+        FROM rap_items ri
+        JOIN rab_subcategories rs ON ri.subcategory_id = rs.id
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        JOIN rap_ahsp_details rad ON rad.rap_item_id = ri.id
+        WHERE rc.project_id = ?
+        GROUP BY ri.subcategory_id, rad.category
+    ", [$projectId]);
+
+    $rapItemDetailsBySub = [];
+    foreach ($rapItemDetailRows as $r) {
+        $subId = intval($r['subcategory_id']);
+        if (!isset($rapItemDetailsBySub[$subId])) {
+            $rapItemDetailsBySub[$subId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+        }
+        $cat = $r['category'] ?? '';
+        $val = floatval($r['total']);
+        if (isset($rapItemDetailsBySub[$subId][$cat])) {
+            $rapItemDetailsBySub[$subId][$cat] = $val;
+        }
+        $rapItemDetailsBySub[$subId]['total'] += $val;
+    }
+
+    // Map all subcategories in this project
+    $subcats = dbGetAll("
+        SELECT rs.id as subcategory_id, rs.ahsp_id, pa.ahsp_code
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+        WHERE rc.project_id = ?
+    ", [$projectId]);
+
+    $result = [];
+    foreach ($subcats as $sub) {
+        $subId = intval($sub['subcategory_id']);
+        $ahspId = intval($sub['ahsp_id'] ?? 0);
+        $ahspCode = $sub['ahsp_code'] ?? null;
+
+        // Priority 1: Master Data RAP (project_ahsp_details_rap)
+        if ($ahspCode && isset($rapMasterByCode[$ahspCode])) {
+            $c = $rapMasterByCode[$ahspCode];
+            $tot = floatval($c['upah']) + floatval($c['material']) + floatval($c['alat']);
+            if ($tot > 0) {
+                $result[$subId] = [
+                    'upah' => floatval($c['upah']),
+                    'material' => floatval($c['material']),
+                    'alat' => floatval($c['alat']),
+                    'total' => $tot,
+                ];
+                continue;
+            }
+        }
+
+        // Priority 2: Per-RAP-item details (rap_ahsp_details)
+        if (isset($rapItemDetailsBySub[$subId]) && $rapItemDetailsBySub[$subId]['total'] > 0) {
+            $result[$subId] = $rapItemDetailsBySub[$subId];
+            continue;
+        }
+
+        // Priority 3: Master Data RAB (project_ahsp_details)
+        if ($ahspId > 0 && isset($rabMasterByAhspId[$ahspId]) && $rabMasterByAhspId[$ahspId]['total'] > 0) {
+            $result[$subId] = $rabMasterByAhspId[$ahspId];
+            continue;
+        }
+
+        $result[$subId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+    }
+
+    return $result;
+}
+
+/**
+ * Batch-load dynamic RAP base unit prices per subcategory_id (no overhead applied).
+ *
+ * @param int $projectId
+ * @return array [subcategory_id => float unit_price]
+ */
+function batchGetRapItemUnitPrices($projectId) {
+    $breakdowns = batchGetRapItemBreakdowns($projectId);
+    $prices = [];
+    foreach ($breakdowns as $subId => $bd) {
+        $prices[$subId] = floatval($bd['total'] ?? 0.0);
+    }
+    return $prices;
+}
+
+/**
+ * Batch-load dynamic historical snapshot subcategory unit prices & component breakdowns
+ * from frozen rab_snapshot_ahsp_details (does NOT read live project_items.price).
+ *
+ * @param int $snapshotId
+ * @return array [snapshot_subcategory_id => ['upah' => float, 'material' => float, 'alat' => float, 'total' => float]]
+ */
+function batchGetSnapshotSubcatUnitPrices($snapshotId) {
+    $snapshotId = intval($snapshotId);
+    if ($snapshotId <= 0) {
+        return [];
+    }
+
+    $rows = dbGetAll("
+        SELECT d.snapshot_subcategory_id, d.category,
+               COALESCE(SUM(d.coefficient * d.unit_price), 0) as total_cat
+        FROM rab_snapshot_ahsp_details d
+        JOIN rab_snapshot_subcategories ss ON d.snapshot_subcategory_id = ss.id
+        JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
+        WHERE sc.snapshot_id = ?
+        GROUP BY d.snapshot_subcategory_id, d.category
+    ", [$snapshotId]);
+
+    $map = [];
+    foreach ($rows as $r) {
+        $sId = intval($r['snapshot_subcategory_id']);
+        if (!isset($map[$sId])) {
+            $map[$sId] = ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+        }
+        $catKey = $r['category'] ?? '';
+        $val = floatval($r['total_cat']);
+        if (isset($map[$sId][$catKey])) {
+            $map[$sId][$catKey] = $val;
+        }
+        $map[$sId]['total'] += $val;
+    }
+
+    return $map;
+}
+
+/**
+ * Batch-load dynamic RAP item quantity capacity per [item_code][subcategory_id] for a project:
+ *   rap_qty = d.coefficient * COALESCE(rap.volume, rs.volume, 0)
+ * Used for dynamic sequential filling without relying on stored subcat_details.rap_qty.
+ *
+ * @param int $projectId
+ * @return array [item_code => [subcategory_id => float rap_qty]]
+ */
+function batchGetSubcatRapItemQtyMap($projectId) {
+    $projectId = intval($projectId);
+    if ($projectId <= 0) {
+        return [];
+    }
+
+    $rows = dbGetAll("
+        SELECT pir.item_code, rs.id as subcategory_id,
+               COALESCE(SUM(d.coefficient * COALESCE(ri.volume, rs.volume, 0)), 0) as rap_qty
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        JOIN project_ahsp pa ON rs.ahsp_id = pa.id
+        JOIN project_ahsp_rap par ON par.ahsp_code = pa.ahsp_code AND par.project_id = pa.project_id
+        JOIN project_ahsp_details_rap d ON d.ahsp_id = par.id
+        JOIN project_items_rap pir ON d.item_id = pir.id
+        LEFT JOIN rap_items ri ON ri.subcategory_id = rs.id
+        WHERE rc.project_id = ?
+        GROUP BY pir.item_code, rs.id
+    ", [$projectId]);
+
+    $map = [];
+    foreach ($rows as $r) {
+        $code = (string)($r['item_code'] ?? '');
+        $subId = intval($r['subcategory_id']);
+        if ($code !== '' && $subId > 0) {
+            $map[$code][$subId] = floatval($r['rap_qty']);
+        }
+    }
+
+    return $map;
+}
+
+/**
+ * Calculate real-time project RAB, RAP, Actual, and category statistics dynamically.
  * Uses exact dynamic AHSP component prices, overhead percentage, PPN, and actualization adjustments.
  * 
  * @param int $projectId
@@ -1885,41 +2134,20 @@ function calculateProjectRealtimeStats($projectId) {
     $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
     $ppnPct = floatval($project['ppn_percentage'] ?? 11);
 
-    // Pre-calculate RAB AHSP component totals
+    // Pre-calculate RAB AHSP component totals dynamically
+    $rabBreakdowns = batchGetAhspComponentBreakdowns($projectId);
     $ahspPrices = [];
-    $ahspRows = dbGetAll("
-        SELECT pa.id as ahsp_id, COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total 
-        FROM project_ahsp pa
-        LEFT JOIN project_ahsp_details d ON d.ahsp_id = pa.id
-        LEFT JOIN project_items i ON d.item_id = i.id 
-        WHERE pa.project_id = ?
-        GROUP BY pa.id
-    ", [$projectId]);
-    foreach ($ahspRows as $r) {
-        $ahspPrices[$r['ahsp_id']] = floatval($r['total']);
+    foreach ($rabBreakdowns as $ahspId => $bd) {
+        $ahspPrices[$ahspId] = floatval($bd['total'] ?? 0.0);
     }
 
-    // Pre-calculate RAP AHSP component totals
-    $ahspRapPrices = [];
-    $ahspRapRows = dbGetAll("
-        SELECT pa.ahsp_code, COALESCE(SUM(d.coefficient * COALESCE(d.unit_price, i.price)), 0) as total 
-        FROM project_ahsp_rap pa
-        LEFT JOIN project_ahsp_details_rap d ON d.ahsp_id = pa.id
-        LEFT JOIN project_items_rap i ON d.item_id = i.id 
-        WHERE pa.project_id = ?
-        GROUP BY pa.ahsp_code
-    ", [$projectId]);
-    foreach ($ahspRapRows as $r) {
-        $ahspRapPrices[$r['ahsp_code']] = floatval($r['total']);
-    }
+    // Pre-calculate RAP base unit prices dynamically per subcategory_id
+    $rapUnitPriceMap = batchGetRapItemUnitPrices($projectId);
 
-    // Actualization adjustments: batchGetActualSpendingBySubcategory already includes net actualization
-    $actualizationAdjustments = [];
-
-    // Pre-load actual spending per subcategory
+    // Pre-load actual spending per subcategory (pure in-memory computation)
     $actualSpendingMap = batchGetActualSpendingBySubcategory($projectId);
 
-    // Fetch categories and subcategories
+    // Fetch categories and subcategories (no stored unit_price columns read)
     $categories = dbGetAll("
         SELECT rc.id, rc.code, rc.name, rc.sort_order
         FROM rab_categories rc
@@ -1934,12 +2162,10 @@ function calculateProjectRealtimeStats($projectId) {
 
     foreach ($categories as $cat) {
         $subcats = dbGetAll("
-            SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price, rs.ahsp_id,
-                   rap.volume as rap_volume, rap.unit_price as rap_unit_price,
-                   pa.ahsp_code
+            SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.ahsp_id,
+                   rap.volume as rap_volume
             FROM rab_subcategories rs
             LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
-            LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
             WHERE rs.category_id = ?
             ORDER BY rs.sort_order, rs.code
         ", [$cat['id']]);
@@ -1949,30 +2175,21 @@ function calculateProjectRealtimeStats($projectId) {
         $catActual = 0;
 
         foreach ($subcats as $sub) {
-            // RAB calculation
-            $rabBasePrice = isset($ahspPrices[$sub['ahsp_id']]) ? $ahspPrices[$sub['ahsp_id']] : floatval($sub['rab_unit_price']);
+            // RAB calculation (100% dynamic from project_ahsp_details)
+            $rabBasePrice = floatval($ahspPrices[$sub['ahsp_id']] ?? 0.0);
             $rabUnitPrice = $rabBasePrice * (1 + ($rabOverheadPct / 100));
             $subRab = floatval($sub['rab_volume']) * $rabUnitPrice;
             $catRab += $subRab;
 
-            // RAP calculation
+            // RAP calculation (100% dynamic via batchGetRapItemUnitPrices)
             $rapVol = (isset($sub['rap_volume']) && $sub['rap_volume'] !== null) ? floatval($sub['rap_volume']) : floatval($sub['rab_volume']);
-            $ahspCode = $sub['ahsp_code'] ?? null;
-            $rapBasePrice = 0;
-            if ($ahspCode && isset($ahspRapPrices[$ahspCode])) {
-                $rapBasePrice = $ahspRapPrices[$ahspCode];
-            }
-            if ($rapBasePrice <= 0) {
-                $rapBasePrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) ? floatval($sub['rap_unit_price']) : floatval($sub['rab_unit_price']);
-            }
+            $rapBasePrice = floatval($rapUnitPriceMap[intval($sub['id'])] ?? 0.0);
             $rapUnitPrice = $rapBasePrice * (1 + ($rapOverheadPct / 100));
             $subRap = $rapVol * $rapUnitPrice;
             $catRap += $subRap;
 
             // Actual calculation
             $subAct = floatval($actualSpendingMap[$sub['id']] ?? 0);
-            $adj = $actualizationAdjustments[$sub['id']] ?? 0;
-            $subAct -= $adj;
             if ($subAct < 0) $subAct = 0;
             $catActual += $subAct;
         }
@@ -2087,16 +2304,16 @@ function batchGetRapAhspComponentBreakdowns($projectId) {
 /**
  * Batch-load actual spending per subcategory for a project.
 /**
- * Synchronize and recalculate weekly progress and actual spending for a project.
- * Ensures weekly_progress table and actual spending are 100% mathematically consistent
- * with approved requests and actualization reports (sisa anggaran).
+ * Dynamically calculate weekly progress and actual spending for a project in memory.
+ * Pure read-only computation with request-local static cache (ZERO writes to weekly_progress table).
+ * 100% mathematically consistent with approved requests, dynamic item totals, and actualization reports (sisa anggaran).
  *
  * @param int $projectId
- * @param bool $persistToDb Whether to update weekly_progress table in database (default true)
+ * @param bool $persistToDb Deprecated (ignored; weekly_progress is no longer persisted as a DB cache)
  * @param bool $forceRefresh Whether to bypass in-memory static cache (default false)
  * @return array ['spending' => array, 'breakdown' => array, 'weekly' => array]
  */
-function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefresh = false) {
+function syncProjectWeeklyProgress($projectId, $persistToDb = false, $forceRefresh = false) {
     static $cache = [];
     $projectId = intval($projectId);
     if (!$projectId) {
@@ -2112,15 +2329,6 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
         return ['spending' => [], 'breakdown' => [], 'weekly' => []];
     }
 
-    $weeklyRanges = [];
-    if (!empty($project['start_date']) && !empty($project['duration_days'])) {
-        $weeklyRanges = generateWeeklyRanges($project['start_date'], $project['duration_days']);
-    }
-    $weekRangeMap = [];
-    foreach ($weeklyRanges as $wr) {
-        $weekRangeMap[$wr['week_number']] = $wr;
-    }
-
     // 1. Get all approved requests
     $requests = dbGetAll("
         SELECT r.id, r.request_number, r.target_week, r.week_number, r.is_actualized,
@@ -2132,9 +2340,6 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
     ", [$projectId]);
 
     if (empty($requests)) {
-        if ($persistToDb) {
-            dbExecute("UPDATE weekly_progress SET realization_amount = 0, updated_at = NOW() WHERE project_id = ? AND realization_amount > 0", [$projectId]);
-        }
         $cache[$projectId] = ['spending' => [], 'breakdown' => [], 'weekly' => []];
         return $cache[$projectId];
     }
@@ -2142,10 +2347,10 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
     $reqIds = array_column($requests, 'id');
     $placeholders = implode(',', array_fill(0, count($reqIds), '?'));
 
-    // 2. Fetch all request items for all approved requests in ONE query
+    // 2. Fetch all request items for all approved requests in ONE query (base input fields only)
     $allItems = dbGetAll("
         SELECT reqi.id, reqi.request_id, reqi.subcategory_id, reqi.subcat_details, reqi.item_code, reqi.item_type,
-               reqi.unit_price, reqi.coefficient, reqi.quantity, reqi.work_type, reqi.total_price,
+               reqi.unit_price, reqi.quantity, reqi.work_type, reqi.work_quantity, reqi.work_duration,
                pi.category as pi_category
         FROM request_items reqi
         LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
@@ -2158,7 +2363,7 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
         $itemsByReq[$item['request_id']][] = $item;
     }
 
-    // 3. Valid subcategories for this project (protect against orphaned references in deleted subcategories)
+    // 3. Valid subcategories & dynamic RAP qty capacity map (single batch query, no stored subcat_details.rap_qty dependency)
     $validSubcatRows = dbGetAll("
         SELECT rs.id 
         FROM rab_subcategories rs
@@ -2166,6 +2371,7 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
         WHERE rc.project_id = ?
     ", [$projectId]);
     $validSubcatMap = array_flip(array_column($validSubcatRows, 'id'));
+    $rapQtyMap = batchGetSubcatRapItemQtyMap($projectId);
 
     $spendingBySubcat = [];
     $breakdownBySubcat = [];
@@ -2199,27 +2405,32 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
             if ($itemWorkType === 'harian') {
                 $subId = intval($item['subcategory_id']);
                 if ($subId > 0 && isset($validSubcatMap[$subId])) {
-                    $amt = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                    $amt = getRequestItemTotal($item);
                     $reqSubcatGross[$subId][$comp] = ($reqSubcatGross[$subId][$comp] ?? 0.0) + $amt;
                     $reqCompGross[$comp] += $amt;
                 }
                 continue;
             }
 
-            $itemCoef = floatval($item['coefficient'] ?: $item['quantity']);
+            $itemQty = getRequestItemEffectiveQty($item);
             $itemPrice = floatval($item['unit_price']);
             $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
 
             if (!empty($subcatDetails) && is_array($subcatDetails)) {
-                $remaining = $itemCoef;
-                $itemCode = $item['item_code'];
+                $remaining = $itemQty;
+                $itemCode = (string)($item['item_code'] ?? '');
 
                 foreach ($subcatDetails as $sd) {
                     if ($remaining <= 0) break;
-                    $subId = intval($sd['subcategory_id']);
+                    $subId = intval($sd['subcategory_id'] ?? 0);
                     if (!isset($validSubcatMap[$subId])) continue;
 
-                    $rapQty = floatval($sd['rap_qty'] ?? 0);
+                    // Dynamic rap_qty from live RAP AHSP; fallback to legacy JSON only if live RAP detail no longer exists
+                    if ($itemCode !== '' && isset($rapQtyMap[$itemCode][$subId])) {
+                        $rapQty = floatval($rapQtyMap[$itemCode][$subId]);
+                    } else {
+                        $rapQty = floatval($sd['rap_qty'] ?? 0);
+                    }
                     $usedAlready = $usedByItemSubcat[$itemCode][$subId] ?? 0.0;
                     $actualSisa = max(0.0, $rapQty - $usedAlready);
 
@@ -2235,7 +2446,7 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
                 }
 
                 if ($remaining > 0 && !empty($subcatDetails)) {
-                    $lastSubcatId = intval(end($subcatDetails)['subcategory_id']);
+                    $lastSubcatId = intval(end($subcatDetails)['subcategory_id'] ?? 0);
                     if (isset($validSubcatMap[$lastSubcatId])) {
                         $amt = $remaining * $itemPrice;
                         $reqSubcatGross[$lastSubcatId][$comp] = ($reqSubcatGross[$lastSubcatId][$comp] ?? 0.0) + $amt;
@@ -2246,7 +2457,7 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
             } else {
                 $subId = intval($item['subcategory_id']);
                 if ($subId > 0 && isset($validSubcatMap[$subId])) {
-                    $amt = floatval($item['total_price'] ?: ($itemCoef * $itemPrice));
+                    $amt = $itemQty * $itemPrice;
                     $reqSubcatGross[$subId][$comp] = ($reqSubcatGross[$subId][$comp] ?? 0.0) + $amt;
                     $reqCompGross[$comp] += $amt;
                 }
@@ -2320,37 +2531,6 @@ function syncProjectWeeklyProgress($projectId, $persistToDb = true, $forceRefres
                 }
                 $breakdownBySubcat[$subId][$c] += $netAmt;
                 $spendingBySubcat[$subId] = ($spendingBySubcat[$subId] ?? 0.0) + $netAmt;
-            }
-        }
-    }
-
-    if ($persistToDb) {
-        $activePairs = [];
-        foreach ($weeklyBySubcat as $subId => $weeks) {
-            foreach ($weeks as $wNum => $data) {
-                $netTotal = round($data['total'], 2);
-                $wStart = $weekRangeMap[$wNum]['start'] ?? null;
-                $wEnd = $weekRangeMap[$wNum]['end'] ?? null;
-                $activePairs[] = $subId . '_' . $wNum;
-
-                dbExecute("
-                    INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
-                    ON DUPLICATE KEY UPDATE 
-                        realization_amount = VALUES(realization_amount),
-                        week_start = VALUES(week_start),
-                        week_end = VALUES(week_end),
-                        updated_at = NOW()
-                ", [$projectId, $subId, $wNum, $wStart, $wEnd, $netTotal]);
-            }
-        }
-
-        // Set realization_amount = 0 for any old entries not in activePairs
-        $existingWp = dbGetAll("SELECT id, subcategory_id, week_number, realization_amount FROM weekly_progress WHERE project_id = ?", [$projectId]);
-        foreach ($existingWp as $ewp) {
-            $key = $ewp['subcategory_id'] . '_' . $ewp['week_number'];
-            if (!in_array($key, $activePairs) && floatval($ewp['realization_amount']) > 0) {
-                dbExecute("UPDATE weekly_progress SET realization_amount = 0, updated_at = NOW() WHERE id = ?", [$ewp['id']]);
             }
         }
     }
@@ -2771,9 +2951,9 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
         $ahsps = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
         foreach ($ahsps as $ahsp) {
             $newAhspId = dbInsert("
-                INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price)
-                VALUES (?, ?, ?, ?, ?)
-            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price']]);
+                INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit)
+                VALUES (?, ?, ?, ?)
+            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit']]);
             $maps['project_ahsp'][$ahsp['id']] = intval($newAhspId);
             
             $details = dbGetAll("SELECT * FROM project_ahsp_details WHERE ahsp_id = ? ORDER BY id ASC", [$ahsp['id']]);
@@ -2801,9 +2981,9 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                 $newRabAhspId = $maps['project_ahsp'][$ahsp['rab_ahsp_id']];
             }
             $newRapAhspId = dbInsert("
-                INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $newRabAhspId]);
+                INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, rab_ahsp_id)
+                VALUES (?, ?, ?, ?, ?)
+            ", [$newProjectId, $ahsp['ahsp_code'], $ahsp['work_name'], $ahsp['unit'], $newRabAhspId]);
             $maps['project_ahsp_rap'][$ahsp['id']] = intval($newRapAhspId);
             
             $details = dbGetAll("SELECT * FROM project_ahsp_details_rap WHERE ahsp_id = ? ORDER BY id ASC", [$ahsp['id']]);
@@ -2857,9 +3037,9 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                     $newAhspId = ($sub['ahsp_id'] === null) ? null : 0;
                 }
                 $newSubId = dbInsert("
-                    INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ", [$newCatId, $newAhspId, $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $sub['unit_price'], $sub['sort_order']]);
+                    INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, sort_order)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ", [$newCatId, $newAhspId, $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $sub['sort_order']]);
                 $maps['rab_subcategories'][$sub['id']] = intval($newSubId);
             }
         }
@@ -2877,9 +3057,9 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                 $newSubcatId = $maps['rab_subcategories'][$ri['subcategory_id']];
                 
                 $newRapItemRecordId = dbInsert("
-                    INSERT INTO rap_items (subcategory_id, volume, unit_price, notes, rab_source_type, rab_snapshot_id, is_locked)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ", [$newSubcatId, $ri['volume'], $ri['unit_price'], $ri['notes'], $ri['rab_source_type'], null, $ri['is_locked']]);
+                    INSERT INTO rap_items (subcategory_id, volume, notes, rab_source_type, rab_snapshot_id, is_locked)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ", [$newSubcatId, $ri['volume'], $ri['notes'], $ri['rab_source_type'], null, $ri['is_locked']]);
                 $maps['rap_items'][$ri['id']] = intval($newRapItemRecordId);
                 
                 $rapDetails = dbGetAll("SELECT * FROM rap_ahsp_details WHERE rap_item_id = ? ORDER BY id ASC", [$ri['id']]);
@@ -2949,9 +3129,10 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                         $newAhspId = $maps['project_ahsp'][$ss['ahsp_id']];
                     }
                     $newSnapSubId = dbInsert("
-                        INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, code, name, unit, volume, unit_price, ahsp_id, sort_order)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ", [$newSnapCatId, $newOrigSubId, $ss['code'], $ss['name'], $ss['unit'], $ss['volume'], $ss['unit_price'], $newAhspId, $ss['sort_order']]);
+                        INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, code, name, unit, volume, ahsp_id, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ", [$newSnapCatId, $newOrigSubId, $ss['code'], $ss['name'], $ss['unit'], $ss['volume'], $newAhspId, $ss['sort_order']]);
+                    $maps['rab_snapshot_subcategories'][$ss['id']] = intval($newSnapSubId);
                     $maps['rab_snapshot_subcategories'][$ss['id']] = intval($newSnapSubId);
                     
                     $snapAhspDetails = dbGetAll("SELECT * FROM rab_snapshot_ahsp_details WHERE snapshot_subcategory_id = ? ORDER BY sort_order ASC, id ASC", [$ss['id']]);
@@ -3008,12 +3189,12 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             $newReqId = dbInsert("
                 INSERT INTO requests (
                     project_id, request_number, request_date, week_number, description, status,
-                    total_amount, approved_amount, approved_by, approved_at, admin_notes, target_week,
+                    approved_by, approved_at, admin_notes, target_week,
                     rejection_reason, created_by, is_actualized, pm_approved_by, pm_approved_at, pm_notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ", [
                 $newProjectId, $req['request_number'], $req['request_date'], $req['week_number'], $req['description'], $req['status'],
-                $req['total_amount'], $req['approved_amount'], $req['approved_by'], $req['approved_at'], $req['admin_notes'], $req['target_week'],
+                $req['approved_by'], $req['approved_at'], $req['admin_notes'], $req['target_week'],
                 $req['rejection_reason'], $req['created_by'], $req['is_actualized'], $req['pm_approved_by'], $req['pm_approved_at'], $req['pm_notes']
             ]);
             $maps['requests'][$req['id']] = intval($newReqId);
@@ -3039,13 +3220,13 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
                         request_id, subcategory_id, subcat_details, category_id, item_name,
                         item_code, item_type, work_type, work_volume, work_unit, work_quantity,
                         work_quantity_unit, work_duration, work_duration_unit, work_billing_unit,
-                        unit, quantity, coefficient, unit_price, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        unit, quantity, unit_price, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ", [
                     $newReqId, $newSubcatId, $ri['subcat_details'], $newCatId, $ri['item_name'],
                     $ri['item_code'], $ri['item_type'], $ri['work_type'] ?? 'borongan', $ri['work_volume'] ?? null, $ri['work_unit'] ?? null, $ri['work_quantity'] ?? null,
                     $ri['work_quantity_unit'] ?? null, $ri['work_duration'] ?? null, $ri['work_duration_unit'] ?? 'Hr', $ri['work_billing_unit'] ?? null,
-                    $ri['unit'], $ri['quantity'], $ri['coefficient'], $ri['unit_price'], $ri['notes']
+                    $ri['unit'], $ri['quantity'], $ri['unit_price'], $ri['notes']
                 ]);
                 $maps['request_items'][$ri['id']] = intval($newReqItemId);
             }
@@ -3109,18 +3290,25 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             }
         }
         
-        // 11. Clone Weekly Progress (weekly_progress)
-        $progressList = dbGetAll("SELECT * FROM weekly_progress WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
-        foreach ($progressList as $prog) {
-            if (!isset($maps['rab_subcategories'][$prog['subcategory_id']])) {
-                throw new RuntimeException("Missing mapping for weekly_progress subcategory_id: " . $prog['subcategory_id']);
+        // 11. Weekly Progress is 100% dynamic; cloning requests above preserves all weekly history.
+        // Optional sync check if legacy table still exists prior to drop
+        $hasWeeklyTable = dbGetRow("
+            SELECT COUNT(*) as cnt 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'weekly_progress'
+        ")['cnt'] ?? 0;
+        if (intval($hasWeeklyTable) > 0) {
+            $progressList = dbGetAll("SELECT * FROM weekly_progress WHERE project_id = ? ORDER BY id ASC", [$sourceProjectId]);
+            foreach ($progressList as $prog) {
+                if (isset($maps['rab_subcategories'][$prog['subcategory_id']])) {
+                    $newSubcatId = $maps['rab_subcategories'][$prog['subcategory_id']];
+                    $newProgId = dbInsert("
+                        INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, notes, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ", [$newProjectId, $newSubcatId, $prog['week_number'], $prog['week_start'], $prog['week_end'], $prog['realization_amount'], $prog['notes'], $prog['created_by']]);
+                    $maps['weekly_progress'][$prog['id']] = intval($newProgId);
+                }
             }
-            $newSubcatId = $maps['rab_subcategories'][$prog['subcategory_id']];
-            $newProgId = dbInsert("
-                INSERT INTO weekly_progress (project_id, subcategory_id, week_number, week_start, week_end, realization_amount, notes, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ", [$newProjectId, $newSubcatId, $prog['week_number'], $prog['week_start'], $prog['week_end'], $prog['realization_amount'], $prog['notes'], $prog['created_by']]);
-            $maps['weekly_progress'][$prog['id']] = intval($newProgId);
         }
         
         // 12. Clone Project Images (project_images)
@@ -3213,10 +3401,12 @@ function duplicateProject($sourceProjectId, $newName, $newCode, $userId) {
             ['table' => 'rab_categories', 'sourceCount' => count($categories), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_categories WHERE project_id = ?"],
             ['table' => 'rab_snapshots', 'sourceCount' => count($snapshots), 'newQuery' => "SELECT COUNT(*) as cnt FROM rab_snapshots WHERE project_id = ?"],
             ['table' => 'requests', 'sourceCount' => count($requests), 'newQuery' => "SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND (request_type = 'rab' OR request_type IS NULL)"],
-            ['table' => 'weekly_progress', 'sourceCount' => count($progressList), 'newQuery' => "SELECT COUNT(*) as cnt FROM weekly_progress WHERE project_id = ?"],
             ['table' => 'project_images', 'sourceCount' => count($images), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_images WHERE project_id = ?"],
             ['table' => 'project_documents', 'sourceCount' => count($docs), 'newQuery' => "SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?"],
         ];
+        if (intval($hasWeeklyTable) > 0 && isset($progressList)) {
+            $checks[] = ['table' => 'weekly_progress', 'sourceCount' => count($progressList), 'newQuery' => "SELECT COUNT(*) as cnt FROM weekly_progress WHERE project_id = ?"];
+        }
         foreach ($checks as $chk) {
             $newCnt = intval(dbGetRow($chk['newQuery'], [$newProjectId])['cnt'] ?? 0);
             if ($newCnt !== $chk['sourceCount']) {
@@ -3302,12 +3492,14 @@ function getNonRabCategoryLabel($categoryKey) {
  */
 function getProjectNonRabTransactions($projectId) {
     $projectId = intval($projectId);
+    $qtyExpr = sqlRequestItemQtyExpr('reqi');
+    $totalExpr = sqlRequestItemTotalExpr('reqi');
     return dbGetAll("
         SELECT req.id as request_id, req.request_number, req.request_date, req.request_date as receipt_date, req.created_at, req.target_week, req.week_number, req.description,
                u.full_name as created_by_name,
-               reqi.id as item_id, reqi.item_name, reqi.quantity, reqi.unit, reqi.unit_price, 
-               reqi.total_price as total_amount,
-               reqi.total_price as total_price,
+               reqi.id as item_id, reqi.item_name, ({$qtyExpr}) as quantity, reqi.unit, reqi.unit_price, 
+               ({$totalExpr}) as total_amount,
+               ({$totalExpr}) as total_price,
                reqi.notes,
                (SELECT filename FROM request_attachments ra WHERE ra.request_id = req.id LIMIT 1) as receipt_file,
                req.non_rab_category
@@ -3327,8 +3519,9 @@ function getProjectNonRabTransactions($projectId) {
  */
 function getProjectNonRabActualTotal($projectId) {
     $projectId = intval($projectId);
+    $totalExpr = sqlRequestItemTotalExpr('reqi');
     $row = dbGetRow("
-        SELECT COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_approved
+        SELECT COALESCE(SUM({$totalExpr}), 0) as total_approved
         FROM requests req
         JOIN request_items reqi ON reqi.request_id = req.id
         WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
@@ -3345,6 +3538,7 @@ function getProjectNonRabActualTotal($projectId) {
 function getProjectNonRabBudgetSummary($projectId) {
     $projectId = intval($projectId);
     $categories = getNonRabCategories();
+    $totalExpr = sqlRequestItemTotalExpr('reqi');
 
     // Fetch configured budgets
     $budgets = dbGetAll("SELECT * FROM project_non_rab_budgets WHERE project_id = ?", [$projectId]);
@@ -3353,9 +3547,9 @@ function getProjectNonRabBudgetSummary($projectId) {
         $budgetMap[$b['category']] = $b;
     }
 
-    // Approved Non-RAB Actuals (Authoritative SUM(quantity * unit_price))
+    // Approved Non-RAB Actuals (Authoritative dynamic SUM)
     $approvedRows = dbGetAll("
-        SELECT req.non_rab_category, COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_approved
+        SELECT req.non_rab_category, COALESCE(SUM({$totalExpr}), 0) as total_approved
         FROM requests req
         JOIN request_items reqi ON reqi.request_id = req.id
         WHERE req.project_id = ? AND req.status = 'approved' AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
@@ -3368,7 +3562,7 @@ function getProjectNonRabBudgetSummary($projectId) {
 
     // Pending / PM Approved Non-RAB Requests
     $pendingRows = dbGetAll("
-        SELECT req.non_rab_category, COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total_pending
+        SELECT req.non_rab_category, COALESCE(SUM({$totalExpr}), 0) as total_pending
         FROM requests req
         JOIN request_items reqi ON reqi.request_id = req.id
         WHERE req.project_id = ? AND req.status IN ('pending', 'pm_approved') AND (req.request_type = 'non_rab' OR reqi.subcategory_id IS NULL)
@@ -3434,6 +3628,166 @@ function getProjectNonRabBudgetSummary($projectId) {
 
     return $summary;
 }
+
+if (!function_exists('getProjectPeriodActualSpending')) {
+    /**
+     * Calculate actual spending in a given period for a project
+     */
+    function getProjectPeriodActualSpending($projectId, $startDate = null, $endDate = null) {
+        $where = "req.project_id = ? AND req.status = 'approved'";
+        $params = [$projectId];
+        
+        if ($startDate) {
+            $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
+            $params[] = $startDate;
+        }
+        if ($endDate) {
+            $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
+            $params[] = $endDate;
+        }
+        
+        $totExpr = sqlRequestItemTotalExpr('reqi');
+        $row = dbGetRow("
+            SELECT COALESCE(SUM($totExpr), 0) as total
+            FROM request_items reqi
+            JOIN requests req ON reqi.request_id = req.id
+            WHERE $where
+        ", $params);
+        
+        return floatval($row['total'] ?? 0);
+    }
+}
+
+if (!function_exists('fetchProjectTransactions')) {
+    /**
+     * Fetch detailed transactions for export
+     */
+    function fetchProjectTransactions($accessibleProjectIds, $projectId = 'all', $startDate = null, $endDate = null) {
+        if (empty($accessibleProjectIds)) return [];
+        
+        $where = "req.status = 'approved'";
+        $params = [];
+        
+        if ($projectId === 'all' || empty($projectId)) {
+            $placeholders = implode(',', array_fill(0, count($accessibleProjectIds), '?'));
+            $where .= " AND req.project_id IN ($placeholders)";
+            $params = array_merge($params, $accessibleProjectIds);
+        } else {
+            $where .= " AND req.project_id = ?";
+            $params[] = intval($projectId);
+        }
+        
+        if ($startDate) {
+            $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
+            $params[] = $startDate;
+        }
+        if ($endDate) {
+            $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
+            $params[] = $endDate;
+        }
+        
+        $qtyExpr = sqlRequestItemQtyExpr('reqi');
+        $totExpr = sqlRequestItemTotalExpr('reqi');
+        return dbGetAll("
+            SELECT req.id as request_id, req.request_number, req.request_type, req.non_rab_category, req.request_date, req.created_at, req.target_week, req.week_number,
+                   p.id as project_id, p.name as project_name,
+                   u.full_name as created_by_name,
+                   reqi.item_name, reqi.item_code, reqi.unit, ({$qtyExpr}) as quantity, reqi.unit_price, ({$totExpr}) as total_price, reqi.work_type, reqi.notes,
+                   rs.code as subcategory_code, rs.name as subcategory_name
+            FROM request_items reqi
+            JOIN requests req ON reqi.request_id = req.id
+            JOIN projects p ON req.project_id = p.id
+            LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
+            LEFT JOIN users u ON req.created_by = u.id
+            WHERE $where
+            ORDER BY COALESCE(req.request_date, DATE(req.created_at)) DESC, p.name, req.id DESC
+        ", $params);
+    }
+}
+
+if (!function_exists('fetchProjectComparisonData')) {
+    /**
+     * Fetch Comparison data for a project
+     */
+    function fetchProjectComparisonData($projectId, $startDate = null, $endDate = null) {
+        $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
+        if (!$project) return ['items' => []];
+
+        $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
+        $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
+
+        // Pre-calculate RAB AHSP prices dynamically
+        $rabBreakdowns = batchGetAhspComponentBreakdowns($projectId);
+
+        // Pre-calculate RAP AHSP component totals dynamically
+        $rapItemBreakdowns = batchGetRapItemBreakdowns($projectId);
+
+        // Subcategories
+        $items = dbGetAll("
+            SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_vol, rs.ahsp_id,
+                   rap.volume as rap_vol,
+                   rc.code as cat_code, rc.name as cat_name
+            FROM rab_subcategories rs
+            JOIN rab_categories rc ON rs.category_id = rc.id
+            LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
+            WHERE rc.project_id = ?
+            ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
+        ", [$projectId]);
+
+        $outItems = [];
+        $totExpr = sqlRequestItemTotalExpr('reqi');
+        foreach ($items as $item) {
+            $rabBasePrice = floatval($rabBreakdowns[$item['ahsp_id']]['total'] ?? 0.0);
+            $rabPriceWithOverhead = $rabBasePrice * (1 + ($rabOverheadPct / 100));
+            $rabVol = floatval($item['rab_vol']);
+            $rabTotal = $rabVol * $rabPriceWithOverhead;
+
+            $rapVol = (isset($item['rap_vol']) && $item['rap_vol'] !== null) ? floatval($item['rap_vol']) : $rabVol;
+            $rapBasePrice = floatval($rapItemBreakdowns[$item['id']]['total'] ?? 0.0);
+            $rapPriceWithOverhead = $rapBasePrice * (1 + ($rapOverheadPct / 100));
+            $rapTotal = $rapVol * $rapPriceWithOverhead;
+
+            // Actual with optional period
+            $actWhere = "reqi.subcategory_id = ? AND req.status = 'approved' AND req.project_id = ?";
+            $actParams = [$item['id'], $projectId];
+            if ($startDate) {
+                $actWhere .= " AND DATE(req.created_at) >= ?";
+                $actParams[] = $startDate;
+            }
+            if ($endDate) {
+                $actWhere .= " AND DATE(req.created_at) <= ?";
+                $actParams[] = $endDate;
+            }
+
+            $actRow = dbGetRow("
+                SELECT COALESCE(SUM($totExpr), 0) as total
+                FROM request_items reqi
+                JOIN requests req ON reqi.request_id = req.id
+                WHERE $actWhere
+            ", $actParams);
+            $actTotal = floatval($actRow['total'] ?? 0);
+
+            $outItems[] = [
+                'id' => $item['id'],
+                'code' => $item['code'],
+                'name' => $item['name'],
+                'unit' => $item['unit'],
+                'cat_code' => $item['cat_code'],
+                'cat_name' => $item['cat_name'],
+                'rab_vol' => $rabVol,
+                'rab_price' => $rabPriceWithOverhead,
+                'rab_total' => $rabTotal,
+                'rap_vol' => $rapVol,
+                'rap_price' => $rapPriceWithOverhead,
+                'rap_total' => $rapTotal,
+                'act_total' => $actTotal
+            ];
+        }
+
+        return ['items' => $outItems];
+    }
+}
+
 
 
 

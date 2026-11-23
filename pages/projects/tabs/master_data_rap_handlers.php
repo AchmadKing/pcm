@@ -138,9 +138,6 @@ if ($action === 'clear_all_items_rap') {
     
     dbExecute("DELETE FROM project_items_rap WHERE project_id = ?", [$projectId]);
     
-    // Reset all RAP AHSP prices
-    dbExecute("UPDATE project_ahsp_rap SET unit_price = 0 WHERE project_id = ?", [$projectId]);
-    
     // === Also delete RAB Items ===
     // Delete RAB AHSP details first
     dbExecute("
@@ -151,9 +148,6 @@ if ($action === 'clear_all_items_rap') {
     
     // Delete RAB items
     dbExecute("DELETE FROM project_items WHERE project_id = ?", [$projectId]);
-    
-    // Reset RAB AHSP prices
-    dbExecute("UPDATE project_ahsp SET unit_price = 0 WHERE project_id = ?", [$projectId]);
     
     setFlash('success', "Semua items RAP dan RAB berhasil dihapus!");
 }
@@ -177,7 +171,7 @@ if ($action === 'add_ahsp_rap') {
                 [$projectId, $ahspCode]);
             $rabAhspId = $rabAhsp ? $rabAhsp['id'] : null;
             
-            dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, 0, ?)",
+            dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, rab_ahsp_id) VALUES (?, ?, ?, ?, ?)",
                 [$projectId, $ahspCode, $workName, $unit, $rabAhspId]);
             
             // Sync to RAB if code doesn't exist there

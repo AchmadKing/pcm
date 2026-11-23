@@ -271,7 +271,7 @@ if ($format === 'csv') {
             $tglTransaksi = !empty($t['request_date']) ? date('d-m-Y', strtotime($t['request_date'])) : date('d-m-Y', strtotime($t['created_at']));
             $catCode = $isNonRab ? 'LAIN-LAIN' : ($t['subcategory_code'] ?? '-');
             $catName = $isNonRab ? 'Biaya Lain-Lain' : ($t['subcategory_name'] ?? '-');
-            $qty = ($isNonRab && isset($t['quantity']) && floatval($t['quantity']) > 0) ? floatval($t['quantity']) : floatval($t['coefficient'] ?? 0);
+            $qty = floatval($t['quantity'] ?? 0);
             $weekVal = $isNonRab ? 'Non-RAB' : ($t['target_week'] ?? $t['week_number'] ?? '-');
 
             fputcsv($output, [
@@ -371,6 +371,7 @@ if ($format === 'csv') {
         $overheadPct = getProjectOverheadProfitPct($selectedProject, 'rab');
         $ppnPct = floatval($selectedProject['ppn_percentage'] ?? 11);
         $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$selectedProject['id']]);
+        $rabBreakdowns = batchGetAhspComponentBreakdowns($selectedProject['id']);
         
         $subtotalRab = 0;
         foreach ($categories as $cat) {
@@ -378,7 +379,7 @@ if ($format === 'csv') {
             $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
             $catTotal = 0;
             foreach ($subcats as $sub) {
-                $basePrice = floatval($sub['unit_price']);
+                $basePrice = floatval($rabBreakdowns[$sub['ahsp_id']]['total'] ?? 0.0);
                 $unitPriceWithOverhead = $basePrice * (1 + ($overheadPct / 100));
                 $total = floatval($sub['volume']) * $unitPriceWithOverhead;
                 $catTotal += $total;
@@ -606,185 +607,5 @@ document.addEventListener('DOMContentLoaded', () => {
 require_once __DIR__ . '/../../includes/footer.php'; 
 
 // =========================================================================
-// HELPER FUNCTIONS FOR REPORT EXPORT
+// HELPER FUNCTIONS FOR REPORT EXPORT (Delegated to functions.php)
 // =========================================================================
-
-/**
- * Calculate actual spending in a given period for a project
- */
-function getProjectPeriodActualSpending($projectId, $startDate = null, $endDate = null) {
-    $where = "req.project_id = ? AND req.status = 'approved'";
-    $params = [$projectId];
-    
-    if ($startDate) {
-        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
-        $params[] = $startDate;
-    }
-    if ($endDate) {
-        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
-        $params[] = $endDate;
-    }
-    
-    $row = dbGetRow("
-        SELECT COALESCE(SUM(reqi.total_price), 0) as total
-        FROM request_items reqi
-        JOIN requests req ON reqi.request_id = req.id
-        WHERE $where
-    ", $params);
-    
-    return floatval($row['total'] ?? 0);
-}
-
-/**
- * Fetch detailed transactions for export
- */
-function fetchProjectTransactions($accessibleProjectIds, $projectId = 'all', $startDate = null, $endDate = null) {
-    if (empty($accessibleProjectIds)) return [];
-    
-    $where = "req.status = 'approved'";
-    $params = [];
-    
-    if ($projectId === 'all' || empty($projectId)) {
-        $placeholders = implode(',', array_fill(0, count($accessibleProjectIds), '?'));
-        $where .= " AND req.project_id IN ($placeholders)";
-        $params = array_merge($params, $accessibleProjectIds);
-    } else {
-        $where .= " AND req.project_id = ?";
-        $params[] = intval($projectId);
-    }
-    
-    if ($startDate) {
-        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) >= ?)";
-        $params[] = $startDate;
-    }
-    if ($endDate) {
-        $where .= " AND (DATE(COALESCE(req.request_date, req.created_at)) <= ?)";
-        $params[] = $endDate;
-    }
-    
-    return dbGetAll("
-        SELECT req.id as request_id, req.request_number, req.request_type, req.non_rab_category, req.request_date, req.created_at, req.target_week, req.week_number,
-               p.id as project_id, p.name as project_name,
-               u.full_name as created_by_name,
-               reqi.item_name, reqi.item_code, reqi.unit, reqi.quantity, reqi.coefficient, reqi.unit_price, reqi.total_price, reqi.notes,
-               rs.code as subcategory_code, rs.name as subcategory_name
-        FROM request_items reqi
-        JOIN requests req ON reqi.request_id = req.id
-        JOIN projects p ON req.project_id = p.id
-        LEFT JOIN rab_subcategories rs ON reqi.subcategory_id = rs.id
-        LEFT JOIN users u ON req.created_by = u.id
-        WHERE $where
-        ORDER BY COALESCE(req.request_date, DATE(req.created_at)) DESC, p.name, req.id DESC
-    ", $params);
-}
-
-/**
- * Fetch Comparison data for a project
- */
-function fetchProjectComparisonData($projectId, $startDate = null, $endDate = null) {
-    $project = dbGetRow("SELECT * FROM projects WHERE id = ?", [$projectId]);
-    if (!$project) return ['items' => []];
-
-    $rabOverheadPct = getProjectOverheadProfitPct($project, 'rab');
-    $rapOverheadPct = getProjectOverheadProfitPct($project, 'rap');
-
-    // Pre-calculate RAB AHSP prices
-    $ahspPrices = [];
-    $ahspRows = dbGetAll("
-        SELECT d.ahsp_id, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details d 
-        JOIN project_items i ON d.item_id = i.id 
-        JOIN project_ahsp pa ON d.ahsp_id = pa.id
-        WHERE pa.project_id = ?
-        GROUP BY d.ahsp_id
-    ", [$projectId]);
-    foreach ($ahspRows as $r) {
-        $ahspPrices[$r['ahsp_id']] = floatval($r['total']);
-    }
-
-    // Pre-calculate RAP AHSP component totals
-    $ahspRapPrices = [];
-    $ahspRapRows = dbGetAll("
-        SELECT pa.ahsp_code, SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-        FROM project_ahsp_details_rap d 
-        JOIN project_items_rap i ON d.item_id = i.id 
-        JOIN project_ahsp_rap pa ON d.ahsp_id = pa.id
-        WHERE pa.project_id = ?
-        GROUP BY pa.ahsp_code
-    ", [$projectId]);
-    foreach ($ahspRapRows as $r) {
-        $ahspRapPrices[$r['ahsp_code']] = floatval($r['total']);
-    }
-
-    // Subcategories
-    $items = dbGetAll("
-        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_vol, rs.unit_price as rab_price, rs.ahsp_id,
-               rap.volume as rap_vol, rap.unit_price as rap_price,
-               pa.ahsp_code,
-               rc.code as cat_code, rc.name as cat_name
-        FROM rab_subcategories rs
-        JOIN rab_categories rc ON rs.category_id = rc.id
-        LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
-        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
-        WHERE rc.project_id = ?
-        ORDER BY rc.sort_order, rc.code, rs.sort_order, rs.code
-    ", [$projectId]);
-
-    $outItems = [];
-    foreach ($items as $item) {
-        $rabBasePrice = isset($ahspPrices[$item['ahsp_id']]) ? $ahspPrices[$item['ahsp_id']] : floatval($item['rab_price']);
-        $rabPriceWithOverhead = $rabBasePrice * (1 + ($rabOverheadPct / 100));
-        $rabVol = floatval($item['rab_vol']);
-        $rabTotal = $rabVol * $rabPriceWithOverhead;
-
-        $rapVol = (isset($item['rap_vol']) && $item['rap_vol'] !== null) ? floatval($item['rap_vol']) : $rabVol;
-        $ahspCode = $item['ahsp_code'] ?? null;
-        $rapBasePrice = 0;
-        if ($ahspCode && isset($ahspRapPrices[$ahspCode])) {
-            $rapBasePrice = $ahspRapPrices[$ahspCode];
-        }
-        if ($rapBasePrice <= 0) {
-            $rapBasePrice = (isset($item['rap_price']) && floatval($item['rap_price']) > 0) ? floatval($item['rap_price']) : floatval($item['rab_price']);
-        }
-        $rapPriceWithOverhead = $rapBasePrice * (1 + ($rapOverheadPct / 100));
-        $rapTotal = $rapVol * $rapPriceWithOverhead;
-
-        // Actual with optional period
-        $actWhere = "reqi.subcategory_id = ? AND req.status = 'approved' AND req.project_id = ?";
-        $actParams = [$item['id'], $projectId];
-        if ($startDate) {
-            $actWhere .= " AND DATE(req.created_at) >= ?";
-            $actParams[] = $startDate;
-        }
-        if ($endDate) {
-            $actWhere .= " AND DATE(req.created_at) <= ?";
-            $actParams[] = $endDate;
-        }
-
-        $actRow = dbGetRow("
-            SELECT COALESCE(SUM(reqi.total_price), 0) as total
-            FROM request_items reqi
-            JOIN requests req ON reqi.request_id = req.id
-            WHERE $actWhere
-        ", $actParams);
-        $actTotal = floatval($actRow['total'] ?? 0);
-
-        $outItems[] = [
-            'id' => $item['id'],
-            'code' => $item['code'],
-            'name' => $item['name'],
-            'unit' => $item['unit'],
-            'cat_code' => $item['cat_code'],
-            'cat_name' => $item['cat_name'],
-            'rab_vol' => $rabVol,
-            'rab_price' => $rabPriceWithOverhead,
-            'rab_total' => $rabTotal,
-            'rap_vol' => $rapVol,
-            'rap_price' => $rapPriceWithOverhead,
-            'rap_total' => $rapTotal,
-            'act_total' => $actTotal
-        ];
-    }
-
-    return ['items' => $outItems];
-}

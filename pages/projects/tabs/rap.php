@@ -24,11 +24,14 @@ if ($rabSourceId > 0) {
     }
 }
 
-// Batch-load ALL RAP AHSP component breakdowns in 1 query (instead of N×2 queries in loop)
-$rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+// Batch-load ALL RAP items component breakdowns in 1 query (instead of N×2 queries in loop)
+$rapItemBreakdownMap = batchGetRapItemBreakdowns($projectId);
 
 // Batch-load ALL RAB AHSP component breakdowns in 1 query (instead of N queries in loop)
 $rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
+
+// If using snapshot, batch load snapshot subcategory unit prices
+$snapshotSubcatPrices = ($usingSnapshot && $rabSourceId > 0) ? batchGetSnapshotSubcatUnitPrices($rabSourceId) : [];
 
 ensureRabHeadSubsTableExists();
 
@@ -60,11 +63,10 @@ $rabOverheadPct = ($usingSnapshot && $selectedSnapshot) ? getProjectOverheadProf
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
-        SELECT rs.*, rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
-               pa.ahsp_code as ahsp_code
+        SELECT rs.id, rs.category_id, rs.ahsp_id, rs.code, rs.name, rs.unit, rs.volume, rs.sort_order,
+               rap.id as rap_id, rap.volume as rap_volume
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
-        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
         WHERE rs.category_id = ? 
         ORDER BY rs.sort_order, rs.code
     ", [$cat['id']]);
@@ -79,44 +81,32 @@ foreach ($categories as $cat) {
     foreach ($subcats as $sub) {
         $volume = $sub['rap_volume'] ?? $sub['volume'];
         
-        // Use pre-loaded batch map instead of per-subcategory query (was 2 queries per subcategory)
-        $ahspCode = $sub['ahsp_code'] ?? null;
-        $components = $ahspCode ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0, 'material' => 0, 'alat' => 0]) : ['upah' => 0, 'material' => 0, 'alat' => 0];
-        
-        $baseUnitPrice = $components['upah'] + $components['material'] + $components['alat'];
-        if ($baseUnitPrice <= 0) {
-            $baseUnitPrice = $sub['rap_unit_price'] ?? $sub['unit_price'];
-        }
+        // Use pre-loaded batch map for RAP item components
+        $components = $rapItemBreakdownMap[$sub['id']] ?? ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0, 'unit_price' => 0];
+        $baseUnitPrice = floatval($components['unit_price'] ?? ($components['total'] ?? 0));
         
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $subTotal = $volume * $unitPriceWithOverhead;
         $catTotal += $subTotal;
         
-        $rabVolume = $sub['volume'];
-        
-        if ($usingSnapshot) {
-            $rabPrice = $sub['unit_price'];
-        } else {
-            if ($sub['ahsp_id']) {
-                // Use pre-loaded batch map instead of per-subcategory query
-                $rabComponents = $rabAhspBreakdownMap[$sub['ahsp_id']] ?? ['total' => 0];
-                $rabPrice = $rabComponents['total'];
-            } else {
-                $rabPrice = $sub['unit_price'];
-            }
-        }
+        $rabVolume = floatval($sub['volume']);
         
         if ($usingSnapshot && $sub['id']) {
             $snapSubcat = dbGetRow("
-                SELECT ss.volume, ss.unit_price 
+                SELECT ss.id, ss.volume 
                 FROM rab_snapshot_subcategories ss
                 JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
                 WHERE sc.snapshot_id = ? AND ss.original_subcategory_id = ?
             ", [$rabSourceId, $sub['id']]);
             if ($snapSubcat) {
-                $rabVolume = $snapSubcat['volume'];
-                $rabPrice = $snapSubcat['unit_price'];
+                $rabVolume = floatval($snapSubcat['volume']);
+                $rabPrice = floatval($snapshotSubcatPrices[$snapSubcat['id']] ?? 0.0);
+            } else {
+                $rabPrice = 0.0;
             }
+        } else {
+            $rabComponents = $sub['ahsp_id'] ? ($rabAhspBreakdownMap[$sub['ahsp_id']] ?? ['total' => 0]) : ['total' => 0];
+            $rabPrice = floatval($rabComponents['total'] ?? 0);
         }
         
         $rabUnitPriceWithOverhead = $rabPrice * (1 + ($rabOverheadPct / 100));
@@ -345,6 +335,9 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
 @media print {
     .rap-floating-header-wrapper {
         display: none !important;
+    }
+    #rapTable tfoot {
+        display: table-row-group !important;
     }
 }
 </style>
@@ -840,7 +833,13 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                 <h5 class="modal-title" id="pdfPreviewModalRapLabel">
                     <i class="mdi mdi-file-pdf-box text-danger"></i> Preview Laporan RAP
                 </h5>
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 align-items-center">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="toggleEditPrintRap()">
+                        <i class="mdi mdi-tune-variant"></i> Edit Print
+                    </button>
+                    <a href="export_rap_pdf.php?id=<?= $projectId ?>&rab_source=<?= $rabSourceId ?>" target="_blank" class="btn btn-outline-secondary btn-sm" title="Buka Preview di Tab Baru">
+                        <i class="mdi mdi-open-in-new"></i> Tab Baru
+                    </a>
                     <button type="button" class="btn btn-success btn-sm" onclick="printPdfPreviewRap()">
                         <i class="mdi mdi-printer"></i> Cetak / Export PDF
                     </button>
@@ -1155,15 +1154,27 @@ function showAhspRapModal(ahspCode) {
 function openPdfPreviewRap() {
     var modal = new bootstrap.Modal(document.getElementById('pdfPreviewModalRap'));
     var iframe = document.getElementById('pdfPreviewIframeRap');
-    iframe.src = 'export_rap_pdf.php?id=<?= $projectId ?>';
+    iframe.src = 'export_rap_pdf.php?id=<?= $projectId ?>&rab_source=<?= $rabSourceId ?>';
     modal.show();
+}
+
+// Toggle Edit Print panel inside RAP PDF iframe
+function toggleEditPrintRap() {
+    var iframe = document.getElementById('pdfPreviewIframeRap');
+    if (iframe && iframe.contentWindow && typeof iframe.contentWindow.toggleEditPrintPanel === 'function') {
+        iframe.contentWindow.toggleEditPrintPanel();
+    }
 }
 
 // Print PDF from iframe for RAP
 function printPdfPreviewRap() {
     var iframe = document.getElementById('pdfPreviewIframeRap');
-    if (iframe.contentWindow) {
-        iframe.contentWindow.print();
+    if (iframe && iframe.contentWindow) {
+        if (typeof iframe.contentWindow.triggerRapPrint === 'function') {
+            iframe.contentWindow.triggerRapPrint();
+        } else {
+            iframe.contentWindow.print();
+        }
     }
 }
 

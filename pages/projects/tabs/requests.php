@@ -107,7 +107,7 @@ $requests = dbGetAll("
     SELECT r.*, u.full_name as created_by_name,
            upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
            ua.full_name as approved_by_name, ua.role as approved_by_role,
-           (SELECT COALESCE(SUM(CASE WHEN r.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount
+           (SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('reqi') . "), 0) FROM request_items reqi WHERE reqi.request_id = r.id) as total_amount
     FROM requests r
     LEFT JOIN users u ON r.created_by = u.id
     LEFT JOIN users upm ON r.pm_approved_by = upm.id
@@ -380,12 +380,6 @@ $canManageTeam = ($project['status'] === 'on_progress');
                                         <a href="<?= $baseUrl ?>/pages/requests/create.php?project_id=<?= $projectId ?>&resubmit_id=<?= $req['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
                                            class="btn btn-sm btn-outline-warning py-0" title="Ajukan Ulang Pengajuan">
                                             <i class="mdi mdi-refresh"></i>
-                                        </a>
-                                        <?php endif; ?>
-                                        <?php if (canApproveRequest($req)): ?>
-                                        <a href="<?= $baseUrl ?>/pages/requests/approval.php?id=<?= $req['id'] ?>&return_url=<?= urlencode($_SERVER['REQUEST_URI'] ?? '') ?>" 
-                                           class="btn btn-sm btn-outline-success py-0" title="<?= $req['status'] === 'pm_approved' ? 'Final Approve' : 'Review & Approve' ?>">
-                                            <i class="mdi <?= $req['status'] === 'pm_approved' ? 'mdi-check-all' : 'mdi-check-circle' ?>"></i>
                                         </a>
                                         <?php endif; ?>
                                         <?php if (hasPermission('requests.delete')): ?>

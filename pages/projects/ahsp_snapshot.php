@@ -30,13 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         
         dbExecute("UPDATE rab_snapshot_ahsp_details SET coefficient = ? WHERE id = ?", [$value, $detailId]);
         
-        $totalPrice = dbGetRow("
-            SELECT SUM(coefficient * unit_price) as total 
-            FROM rab_snapshot_ahsp_details 
-            WHERE snapshot_subcategory_id = ?
-        ", [$detail['snapshot_subcategory_id']])['total'] ?? 0;
-        dbExecute("UPDATE rab_snapshot_subcategories SET unit_price = ? WHERE id = ?", [$totalPrice, $detail['snapshot_subcategory_id']]);
-        
         die(json_encode(['success' => true, 'message' => 'Koefisien tersimpan']));
     } catch (Exception $e) {
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
@@ -91,14 +84,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($coefficient > 0) {
                 dbExecute("UPDATE rab_snapshot_ahsp_details SET coefficient = ? WHERE id = ?",
                     [$coefficient, $detailId]);
-                    
-                // Recalculate snapshot subcategory unit_price
-                $totalPrice = dbGetRow("
-                    SELECT SUM(coefficient * unit_price) as total 
-                    FROM rab_snapshot_ahsp_details 
-                    WHERE snapshot_subcategory_id = ?
-                ", [$subcategoryId])['total'] ?? 0;
-                dbExecute("UPDATE rab_snapshot_subcategories SET unit_price = ? WHERE id = ?", [$totalPrice, $subcategoryId]);
                 
                 setFlash('success', 'Koefisien berhasil diperbarui!');
             }
@@ -118,14 +103,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 dbExecute("UPDATE rab_snapshot_ahsp_details SET unit_price = ? WHERE id = ?", [$unitPrice, $detailId]);
-                
-                // Recalculate snapshot subcategory unit_price
-                $totalPrice = dbGetRow("
-                    SELECT SUM(coefficient * unit_price) as total 
-                    FROM rab_snapshot_ahsp_details 
-                    WHERE snapshot_subcategory_id = ?
-                ", [$subcategoryId])['total'] ?? 0;
-                dbExecute("UPDATE rab_snapshot_subcategories SET unit_price = ? WHERE id = ?", [$totalPrice, $subcategoryId]);
                 
                 setFlash('success', 'Harga satuan berhasil diperbarui!');
             }
@@ -237,7 +214,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <div class="col-md-6 text-md-end">
                 <p class="mb-0">
                     Satuan: <strong><?= sanitize($subcategory['unit']) ?></strong><br>
-                    Harga Satuan (D): <strong class="text-primary fs-5"><?= formatRupiah($subcategory['unit_price']) ?></strong>
+                    Harga Satuan (D): <strong class="text-primary fs-5"><?= formatRupiah($grandTotal) ?></strong>
                 </p>
             </div>
         </div>

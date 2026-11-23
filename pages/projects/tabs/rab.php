@@ -969,7 +969,8 @@ $hasCcoModal = dbGetRow("SELECT id, name, created_at FROM rab_snapshots WHERE pr
                         $overheadPct = getProjectOverheadProfitPct($project, 'rab');
                         $overheadLabel = formatOverheadProfitLabel($project, 'rab');
                         foreach ($ahspList as $ahsp): 
-                            $priceWithOverhead = $ahsp['unit_price'] * (1 + ($overheadPct / 100));
+                            $ahspBasePrice = $ahspBreakdownMap[$ahsp['id']]['total'] ?? ($ahspBreakdownMap[$ahsp['id']]['unit_price'] ?? 0);
+                            $priceWithOverhead = $ahspBasePrice * (1 + ($overheadPct / 100));
                         ?>
                         <option value="<?= $ahsp['id'] ?>" data-unit="<?= sanitize($ahsp['unit']) ?>" data-price="<?= $priceWithOverhead ?>">
                             <?= sanitize($ahsp['work_name']) ?> (<?= formatRupiah($priceWithOverhead) ?>/<?= $ahsp['unit'] ?>)

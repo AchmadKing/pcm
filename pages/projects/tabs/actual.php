@@ -30,8 +30,8 @@ $overheadPct = getProjectOverheadProfitPct($project, $targetType);
 $weeklyRanges = [];
 $showWeeklyColumns = false;
 
-// Check if there's any weekly history
-$hasWeeklyHistory = dbGetRow("SELECT 1 FROM weekly_progress WHERE project_id = ? LIMIT 1", [$projectId]) ? true : false;
+// Check if there's any weekly history (from approved requests)
+$hasWeeklyHistory = dbGetRow("SELECT 1 FROM requests WHERE project_id = ? AND status = 'approved' LIMIT 1", [$projectId]) ? true : false;
 
 // Show weekly columns if project is on_progress/completed OR has history
 if ($project['status'] !== 'draft' || $hasWeeklyHistory) {
@@ -48,7 +48,7 @@ $batchActualBreakdown = $syncedProgress['breakdown'];
 $weeklyData = $syncedProgress['weekly'];
 
 // Batch-load ALL data needed for subcategory calculations (instead of N queries per subcategory)
-$rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$rapItemBreakdowns = batchGetRapItemBreakdowns($projectId);
 $rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 $actualizationAdjustments = []; // already factored into syncedProgress
 
@@ -72,9 +72,9 @@ foreach ($categories as $cat) {
     
     // Get subcategories with RAP data, AHSP code, and AHSP id
     $subcats = dbGetAll("
-        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
+        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume,
                rs.ahsp_id,
-               rap.id as rap_id, rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+               rap.id as rap_id, rap.volume as rap_volume,
                pa.ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
@@ -104,12 +104,7 @@ foreach ($categories as $cat) {
                 ? $rabAhspBreakdownMap[$sub['ahsp_id']] 
                 : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
             
-            $baseUnitPrice = $rabComponents['total'];
-            if ($baseUnitPrice <= 0) {
-                $baseUnitPrice = (isset($sub['rab_unit_price']) && floatval($sub['rab_unit_price']) > 0) 
-                    ? floatval($sub['rab_unit_price']) 
-                    : 0.0;
-            }
+            $baseUnitPrice = floatval($rabComponents['total'] ?? 0.0);
             
             $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
             $subTargetTotal = $volume * $unitPriceWithOverhead;
@@ -123,17 +118,8 @@ foreach ($categories as $cat) {
                 ? floatval($sub['rap_volume']) 
                 : floatval($sub['rab_volume']);
             
-            $ahspCode = $sub['ahsp_code'] ?? null;
-            $rapComponents = $ahspCode 
-                ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) 
-                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-            
-            $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
-            if ($baseUnitPrice <= 0) {
-                $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) 
-                    ? floatval($sub['rap_unit_price']) 
-                    : floatval($sub['rab_unit_price']);
-            }
+            $rapComponents = $rapItemBreakdowns[$sub['id']] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+            $baseUnitPrice = floatval($rapComponents['total'] ?? 0.0);
             
             $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
             $subTargetTotal = $volume * $unitPriceWithOverhead;
@@ -281,7 +267,7 @@ if (!empty($nonRabTransactions)) {
 
     $itemNo = 1;
     foreach ($nonRabTransactions as $tx) {
-        $txAmount = floatval($tx['total_amount'] ?? $tx['total_price'] ?? 0);
+        $txAmount = floatval($tx['item_total'] ?? $tx['total_amount'] ?? $tx['total_price'] ?? 0);
         $txWeek = intval($tx['target_week'] ?: ($tx['week_number'] ?: 1));
 
         $txWeekly = [];

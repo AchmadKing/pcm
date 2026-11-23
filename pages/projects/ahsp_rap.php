@@ -33,10 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Update coefficient
         dbExecute("UPDATE rap_ahsp_details SET coefficient = ? WHERE id = ?", [$value, $detailId]);
         
-        // Recalculate RAP unit_price
-        $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$detail['rap_item_id']])['total'] ?? 0;
-        dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $detail['rap_item_id']]);
-        
         die(json_encode(['success' => true, 'message' => 'Koefisien tersimpan']));
     } catch (Exception $e) {
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
@@ -93,10 +89,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             dbExecute("UPDATE rap_ahsp_details SET coefficient = ? WHERE id = ?", [$value, $detailId]);
             
-            // Recalculate RAP unit_price
-            $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
-            dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
-            
             // Sync to Master Data AHSP RAP
             syncRapTableToMasterAhspRap($rapItemId, $projectId);
             
@@ -112,10 +104,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $value = floatval(str_replace(',', '.', str_replace('.', '', $valueRaw)));
             
             dbExecute("UPDATE rap_ahsp_details SET unit_price = ? WHERE id = ?", [$value, $detailId]);
-            
-            // Recalculate RAP unit_price
-            $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
-            dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
             
             // Sync to Master Data AHSP RAP
             syncRapTableToMasterAhspRap($rapItemId, $projectId);
@@ -138,10 +126,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     dbInsert("INSERT INTO rap_ahsp_details (rap_item_id, item_id, category, coefficient, unit_price) VALUES (?, ?, ?, ?, ?)",
                         [$rapItemId, $itemId, $item['category'], $coefficient, $item['price']]);
                     
-                    // Recalculate
-                    $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
-                    dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
-                    
                     setFlash('success', 'Item berhasil ditambahkan!');
                 }
             }
@@ -153,10 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'delete_detail' && $isEditable) {
             $detailId = intval($_POST['detail_id']);
             dbExecute("DELETE FROM rap_ahsp_details WHERE id = ? AND rap_item_id = ?", [$detailId, $rapItemId]);
-            
-            // Recalculate
-            $newUnitPrice = dbGetRow("SELECT SUM(coefficient * unit_price) as total FROM rap_ahsp_details WHERE rap_item_id = ?", [$rapItemId])['total'] ?? 0;
-            dbExecute("UPDATE rap_items SET unit_price = ? WHERE id = ?", [$newUnitPrice, $rapItemId]);
             
             setFlash('success', 'Item berhasil dihapus!');
             header('Location: ahsp_rap.php?id=' . $rapItemId);

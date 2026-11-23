@@ -151,12 +151,12 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 $nextCode = $category['code'] . '.' . $maxSubCode['next'];
                 $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$categoryId]);
                 
-                $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                    [$categoryId, $ahspId, $nextCode, $ahsp['work_name'], $ahsp['unit'], $volume, $ahsp['unit_price'], $maxSort['next']]);
+                $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                    [$categoryId, $ahspId, $nextCode, $ahsp['work_name'], $ahsp['unit'], $volume, $maxSort['next']]);
                 
                 // Auto-sync: Create RAP item
-                $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                    [$subcatId, $volume, $ahsp['unit_price']]);
+                $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                    [$subcatId, $volume]);
                 
                 // Copy AHSP details to rap_ahsp_details
                 $ahspDetails = dbGetAll("
@@ -239,40 +239,21 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                 
                 dbExecute("UPDATE rab_subcategories SET volume = ? WHERE id = ?", [$volume, $subcatId]);
                 
-                $subcat = dbGetRow("SELECT unit_price FROM rab_subcategories WHERE id = ?", [$subcatId]);
-                
                 $rapItem = dbGetRow("SELECT id FROM rap_items WHERE subcategory_id = ?", [$subcatId]);
                 if ($rapItem) {
-                    dbExecute("UPDATE rap_items SET volume = ?, unit_price = ? WHERE subcategory_id = ?",
-                        [$volume, $subcat['unit_price'], $subcatId]);
+                    dbExecute("UPDATE rap_items SET volume = ? WHERE subcategory_id = ?",
+                        [$volume, $subcatId]);
                 } else {
-                    dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                        [$subcatId, $volume, $subcat['unit_price']]);
+                    dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                        [$subcatId, $volume]);
                 }
                 
                 setFlash('success', 'Volume berhasil diperbarui!');
                 break;
                 
             case 'submit_rab':
-                $hasRap = dbGetRow("
-                    SELECT COUNT(*) as cnt FROM rap_items rap
-                    JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-                    JOIN rab_categories rc ON rs.category_id = rc.id
-                    WHERE rc.project_id = ?
-                ", [$projectId]);
-                
-                if ($hasRap && $hasRap['cnt'] > 0) {
-                    dbExecute("
-                        UPDATE rap_items rap
-                        JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-                        JOIN rab_categories rc ON rs.category_id = rc.id
-                        SET rap.unit_price = rs.unit_price
-                        WHERE rc.project_id = ? AND rap.is_locked = 0
-                    ", [$projectId]);
-                    setFlash('success', 'RAB berhasil di-submit! RAP yang terkait sudah disinkronkan.');
-                } else {
-                    setFlash('success', 'RAB berhasil di-submit!');
-                }
+                setFlash('success', 'RAB berhasil di-submit!');
+                break;
                 
                 dbExecute("UPDATE projects SET rab_submitted = 1 WHERE id = ?", [$projectId]);
                 break;
@@ -340,11 +321,8 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     
                     $subcats = dbGetAll("SELECT * FROM rab_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
                     foreach ($subcats as $sub) {
-                        $components = $ahspBreakdownMap[$sub['ahsp_id']] ?? ['upah' => 0, 'material' => 0, 'alat' => 0, 'total' => 0];
-                        $baseUnitPrice = $components['total'] > 0 ? $components['total'] : floatval($sub['unit_price']);
-
-                        $snapSubId = dbInsert("INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            [$snapCatId, $sub['id'], $sub['ahsp_id'], $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $baseUnitPrice, $sub['sort_order']]);
+                        $snapSubId = dbInsert("INSERT INTO rab_snapshot_subcategories (category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [$snapCatId, $sub['id'], $sub['ahsp_id'], $sub['code'], $sub['name'], $sub['unit'], $sub['volume'], $sub['sort_order']]);
                         
                         // Pre-populate independent AHSP details for snapshot
                         if (!empty($sub['ahsp_id'])) {
@@ -474,11 +452,11 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     $nextSubCode = $category['code'] . '.' . $maxSubCode['next'];
                     $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$currentCategoryId]);
                     
-                    $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                        [$currentCategoryId, $ahsp['id'], $nextSubCode, $ahsp['work_name'], $ahsp['unit'], $volume, $ahsp['unit_price'], $maxSort['next']]);
+                    $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                        [$currentCategoryId, $ahsp['id'], $nextSubCode, $ahsp['work_name'], $ahsp['unit'], $volume, $maxSort['next']]);
                     
-                    $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                        [$subcatId, $volume, $ahsp['unit_price']]);
+                    $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                        [$subcatId, $volume]);
                     
                     $ahspDetails = dbGetAll("
                         SELECT d.item_id, i.category, d.coefficient, i.price
@@ -600,8 +578,8 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                             dbExecute("UPDATE rap_items SET volume = ? WHERE id = ?", [$volume, $existingRap['id']]);
                             $updatedRapItems++;
                         } else {
-                            $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                                [$subcatId, $volume, $existingSub['unit_price']]);
+                            $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                                [$subcatId, $volume]);
                             
                             $ahspDetails = dbGetAll("
                                 SELECT d.item_id, i.category, d.coefficient, i.price
@@ -622,11 +600,11 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                         $nextSubCode = $category['code'] . '.' . $maxSubCode['next'];
                         $maxSort = dbGetRow("SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM rab_subcategories WHERE category_id = ?", [$currentCategoryId]);
                         
-                        $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, unit_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                            [$currentCategoryId, $ahsp['id'], $nextSubCode, $ahsp['work_name'], $ahsp['unit'], $volume, $ahsp['unit_price'], $maxSort['next']]);
+                        $subcatId = dbInsert("INSERT INTO rab_subcategories (category_id, ahsp_id, code, name, unit, volume, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                            [$currentCategoryId, $ahsp['id'], $nextSubCode, $ahsp['work_name'], $ahsp['unit'], $volume, $maxSort['next']]);
                         
-                        $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                            [$subcatId, $volume, $ahsp['unit_price']]);
+                        $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                            [$subcatId, $volume]);
                         
                         $ahspDetails = dbGetAll("
                             SELECT d.item_id, i.category, d.coefficient, i.price
@@ -669,7 +647,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
             
             case 'generate_rap':
                 $rabSubcats = dbGetAll("
-                    SELECT rs.id, rs.volume, rs.unit_price, rs.ahsp_id
+                    SELECT rs.id, rs.volume, rs.ahsp_id
                     FROM rab_subcategories rs
                     JOIN rab_categories rc ON rs.category_id = rc.id
                     WHERE rc.project_id = ?
@@ -679,12 +657,12 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                     $existing = dbGetRow("SELECT id FROM rap_items WHERE subcategory_id = ?", [$sub['id']]);
                     
                     if ($existing) {
-                        dbExecute("UPDATE rap_items SET volume = ?, unit_price = ? WHERE subcategory_id = ?",
-                            [$sub['volume'], $sub['unit_price'], $sub['id']]);
+                        dbExecute("UPDATE rap_items SET volume = ? WHERE subcategory_id = ?",
+                            [$sub['volume'], $sub['id']]);
                         $rapItemId = $existing['id'];
                     } else {
-                        $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                            [$sub['id'], $sub['volume'], $sub['unit_price']]);
+                        $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                            [$sub['id'], $sub['volume']]);
                     }
                     
                     if ($sub['ahsp_id']) {
@@ -740,7 +718,7 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                             $sourceName = $snapshot['name'];
                             
                             $snapshotSubcats = dbGetAll("
-                                SELECT ss.original_subcategory_id, ss.volume, ss.unit_price, ss.ahsp_id
+                                SELECT ss.original_subcategory_id, ss.volume, ss.ahsp_id
                                 FROM rab_snapshot_subcategories ss
                                 JOIN rab_snapshot_categories sc ON ss.category_id = sc.id
                                 WHERE sc.snapshot_id = ?
@@ -748,8 +726,8 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                             
                             foreach ($snapshotSubcats as $snapSub) {
                                 if ($snapSub['original_subcategory_id']) {
-                                    $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                                        [$snapSub['original_subcategory_id'], $snapSub['volume'], $snapSub['unit_price']]);
+                                    $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                                        [$snapSub['original_subcategory_id'], $snapSub['volume']]);
                                     
                                     if ($snapSub['ahsp_id']) {
                                         $ahspDetails = dbGetAll("
@@ -769,15 +747,15 @@ if ($isRabEditable || in_array($action, $allowedWhenRabSubmitted) || strpos($act
                         }
                     } else {
                         $rabSubcats = dbGetAll("
-                            SELECT rs.id, rs.volume, rs.unit_price, rs.ahsp_id
+                            SELECT rs.id, rs.volume, rs.ahsp_id
                             FROM rab_subcategories rs
                             JOIN rab_categories rc ON rs.category_id = rc.id
                             WHERE rc.project_id = ?
                         ", [$projectId]);
                         
                         foreach ($rabSubcats as $sub) {
-                            $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume, unit_price) VALUES (?, ?, ?)",
-                                [$sub['id'], $sub['volume'], $sub['unit_price']]);
+                            $rapItemId = dbInsert("INSERT INTO rap_items (subcategory_id, volume) VALUES (?, ?)",
+                                [$sub['id'], $sub['volume']]);
                             
                             if ($sub['ahsp_id']) {
                                 $ahspDetails = dbGetAll("

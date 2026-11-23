@@ -118,13 +118,13 @@ try {
         $projName = $currentReq['project_name'] ?? '';
 
         // Calculate authoritative total of this request
-        $reqTotalRow = dbGetRow("SELECT COALESCE(SUM(quantity * unit_price), 0) as total FROM request_items WHERE request_id = ?", [$reqId]);
+        $reqTotalRow = dbGetRow("SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('') . "), 0) as total FROM request_items WHERE request_id = ?", [$reqId]);
         $reqTotal = floatval($reqTotalRow['total']);
 
         if ($reqType === 'non_rab') {
             dbExecute(
-                "UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
-                [$newStatus, $reqTotal, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
+                "UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
+                [$newStatus, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
             );
             $pdo->commit();
             setFlash('success', 'Pengajuan Biaya Lain-Lain (' . formatRupiah($reqTotal) . ') berhasil disetujui.');
@@ -134,8 +134,8 @@ try {
 
         // DIRECT COST (RAB/RAP) OR MIXED FLOW
         dbExecute(
-            "UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
-            [$newStatus, $reqTotal, $reqTotal, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
+            "UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ? AND project_id = ?",
+            [$newStatus, $notes, $reqTargetWeek, $reqTargetWeek, getCurrentUserId(), $reqId, $projectId]
         );
 
         // Insert realization into weekly_progress using sequential filling & FIFO sisa deduction
@@ -155,10 +155,13 @@ try {
         if ($weekStart && $weekEnd) {
             $approvedItems = dbGetAll("
                 SELECT id, subcategory_id, subcat_details, item_code, item_type,
-                       unit_price, coefficient, quantity, work_type, total_price
+                       unit_price, quantity, work_type, work_quantity, work_duration
                 FROM request_items 
                 WHERE request_id = ?
             ", [$reqId]);
+
+            // Pre-load dynamic RAP quantity map for sequential filling
+            $subcatRapMap = batchGetSubcatRapItemQtyMap($projId);
 
             $subcatAmounts = [];
 
@@ -172,7 +175,7 @@ try {
                 if ($itemWorkType === 'harian') {
                     $subId = intval($item['subcategory_id']);
                     if ($subId > 0) {
-                        $amount = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                        $amount = getRequestItemTotal($item);
                         if (!isset($subcatAmounts[$subId])) {
                             $subcatAmounts[$subId] = 0;
                         }
@@ -181,21 +184,20 @@ try {
                     continue;
                 }
 
-                $itemCoef = floatval($item['coefficient']);
+                $itemQty = getRequestItemEffectiveQty($item);
                 $itemPrice = floatval($item['unit_price']);
                 $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
 
                 if (!empty($subcatDetails) && is_array($subcatDetails)) {
-                    $remaining = $itemCoef;
+                    $remaining = $itemQty;
 
                     foreach ($subcatDetails as $sd) {
                         if ($remaining <= 0) break;
 
                         $subId = intval($sd['subcategory_id']);
-                        $sisaCapacity = floatval($sd['sisa'] ?? 0);
 
                         $currentUsed = dbGetRow("
-                            SELECT COALESCE(SUM(reqi2.coefficient), 0) as total_used
+                            SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) as total_used
                             FROM request_items reqi2
                             JOIN requests r ON reqi2.request_id = r.id
                             WHERE reqi2.item_code = ?
@@ -204,7 +206,7 @@ try {
                               AND r.id != ?
                         ", [$item['item_code'], $subId, $reqId]);
 
-                        $rapQty = floatval($sd['rap_qty'] ?? 0);
+                        $rapQty = $subcatRapMap[$item['item_code']][$subId] ?? floatval($sd['rap_qty'] ?? 0);
                         $actualSisa = $rapQty - floatval($currentUsed['total_used'] ?? 0);
                         if ($actualSisa < 0) $actualSisa = 0;
 
@@ -232,7 +234,7 @@ try {
                 } else {
                     $subId = intval($item['subcategory_id']);
                     if ($subId) {
-                        $amount = $itemCoef * $itemPrice;
+                        $amount = $itemQty * $itemPrice;
                         if (!isset($subcatAmounts[$subId])) {
                             $subcatAmounts[$subId] = 0;
                         }

@@ -63,7 +63,7 @@ $items = dbGetAll("
 
 $totalAmount = 0;
 foreach ($items as $it) {
-    $totalAmount += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+    $totalAmount += getRequestItemTotal($it);
 }
 
 // Fetch attachments if requested
@@ -620,7 +620,7 @@ $baseUrl = getBaseUrl();
                     <?php endif; ?>
                 </td>
                 <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?><br><small style="color: #555;">/ <?= htmlspecialchars($item['unit'] ?: ($item['work_billing_unit'] ?: 'OH')) ?></small></td>
-                <td class="text-end"><strong><?= number_format($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), 2, ',', '.') ?></strong></td>
+                <td class="text-end"><strong><?= number_format(getRequestItemTotal($item), 2, ',', '.') ?></strong></td>
             </tr>
             <?php endforeach; ?>
             
@@ -662,9 +662,9 @@ $baseUrl = getBaseUrl();
                     <?php endif; ?>
                 </td>
                 <td class="text-center"><?= htmlspecialchars($item['unit'] ?: 'ls') ?></td>
-                <td class="text-end"><?= formatVolume($item['coefficient'] ?: $item['quantity']) ?></td>
+                <td class="text-end"><?= formatVolume(getRequestItemEffectiveQty($item)) ?></td>
                 <td class="text-end"><?= number_format($item['unit_price'], 2, ',', '.') ?></td>
-                <td class="text-end"><?= number_format($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), 2, ',', '.') ?></td>
+                <td class="text-end"><?= number_format(getRequestItemTotal($item), 2, ',', '.') ?></td>
             </tr>
             <?php endforeach; ?>
             

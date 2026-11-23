@@ -31,17 +31,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Update coefficient
         dbExecute("UPDATE project_ahsp_details SET coefficient = ? WHERE id = ?", [$value, $detailId]);
         
-        // Recalculate AHSP total
-        $totalPrice = dbGetRow("
-            SELECT SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total
-            FROM project_ahsp_details d
-            JOIN project_items i ON d.item_id = i.id
-            WHERE d.ahsp_id = ?
-        ", [$detail['ahsp_id']])['total'] ?? 0;
-        
-        dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$totalPrice, $detail['ahsp_id']]);
-        dbExecute("UPDATE rab_subcategories SET unit_price = ? WHERE ahsp_id = ?", [$totalPrice, $detail['ahsp_id']]);
-        
         die(json_encode(['success' => true, 'message' => 'Koefisien tersimpan']));
     } catch (Exception $e) {
         die(json_encode(['success' => false, 'message' => $e->getMessage()]));
@@ -65,7 +54,7 @@ if (!$subcategoryId) {
 // Get subcategory with related data
 $subcategory = dbGetRow("
     SELECT rs.*, rc.project_id, rc.name as category_name, rc.code as category_code,
-           pa.work_name as ahsp_work_name, pa.unit as ahsp_unit, pa.unit_price as ahsp_unit_price
+           pa.work_name as ahsp_work_name, pa.unit as ahsp_unit
     FROM rab_subcategories rs
     JOIN rab_categories rc ON rs.category_id = rc.id
     LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
@@ -98,18 +87,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isEditable && $ahspId) {
             if ($coefficient > 0) {
                 dbExecute("UPDATE project_ahsp_details SET coefficient = ? WHERE id = ?",
                     [$coefficient, $detailId]);
-                    
-                // Recalculate AHSP unit_price
-                $totalPrice = dbGetRow("
-                    SELECT SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-                    FROM project_ahsp_details d 
-                    JOIN project_items i ON d.item_id = i.id 
-                    WHERE d.ahsp_id = ?
-                ", [$ahspId])['total'] ?? 0;
-                dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$totalPrice, $ahspId]);
-                
-                // Sync to rab_subcategories that use this AHSP
-                dbExecute("UPDATE rab_subcategories SET unit_price = ? WHERE ahsp_id = ?", [$totalPrice, $ahspId]);
                 
                 setFlash('success', 'Koefisien berhasil diperbarui!');
             }
@@ -130,18 +107,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isEditable && $ahspId) {
                 }
                 
                 dbExecute("UPDATE project_ahsp_details SET unit_price = ? WHERE id = ?", [$unitPrice, $detailId]);
-                
-                // Recalculate AHSP total
-                $totalPrice = dbGetRow("
-                    SELECT SUM(d.coefficient * COALESCE(d.unit_price, i.price)) as total 
-                    FROM project_ahsp_details d 
-                    JOIN project_items i ON d.item_id = i.id 
-                    WHERE d.ahsp_id = ?
-                ", [$ahspId])['total'] ?? 0;
-                dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$totalPrice, $ahspId]);
-                
-                // Sync to rab_subcategories that use this AHSP
-                dbExecute("UPDATE rab_subcategories SET unit_price = ? WHERE ahsp_id = ?", [$totalPrice, $ahspId]);
                 
                 setFlash('success', 'Harga satuan berhasil diperbarui!');
             }

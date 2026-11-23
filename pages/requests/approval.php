@@ -80,13 +80,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $projName = $currentReq['project_name'] ?? '';
 
             // Calculate authoritative total of this request
-            $reqTotalRow = dbGetRow("SELECT COALESCE(SUM(quantity * unit_price), 0) as total FROM request_items WHERE request_id = ?", [$reqId]);
+            $reqTotalRow = dbGetRow("SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('') . "), 0) as total FROM request_items WHERE request_id = ?", [$reqId]);
             $reqTotal = floatval($reqTotalRow['total']);
             
             if ($reqType === 'non_rab') {
                 // Update request status
-                dbExecute("UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                    [$newStatus, $reqTotal, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+                dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                    [$newStatus, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
                 
                 setFlash('success', 'Pengajuan Biaya Lain-Lain (' . formatRupiah($reqTotal) . ') berhasil disetujui!');
                 $_SESSION['approved_project_id'] = $projId;
@@ -96,9 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             // DIRECT COST (RAB/RAP) OR MIXED FLOW
-            // Update request status with target_week, week_number and approved_amount
-            dbExecute("UPDATE requests SET status = ?, total_amount = CASE WHEN total_amount <= 0 THEN ? ELSE total_amount END, approved_amount = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
-                [$newStatus, $reqTotal, $reqTotal, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
+            // Update request status with target_week and week_number
+            dbExecute("UPDATE requests SET status = ?, admin_notes = ?, target_week = ?, week_number = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+                [$newStatus, $notes, $targetWeek, $targetWeek, getCurrentUserId(), $reqId]);
             
             // Insert realization into weekly_progress using sequential filling
             // Get project info for weekly ranges
@@ -120,12 +120,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Get all items of the approved request with subcat_details
                 $approvedItems = dbGetAll("
                     SELECT id, subcategory_id, subcat_details, item_code, item_type,
-                           unit_price, coefficient, quantity, work_type, total_price
+                           unit_price, quantity, work_type, work_quantity, work_duration
                     FROM request_items 
                     WHERE request_id = ?
                 ", [$reqId]);
                 
-                // Accumulate amounts per subcategory for weekly_progress
+                // Pre-load dynamic RAP quantity map for sequential filling
+                $subcatRapMap = batchGetSubcatRapItemQtyMap($projId);
+                
+                // Accumulate amounts per subcategory for sisa deduction
                 $subcatAmounts = [];
                 
                 foreach ($approvedItems as $item) {
@@ -138,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($itemWorkType === 'harian') {
                         $subcatId = intval($item['subcategory_id']);
                         if ($subcatId > 0) {
-                            $amount = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                            $amount = getRequestItemTotal($item);
                             if (!isset($subcatAmounts[$subcatId])) {
                                 $subcatAmounts[$subcatId] = 0;
                             }
@@ -147,23 +150,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                     
-                    $itemCoef = floatval($item['coefficient']);
+                    $itemQty = getRequestItemEffectiveQty($item);
                     $itemPrice = floatval($item['unit_price']);
                     $subcatDetails = json_decode($item['subcat_details'] ?? '', true);
                     
                     if (!empty($subcatDetails) && is_array($subcatDetails)) {
-                        // Sequential filling: distribute coefficient across pekerjaan in order
-                        $remaining = $itemCoef;
+                        // Sequential filling: distribute quantity across pekerjaan in order
+                        $remaining = $itemQty;
                         
                         foreach ($subcatDetails as $sd) {
                             if ($remaining <= 0) break;
                             
                             $subcatId = intval($sd['subcategory_id']);
-                            $sisaCapacity = floatval($sd['sisa'] ?? 0);
                             
                             // Recalculate current sisa from DB for accuracy
                             $currentUsed = dbGetRow("
-                                SELECT COALESCE(SUM(reqi2.coefficient), 0) as total_used
+                                SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) as total_used
                                 FROM request_items reqi2
                                 JOIN requests r ON reqi2.request_id = r.id
                                 WHERE reqi2.item_code = ?
@@ -172,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                   AND r.id != ?
                             ", [$item['item_code'], $subcatId, $reqId]);
                             
-                            $rapQty = floatval($sd['rap_qty'] ?? 0);
+                            $rapQty = $subcatRapMap[$item['item_code']][$subcatId] ?? floatval($sd['rap_qty'] ?? 0);
                             $actualSisa = $rapQty - floatval($currentUsed['total_used'] ?? 0);
                             if ($actualSisa < 0) $actualSisa = 0;
                             
@@ -203,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // Fallback: no subcat_details, use primary subcategory_id
                         $subcatId = intval($item['subcategory_id']);
                         if ($subcatId) {
-                            $amount = $itemCoef * $itemPrice;
+                            $amount = $itemQty * $itemPrice;
                             if (!isset($subcatAmounts[$subcatId])) {
                                 $subcatAmounts[$subcatId] = 0;
                             }
@@ -308,7 +310,7 @@ $pendingRequests = dbGetAll("
     SELECT req.*, p.name as project_name, u.full_name as created_by_name,
         upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
         ua.full_name as approved_by_name, ua.role as approved_by_role,
-        (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
+        (SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('reqi') . "), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
     FROM requests req
     LEFT JOIN projects p ON req.project_id = p.id
     LEFT JOIN users u ON req.created_by = u.id
@@ -337,7 +339,7 @@ if ($requestId) {
         SELECT req.*, p.name as project_name, p.id as project_id, u.full_name as created_by_name,
                upm.full_name as pm_approved_by_name, upm.role as pm_approved_by_role,
                ua.full_name as approved_by_name, ua.role as approved_by_role,
-               (SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
+               (SELECT COALESCE(SUM(" . sqlRequestItemTotalExpr('reqi') . "), 0) FROM request_items reqi WHERE reqi.request_id = req.id) as total_amount
         FROM requests req
         LEFT JOIN projects p ON req.project_id = p.id
         LEFT JOIN users u ON req.created_by = u.id
@@ -398,7 +400,7 @@ if ($requestId) {
                        AND rs2.id = reqi.subcategory_id
                      LIMIT 1) as rap_qty,
                     -- Sum approved qty by item_code for this subcategory
-                    (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+                    (SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) 
                      FROM request_items reqi2 
                      JOIN requests r ON reqi2.request_id = r.id 
                      WHERE reqi2.item_code = reqi.item_code 
@@ -475,7 +477,7 @@ if ($requestId) {
                     $thisReqWorkVol = 0;
                     foreach ($selectedItems as $si2) {
                         if (intval($si2['subcategory_id'] ?? 0) === $subId && ($si2['item_type'] ?? 'upah') === $iType) {
-                            $subcatTotalLapangan += floatval($si2['total_price'] ?: ($si2['quantity'] * $si2['unit_price']));
+                            $subcatTotalLapangan += getRequestItemTotal($si2);
                             if (!empty($si2['work_volume'])) {
                                 $thisReqWorkVol = max($thisReqWorkVol, floatval($si2['work_volume']));
                             }
@@ -485,7 +487,7 @@ if ($requestId) {
                     $boronganUsedItems = dbGetAll("
                         SELECT d.coefficient as ahsp_coef,
                                COALESCE((
-                                   SELECT SUM(reqi2.coefficient) 
+                                   SELECT SUM(" . sqlRequestItemQtyExpr('reqi2') . ") 
                                    FROM request_items reqi2 
                                    JOIN requests r ON reqi2.request_id = r.id 
                                    WHERE reqi2.item_code = pir.item_code 
@@ -804,7 +806,7 @@ if (empty($returnUrl)) {
                                 $statKey = $subId . '_' . $iType;
                                 $stat = $harianSubcatStats[$statKey] ?? null;
                                 
-                                $itemTotalLap = floatval($item['total_price'] ?: ($item['quantity'] * $item['unit_price']));
+                                $itemTotalLap = getRequestItemTotal($item);
                                 $totalReq += $itemTotalLap;
                                 
                                 $rapSubcatTotal = $stat ? $stat['rap_total_cost'] : 0;
@@ -937,16 +939,17 @@ if (empty($returnUrl)) {
                         <tbody>
                             <?php 
                             foreach ($directItems as $item): 
-                                $hargaLapangan = $item['unit_price'] * $item['coefficient'];
+                                $itemQty = getRequestItemEffectiveQty($item);
+                                $hargaLapangan = getRequestItemTotal($item);
                                 $totalReq += $hargaLapangan;
                                 
-                                $hargaRap = ($item['rap_unit_price'] ?? 0) * $item['coefficient'];
+                                $hargaRap = ($item['rap_unit_price'] ?? 0) * $itemQty;
                                 $totalRap += $hargaRap;
                                 
                                 $qtyRap = $item['rap_qty'] ?? 0;
                                 $remainingQty = $qtyRap - ($item['approved_qty'] ?? 0);
-                                $isOverQty = $item['coefficient'] > $remainingQty && $qtyRap > 0;
-                                $afterApproval = $remainingQty - $item['coefficient'];
+                                $isOverQty = $itemQty > $remainingQty && $qtyRap > 0;
+                                $afterApproval = $remainingQty - $itemQty;
                             ?>
                             <tr class="<?= $isOverQty ? 'table-danger' : '' ?>">
                                 <td>
@@ -964,7 +967,7 @@ if (empty($returnUrl)) {
                                     <small class="text-muted d-block mt-1"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
+                                <td class="text-end"><?= formatVolume($itemQty) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><?= formatRupiah($hargaLapangan, false) ?></td>
                                 <td class="text-end">
@@ -1000,7 +1003,7 @@ if (empty($returnUrl)) {
                                         <span class="badge bg-success">OK</span>
                                         <br><small class="text-success">Proyeksi sisa: <?= formatVolume($afterApproval) ?></small>
                                         <?php endif; ?>
-                                        <br><small class="text-muted">RAP: <?= formatVolume($qtyRap) ?> | Diajukan: <?= formatVolume($item['coefficient']) ?></small>
+                                        <br><small class="text-muted">RAP: <?= formatVolume($qtyRap) ?> | Diajukan: <?= formatVolume($itemQty) ?></small>
                                     <?php else: ?>
                                         <span class="badge bg-secondary">-</span>
                                         <br><small class="text-muted">Tidak ada data RAP</small>
@@ -1092,7 +1095,7 @@ if (empty($returnUrl)) {
                             <?php 
                             $no = 1;
                             foreach ($nonRabItems as $item): 
-                                $subtotal = floatval($item['quantity'] ?: $item['coefficient'] ?: 1) * floatval($item['unit_price']);
+                                $subtotal = getRequestItemTotal($item);
                                 $totalNonRab += $subtotal;
                             ?>
                             <tr>
@@ -1103,7 +1106,7 @@ if (empty($returnUrl)) {
                                     <br><small class="text-muted"><?= sanitize($item['notes']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end"><?= formatVolume($item['quantity'] ?: $item['coefficient'] ?: 1) ?></td>
+                                <td class="text-end"><?= formatVolume(getRequestItemEffectiveQty($item)) ?></td>
                                 <td><?= sanitize($item['unit'] ?: 'ls') ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><strong><?= formatRupiah($subtotal, false) ?></strong></td>

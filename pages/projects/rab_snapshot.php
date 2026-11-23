@@ -131,7 +131,7 @@ $grandTotalAlat = 0;
 $overheadPct = getProjectOverheadProfitPct($snapshot, 'rab');
 
 foreach ($categories as $cat) {
-    $subcats = dbGetAll("SELECT * FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
+    $subcats = dbGetAll("SELECT id, category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, sort_order FROM rab_snapshot_subcategories WHERE category_id = ? ORDER BY sort_order, code", [$cat['id']]);
     $catTotal = 0;
     $catTenaga = 0;
     $catBahan = 0;
@@ -139,16 +139,15 @@ foreach ($categories as $cat) {
     
     $enrichedSubcats = [];
     foreach ($subcats as $sub) {
-        // Calculate unit price with overhead
-        $baseUnitPrice = $sub['unit_price'];
+        // Get AHSP component breakdown from snapshot data dynamically
+        $components = getSnapshotAhspComponentBreakdown($sub['id']);
+        $baseUnitPrice = floatval($components['upah'] + $components['material'] + $components['alat']);
         $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
         $sub['unit_price_display'] = $unitPriceWithOverhead;
         
         $subTotal = $sub['volume'] * $unitPriceWithOverhead;
         $catTotal += $subTotal;
         
-        // Get AHSP component breakdown from snapshot data
-        $components = getSnapshotAhspComponentBreakdown($sub['id']);
         $sub['anggaran_tenaga'] = $components['upah'] * $sub['volume'];
         $sub['anggaran_bahan'] = $components['material'] * $sub['volume'];
         $sub['anggaran_alat'] = $components['alat'] * $sub['volume'];

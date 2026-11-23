@@ -76,7 +76,8 @@ $grandTotalAlat = 0;
 
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
-        SELECT * FROM rab_snapshot_subcategories 
+        SELECT id, category_id, original_subcategory_id, ahsp_id, code, name, unit, volume, sort_order
+        FROM rab_snapshot_subcategories 
         WHERE category_id = ? 
         ORDER BY sort_order, code
     ", [$cat['id']]);
@@ -97,7 +98,7 @@ foreach ($categories as $cat) {
             $compMaterial = $components['material'];
             $compAlat = $components['alat'];
         } else {
-            $baseUnitPrice = floatval($sub['unit_price']);
+            $baseUnitPrice = 0.0;
             $compUpah = 0;
             $compMaterial = 0;
             $compAlat = 0;

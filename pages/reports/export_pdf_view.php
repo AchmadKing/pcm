@@ -193,6 +193,11 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 size: <?= in_array($type, ['transactions', 'comparison']) ? 'A4 landscape' : 'A4 portrait' ?>;
                 margin: 12mm 10mm;
             }
+            .data-table { page-break-inside: auto; }
+            .data-table tr { page-break-inside: avoid; break-inside: avoid; }
+            .data-table thead { display: table-header-group; }
+            .data-table tfoot { display: table-row-group !important; }
+            .data-table tbody.summary-section { page-break-inside: avoid; break-inside: avoid; }
         }
     </style>
 </head>
@@ -323,7 +328,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-                <tfoot>
+                <tbody class="summary-section">
                     <?php 
                     $grandSisa = $grandRap - $grandActual;
                     $grandMargin = $grandRab - $grandActual;
@@ -338,7 +343,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                         <th class="text-end"><?= number_format($grandMargin, 2, ',', '.') ?></th>
                         <th class="text-center"><?= number_format($grandPct, 1, ',', '.') ?>%</th>
                     </tr>
-                </tfoot>
+                </tbody>
             </table>
         <?php else: ?>
             <!-- Rekap Detail 1 Proyek -->
@@ -386,7 +391,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-                <tfoot>
+                <tbody class="summary-section">
                     <tr class="total-row">
                         <th colspan="3" class="text-center">SUBTOTAL DIRECT COST</th>
                         <th class="text-end"><?= number_format($stats['subtotal_rab'] ?? 0, 2, ',', '.') ?></th>
@@ -407,7 +412,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                         <th colspan="4"></th>
                     </tr>
                     <?php endif; ?>
-                </tfoot>
+                </tbody>
             </table>
 
             <h4 style="margin-top: 20px; margin-bottom: 6px; font-size: 10pt; text-transform: uppercase;">2. Biaya Lain-Lain (Non-RAB)</h4>
@@ -444,12 +449,12 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     </tr>
                     <?php endforeach; endif; ?>
                 </tbody>
-                <tfoot>
+                <tbody class="summary-section">
                     <tr class="total-row">
                         <th colspan="5" class="text-end">TOTAL REALISASI BIAYA LAIN-LAIN</th>
                         <th class="text-end"><?= number_format($totalNonRabActual, 2, ',', '.') ?></th>
                     </tr>
-                </tfoot>
+                </tbody>
             </table>
 
             <h4 style="margin-top: 20px; margin-bottom: 6px; font-size: 10pt; text-transform: uppercase;">3. Konsolidasi Total Biaya & Proyeksi Margin Bersih</h4>
@@ -514,7 +519,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     $tglTransaksi = !empty($t['request_date']) ? date('d/m/Y', strtotime($t['request_date'])) : date('d/m/Y', strtotime($t['created_at']));
                     $catCode = $isNonRab ? 'LAIN-LAIN' : ($t['subcategory_code'] ?? '-');
                     $catName = $isNonRab ? 'Biaya Lain-Lain' : ($t['subcategory_name'] ?? '-');
-                    $qty = ($isNonRab && isset($t['quantity']) && floatval($t['quantity']) > 0) ? floatval($t['quantity']) : floatval($t['coefficient'] ?? 0);
+                    $qty = floatval($t['quantity'] ?? 0);
                     $weekVal = $isNonRab ? 'Non-RAB' : ($t['target_week'] ?? $t['week_number'] ?? '-');
                 ?>
                 <tr>
@@ -545,13 +550,13 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 </tr>
                 <?php endif; ?>
             </tbody>
-            <tfoot>
+            <tbody class="summary-section">
                 <tr class="total-row">
                     <th colspan="<?= $isAllProjects ? 10 : 9 ?>" class="text-center">TOTAL REALISASI PENGELUARAN</th>
                     <th class="text-end"><?= number_format($totalNominal, 2, ',', '.') ?></th>
                     <th></th>
                 </tr>
-            </tfoot>
+            </tbody>
         </table>
 
     <?php elseif ($type === 'comparison'): ?>
@@ -607,7 +612,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 endforeach; 
                 ?>
             </tbody>
-            <tfoot>
+            <tbody class="summary-section">
                 <tr class="total-row">
                     <th colspan="<?= $isAllProjects ? 6 : 5 ?>" class="text-center">TOTAL KESELURUHAN</th>
                     <th class="text-end"><?= number_format($grandRab, 2, ',', '.') ?></th>
@@ -616,7 +621,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     <th class="text-end"><?= number_format($grandAct, 2, ',', '.') ?></th>
                     <th class="text-end"><?= number_format($grandRab - $grandAct, 2, ',', '.') ?></th>
                 </tr>
-            </tfoot>
+            </tbody>
         </table>
 
     <?php elseif ($type === 'rab' && !$isAllProjects): ?>
@@ -628,6 +633,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
         $ppnPct = floatval($selectedProject['ppn_percentage'] ?? 11);
         $categories = dbGetAll("SELECT * FROM rab_categories WHERE project_id = ? ORDER BY sort_order, code", [$selectedProject['id']]);
         $subtotalRab = 0;
+        $rabBreakdowns = batchGetAhspComponentBreakdowns($selectedProject['id']);
         ?>
         <table class="data-table">
             <thead>
@@ -655,7 +661,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 </tr>
                 <?php 
                 foreach ($subcats as $sub):
-                    $basePrice = floatval($sub['unit_price']);
+                    $basePrice = floatval($rabBreakdowns[$sub['ahsp_id']]['total'] ?? 0.0);
                     $unitPriceWithOverhead = $basePrice * (1 + ($overheadPct / 100));
                     $total = floatval($sub['volume']) * $unitPriceWithOverhead;
                     $catTotal += $total;
@@ -682,7 +688,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                 $totalRounded = ceil($totalWithPpn / 10) * 10;
                 ?>
             </tbody>
-            <tfoot>
+            <tbody class="summary-section">
                 <tr class="total-row">
                     <th colspan="6" class="text-end">SUBTOTAL RAB</th>
                     <th class="text-end"><?= number_format($subtotalRab, 2, ',', '.') ?></th>
@@ -695,7 +701,7 @@ $currentUserRole = getRoleDisplayName(getCurrentUserRole());
                     <th colspan="6" class="text-end">TOTAL RAB DIBULATKAN</th>
                     <th class="text-end"><?= number_format($totalRounded, 0, ',', '.') ?></th>
                 </tr>
-            </tfoot>
+            </tbody>
         </table>
     <?php endif; ?>
 

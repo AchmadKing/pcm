@@ -129,9 +129,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
             // Delete all items
             $deletedCount = dbExecute("DELETE FROM project_items WHERE project_id = ?", [$projectId]);
             
-            // Recalculate all AHSP prices (set to 0 since no items)
-            dbExecute("UPDATE project_ahsp SET unit_price = 0 WHERE project_id = ?", [$projectId]);
-            
             // === Also delete RAP Items ===
             // Delete RAP AHSP details first
             dbExecute("
@@ -142,9 +139,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
             
             // Delete RAP items
             dbExecute("DELETE FROM project_items_rap WHERE project_id = ?", [$projectId]);
-            
-            // Reset RAP AHSP prices
-            dbExecute("UPDATE project_ahsp_rap SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
             setFlash('success', "Semua items RAB dan RAP berhasil dihapus!");
         }
@@ -214,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasPermission('master_data.edit')) 
                 if ($existing) {
                     setFlash('error', 'Kode AHSP "' . $ahspCode . '" sudah digunakan!');
                 } else {
-                    $newAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, 0)",
+                    $newAhspId = dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit) VALUES (?, ?, ?, ?)",
                         [$projectId, $ahspCode, $workName, $unit]);
                     // Sync new AHSP to RAP master data
                     syncAhspCodeRabToRap($projectId, $ahspCode);
@@ -420,12 +414,11 @@ function recalculateAhspPrice($ahspId) {
         FROM project_ahsp_details d
         JOIN project_items i ON d.item_id = i.id
         WHERE d.ahsp_id = ?
-    ", [$ahspId])['total'];
+    ", [$ahspId])['total'] ?? 0;
     
-    dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$total, $ahspId]);
-    
-    // Sync to RAB subcategories that use this AHSP
+    // Sync non-calculated metadata (work_name, unit) to RAB subcategories
     syncAhspToRab($ahspId);
+    return floatval($total);
 }
 }
 
@@ -433,23 +426,15 @@ function recalculateAhspPrice($ahspId) {
 if (!function_exists('syncAhspToRab')) {
 function syncAhspToRab($ahspId) {
     // Get updated AHSP data
-    $ahsp = dbGetRow("SELECT work_name, unit, unit_price FROM project_ahsp WHERE id = ?", [$ahspId]);
+    $ahsp = dbGetRow("SELECT work_name, unit FROM project_ahsp WHERE id = ?", [$ahspId]);
     if (!$ahsp) return;
     
-    // Update all RAB subcategories that reference this AHSP
+    // Update all RAB subcategories metadata that reference this AHSP (unit_price is dynamic)
     dbExecute("
         UPDATE rab_subcategories 
-        SET name = ?, unit = ?, unit_price = ?
+        SET name = ?, unit = ?
         WHERE ahsp_id = ?
-    ", [$ahsp['work_name'], $ahsp['unit'], $ahsp['unit_price'], $ahspId]);
-    
-    // Also sync to RAP (unit_price only, keep volume as user may have customized it)
-    dbExecute("
-        UPDATE rap_items rap
-        JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-        SET rap.unit_price = rs.unit_price
-        WHERE rs.ahsp_id = ? AND rap.is_locked = 0
-    ", [$ahspId]);
+    ", [$ahsp['work_name'], $ahsp['unit'], $ahspId]);
 }
 }
 
@@ -477,24 +462,32 @@ $items = dbGetAll("SELECT * FROM project_items WHERE project_id = ? ORDER BY cat
 // AHSP sorting
 $ahspSort = $_GET['ahsp_sort'] ?? 'name';
 $ahspSortOrder = 'ASC';
-switch ($ahspSort) {
-    case 'code':
-        $ahspOrderBy = 'ahsp_code';
-        break;
-    case 'price_asc':
-        $ahspOrderBy = 'unit_price';
-        $ahspSortOrder = 'ASC';
-        break;
-    case 'price_desc':
-        $ahspOrderBy = 'unit_price';
-        $ahspSortOrder = 'DESC';
-        break;
-    case 'name':
-    default:
-        $ahspOrderBy = 'work_name';
-        break;
+$ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY ahsp_code ASC, work_name ASC", [$projectId]);
+$ahspBreakdowns = batchGetAhspComponentBreakdowns($projectId);
+foreach ($ahspList as &$ahspItem) {
+    $ahspItem['unit_price'] = $ahspBreakdowns[$ahspItem['id']]['unit_price'] ?? 0.0;
 }
-$ahspList = dbGetAll("SELECT * FROM project_ahsp WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
+unset($ahspItem);
+
+// Sort $ahspList with 0-priced AHSP on top, then by selected sort option
+usort($ahspList, function($a, $b) use ($ahspSort) {
+    $aPrice = floatval($a['unit_price'] ?? 0);
+    $bPrice = floatval($b['unit_price'] ?? 0);
+    $aIsZero = ($aPrice <= 0);
+    $bIsZero = ($bPrice <= 0);
+    if ($aIsZero !== $bIsZero) {
+        return $aIsZero ? -1 : 1;
+    }
+    if ($ahspSort === 'price_asc') {
+        return $aPrice <=> $bPrice;
+    } elseif ($ahspSort === 'price_desc') {
+        return $bPrice <=> $aPrice;
+    } elseif ($ahspSort === 'code') {
+        return strcasecmp($a['ahsp_code'] ?? '', $b['ahsp_code'] ?? '');
+    } else {
+        return strcasecmp($a['work_name'] ?? '', $b['work_name'] ?? '');
+    }
+});
 
 // Get overhead percentage for price display
 $overheadPct = getProjectOverheadProfitPct($project, 'ahsp');
@@ -530,8 +523,32 @@ foreach ($itemsRap as $item) {
     $itemsRapByCategory[$item['category']][] = $item;
 }
 
-// Get RAP AHSP with same sorting (0-priced AHSP on top)
-$ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY CASE WHEN unit_price = 0 OR unit_price IS NULL THEN 0 ELSE 1 END ASC, $ahspOrderBy $ahspSortOrder", [$projectId]);
+// Get RAP AHSP with same dynamic calculation and sorting (0-priced AHSP on top)
+$ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY ahsp_code ASC, work_name ASC", [$projectId]);
+$rapBreakdowns = batchGetRapAhspComponentBreakdowns($projectId);
+foreach ($ahspListRap as &$rapItem) {
+    $rapItem['unit_price'] = $rapBreakdowns[$rapItem['id']]['unit_price'] ?? 0.0;
+}
+unset($rapItem);
+
+usort($ahspListRap, function($a, $b) use ($ahspSort) {
+    $aPrice = floatval($a['unit_price'] ?? 0);
+    $bPrice = floatval($b['unit_price'] ?? 0);
+    $aIsZero = ($aPrice <= 0);
+    $bIsZero = ($bPrice <= 0);
+    if ($aIsZero !== $bIsZero) {
+        return $aIsZero ? -1 : 1;
+    }
+    if ($ahspSort === 'price_asc') {
+        return $aPrice <=> $bPrice;
+    } elseif ($ahspSort === 'price_desc') {
+        return $bPrice <=> $aPrice;
+    } elseif ($ahspSort === 'code') {
+        return strcasecmp($a['ahsp_code'] ?? '', $b['ahsp_code'] ?? '');
+    } else {
+        return strcasecmp($a['work_name'] ?? '', $b['work_name'] ?? '');
+    }
+});
 ?>
 
 <!-- Sub-tabs for Items and AHSP (RAB & RAP) -->

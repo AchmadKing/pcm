@@ -50,14 +50,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_categories' && $projectId) {
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_subcategories' && isset($_GET['category_id'])) {
     header('Content-Type: application/json');
     $categoryId = intval($_GET['category_id']);
+    $catRow = dbGetRow("SELECT project_id FROM rab_categories WHERE id = ?", [$categoryId]);
+    $catProjId = intval($catRow['project_id'] ?? 0);
+    $rapPrices = $catProjId ? batchGetRapItemUnitPrices($catProjId) : [];
     $subcategories = dbGetAll("
-        SELECT rs.id, rs.code, rs.name, rs.unit,
-               COALESCE(rap.total_price, rs.volume * rs.unit_price) as rap_total
+        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume,
+               COALESCE(rap.volume, rs.volume, 0) as rap_volume
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rap.subcategory_id = rs.id
         WHERE rs.category_id = ?
         ORDER BY rs.sort_order, rs.code
     ", [$categoryId]);
+    foreach ($subcategories as &$sc) {
+        $uPrice = $rapPrices[$sc['id']]['total'] ?? 0.0;
+        $sc['rap_total'] = round($sc['rap_volume'] * $uPrice, 2);
+    }
+    unset($sc);
     echo json_encode(['success' => true, 'data' => $subcategories]);
     exit;
 }
@@ -182,7 +190,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_items_by_selected_rap' && iss
                rs.category_id,
                COALESCE(ri.volume, rs.volume, 0) as rap_volume,
                (d.coefficient * COALESCE(ri.volume, rs.volume, 0)) as rap_qty,
-               (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+               (SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) 
                 FROM request_items reqi2 
                 JOIN requests r ON reqi2.request_id = r.id 
                 WHERE reqi2.item_code = pir.item_code 
@@ -413,7 +421,7 @@ if ($projectId) {
                             $calc = dbGetRow("
                                 SELECT 
                                     SUM(d.coefficient * COALESCE(ri.volume, 0)) as total_rap_qty,
-                                    (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+                                    (SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) 
                                      FROM request_items reqi2 
                                      JOIN requests r ON reqi2.request_id = r.id 
                                      WHERE reqi2.item_code = ? 
@@ -436,7 +444,7 @@ if ($projectId) {
                         $calc = dbGetRow("
                             SELECT 
                                 (d.coefficient * COALESCE(ri.volume, 0)) as total_rap_qty,
-                                (SELECT COALESCE(SUM(reqi2.coefficient), 0) 
+                                (SELECT COALESCE(SUM(" . sqlRequestItemQtyExpr('reqi2') . "), 0) 
                                  FROM request_items reqi2 
                                  JOIN requests r ON reqi2.request_id = r.id 
                                  WHERE reqi2.item_code = ? 
@@ -475,8 +483,8 @@ if ($projectId) {
                     'item_name' => $item['item_name'],
                     'unit' => $item['unit'],
                     'unit_price' => floatval($item['unit_price']),
-                    'coefficient' => floatval($item['coefficient'] ?: $item['quantity']),
-                    'total_price' => floatval($item['total_price'] ?? 0),
+                    'coefficient' => getRequestItemEffectiveQty($item),
+                    'total_price' => getRequestItemTotal($item),
                     'notes' => $item['notes'] ?? '',
                     'subcat_details' => !empty($subcatDetails) ? $subcatDetails : [],
                     'rap_unit_price' => $rapUnitPrice,
@@ -564,9 +572,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $unitPrice = floatval($item['unit_price'] ?? 0);
             $notes = trim($item['notes'] ?? '');
             $subcatDetails = trim($item['subcat_details'] ?? '');
-            
-            if ($subcatDetails && json_decode($subcatDetails) === null) {
-                $subcatDetails = '';
+            if ($subcatDetails) {
+                $sdArray = json_decode($subcatDetails, true);
+                if (is_array($sdArray) && !empty($sdArray)) {
+                    $cleanSd = [];
+                    foreach ($sdArray as $sd) {
+                        $sId = intval($sd['subcategory_id'] ?? 0);
+                        if ($sId > 0) {
+                            $cleanSd[] = [
+                                'subcategory_id' => $sId,
+                                'subcat_code' => trim($sd['subcat_code'] ?? ''),
+                                'subcat_name' => trim($sd['subcat_name'] ?? ''),
+                                'subcat_unit' => trim($sd['subcat_unit'] ?? '')
+                            ];
+                        }
+                    }
+                    $subcatDetails = !empty($cleanSd) ? json_encode($cleanSd) : '';
+                } else {
+                    $subcatDetails = '';
+                }
             }
             
             if ($itemWorkType === 'harian') {
@@ -594,9 +618,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
                 
                 // Server-side calculation & integrity
-                $quantity = round($workQuantity * $workDuration, 4);
+                $quantity = 0; // Harian quantity is derived dynamically via (work_quantity * work_duration)
                 $coefficient = round($workQuantity * $workDuration, 6);
-                $itemTotal = round($quantity * $unitPrice, 2);
+                $itemTotal = round(($workQuantity * $workDuration) * $unitPrice, 2);
                 
                 if ($workVolume > 0 && $workQuantity > 0 && $workDuration > 0 && $unitPrice > 0 && !empty($itemName)) {
                     $directTotal += $itemTotal;
@@ -729,7 +753,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $boronganUsedItems = dbGetAll("
                     SELECT d.coefficient as ahsp_coef,
                            COALESCE((
-                               SELECT SUM(reqi2.coefficient) 
+                               SELECT SUM(" . sqlRequestItemQtyExpr('reqi2') . ") 
                                FROM request_items reqi2 
                                JOIN requests r ON reqi2.request_id = r.id 
                                WHERE reqi2.item_code = pir.item_code 
@@ -798,16 +822,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         // Insert request header with work_type
         $requestId = dbInsert("
-            INSERT INTO requests (project_id, request_type, work_type, non_rab_category, request_number, request_date, week_number, target_week, description, status, total_amount, created_by)
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?, ?)
-        ", [$projectId, $requestType, $workType, $requestNumber, $requestDate, $targetWeek, $targetWeek, $description, $totalAmount, getCurrentUserId()]);
+            INSERT INTO requests (project_id, request_type, work_type, non_rab_category, request_number, request_date, week_number, target_week, description, status, created_by)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?)
+        ", [$projectId, $requestType, $workType, $requestNumber, $requestDate, $targetWeek, $targetWeek, $description, getCurrentUserId()]);
 
         // Insert Direct Cost items
         foreach ($validDirectItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ", [
                 $requestId, 
                 $vi['category_id'], 
@@ -827,7 +851,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $vi['unit'], 
                 $vi['unit_price'],
                 $vi['quantity'], 
-                $vi['coefficient'],
                 $vi['notes']
             ]);
         }
@@ -836,29 +859,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         foreach ($validNonRabItems as $vi) {
             dbInsert("
                 INSERT INTO request_items 
-                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, coefficient, notes)
-                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', 'borongan', NULL, NULL, NULL, NULL, NULL, 'Hr', NULL, ?, ?, ?, ?, ?, ?)
+                (request_id, category_id, subcategory_id, subcat_details, item_code, item_type, work_type, work_volume, work_unit, work_quantity, work_quantity_unit, work_duration, work_duration_unit, work_billing_unit, item_name, unit, unit_price, quantity, notes)
+                VALUES (?, NULL, NULL, NULL, NULL, 'non_rab', 'borongan', NULL, NULL, NULL, NULL, NULL, 'Hr', NULL, ?, ?, ?, ?, ?)
             ", [
                 $requestId,
                 $vi['item_name'],
                 $vi['unit'],
                 $vi['unit_price'],
                 $vi['quantity'],
-                $vi['coefficient'],
                 $vi['notes']
             ]);
         }
-
-        // Ensure requests.total_amount matches the exact sum of inserted request_items
-        dbExecute("
-            UPDATE requests 
-            SET total_amount = (
-                SELECT COALESCE(SUM(CASE WHEN request_type = 'non_rab' THEN quantity * unit_price ELSE total_price END), 0)
-                FROM request_items 
-                WHERE request_id = ?
-            )
-            WHERE id = ?
-        ", [$requestId, $requestId]);
         
         // Ensure upload directory exists
         $uploadDir = __DIR__ . '/../../uploads/receipts/';
@@ -3432,9 +3443,8 @@ $(document).ready(function() {
             grandTotal += total;
         });
         
-        $('#grandTotalDisplay').text(formatRupiah(grandTotal));
-        $('#grandTotalBig').text(formatRupiah(grandTotal));
-        $('#rabSubtotalSummary').text(formatRupiah(grandTotal));
+        $('#grandTotalDisplay').text(formatRupiahJs(grandTotal));
+        $('#rabSubtotalSummary').text(formatRupiahJs(grandTotal));
         if (typeof updateCombinedGrandTotal === 'function') {
             updateCombinedGrandTotal();
         }
@@ -3715,9 +3725,11 @@ $(document).ready(function() {
             nonRabTotal += (qty * price);
         });
 
+        const combinedTotal = rabTotal + nonRabTotal;
         $('#rabSubtotalSummary').text(formatRupiahJs(rabTotal));
         $('#nonRabSubtotalSummary').text(formatRupiahJs(nonRabTotal));
-        $('#combinedGrandTotalDisplay').text(formatRupiahJs(rabTotal + nonRabTotal));
+        $('#combinedGrandTotalDisplay').text(formatRupiahJs(combinedTotal));
+        $('#grandTotalBig').text(formatRupiahJs(combinedTotal));
     };
 
     // Submit request via AJAX
@@ -4223,6 +4235,9 @@ $(document).ready(function() {
         });
         renderStagedFiles();
     }
+    
+    // Ensure combined grand total and big total badge are synchronized
+    updateCombinedGrandTotal();
     
     // Load RAP Pekerjaan checkboxes on page load
     loadRapPekerjaan();

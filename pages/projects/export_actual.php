@@ -41,7 +41,7 @@ $regionName = $project['region_name'] ?? '-';
 // Weekly progress setup
 $weeklyRanges = [];
 $showWeeklyColumns = false;
-$hasWeeklyHistory = dbGetRow("SELECT 1 FROM weekly_progress WHERE project_id = ? LIMIT 1", [$projectId]) ? true : false;
+$hasWeeklyHistory = dbGetRow("SELECT 1 FROM requests WHERE project_id = ? AND status = 'approved' LIMIT 1", [$projectId]) ? true : false;
 if ($project['status'] !== 'draft' || $hasWeeklyHistory) {
     if (!empty($project['start_date']) && !empty($project['duration_days'])) {
         $weeklyRanges = generateWeeklyRanges($project['start_date'], $project['duration_days']);
@@ -64,7 +64,7 @@ if ($showWeeklyColumns) {
 $actualizationAdjustments = [];
 
 // Batch-load all data needed (instead of per-subcategory queries)
-$rapAhspBreakdownMap = batchGetRapAhspComponentBreakdowns($projectId);
+$rapItemBreakdowns = batchGetRapItemBreakdowns($projectId);
 $rabAhspBreakdownMap = batchGetAhspComponentBreakdowns($projectId);
 
 // Get categories
@@ -136,9 +136,9 @@ foreach ($categories as $cat) {
     
     // Subcategories
     $subcats = dbGetAll("
-        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume, rs.unit_price as rab_unit_price,
+        SELECT rs.id, rs.code, rs.name, rs.unit, rs.volume as rab_volume,
                rs.ahsp_id,
-               rap.volume as rap_volume, rap.unit_price as rap_unit_price,
+               rap.volume as rap_volume,
                pa.ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
@@ -177,13 +177,7 @@ foreach ($categories as $cat) {
                 ? $rabAhspBreakdownMap[$sub['ahsp_id']] 
                 : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
             
-            $baseUnitPrice = $rabComponents['total'];
-            if ($baseUnitPrice <= 0) {
-                $baseUnitPrice = (isset($sub['rab_unit_price']) && floatval($sub['rab_unit_price']) > 0) 
-                    ? floatval($sub['rab_unit_price']) 
-                    : 0.0;
-            }
-            
+            $baseUnitPrice = floatval($rabComponents['total'] ?? 0.0);
             $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
             $subTargetTotal = $volume * $unitPriceWithOverhead;
         } else {
@@ -191,17 +185,8 @@ foreach ($categories as $cat) {
                 ? floatval($sub['rap_volume']) 
                 : floatval($sub['rab_volume']);
             
-            $ahspCode = $sub['ahsp_code'] ?? null;
-            $rapComponents = $ahspCode 
-                ? ($rapAhspBreakdownMap[$ahspCode] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0]) 
-                : ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0];
-            
-            $baseUnitPrice = $rapComponents['upah'] + $rapComponents['material'] + $rapComponents['alat'];
-            if ($baseUnitPrice <= 0) {
-                $baseUnitPrice = (isset($sub['rap_unit_price']) && floatval($sub['rap_unit_price']) > 0) 
-                    ? floatval($sub['rap_unit_price']) 
-                    : floatval($sub['rab_unit_price']);
-            }
+            $rapComponents = $rapItemBreakdowns[$sub['id']] ?? ['upah' => 0.0, 'material' => 0.0, 'alat' => 0.0, 'total' => 0.0];
+            $baseUnitPrice = floatval($rapComponents['total'] ?? 0.0);
             
             $unitPriceWithOverhead = $baseUnitPrice * (1 + ($overheadPct / 100));
             $subTargetTotal = $volume * $unitPriceWithOverhead;

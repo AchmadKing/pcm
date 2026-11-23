@@ -214,10 +214,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Col B = AHSP code to add as subcategory
                     // Col C = Volume
                     
-                    // Load AHSP lookup
-                    $ahspList = dbGetAll("SELECT id, ahsp_code, work_name, unit, unit_price FROM project_ahsp WHERE project_id = ?", [$projectId]);
+                    // Load AHSP lookup with dynamic unit prices
+                    $ahspList = dbGetAll("SELECT id, ahsp_code, work_name, unit FROM project_ahsp WHERE project_id = ?", [$projectId]);
+                    $ahspPrices = batchGetAhspComponentBreakdowns($projectId);
                     $ahspLookup = [];
                     foreach ($ahspList as $ahsp) {
+                        $ahsp['unit_price'] = $ahspPrices[$ahsp['id']]['unit_price'] ?? 0.0;
                         $code = strtolower(trim($ahsp['ahsp_code'] ?? ''));
                         if (!empty($code)) {
                             $ahspLookup[$code] = $ahsp;
@@ -787,7 +789,7 @@ function importAhsp($data, $projectId) {
             } else {
                 // Create new AHSP with code
                 $ahspId = dbInsert(
-                    "INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, 0)",
+                    "INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit) VALUES (?, ?, ?, ?)",
                     [$projectId, $ahspCode, $ahspName, $ahspUnit]
                 );
                 $ahspCache[$ahspKey] = $ahspId;
@@ -845,9 +847,9 @@ function recalculateAhspPriceById($ahspId) {
         FROM project_ahsp_details d
         JOIN project_items i ON d.item_id = i.id
         WHERE d.ahsp_id = ?
-    ", [$ahspId])['total'];
+    ", [$ahspId])['total'] ?? 0;
     
-    dbExecute("UPDATE project_ahsp SET unit_price = ? WHERE id = ?", [$total, $ahspId]);
+    return floatval($total);
 }
 
 // Get counts for preview

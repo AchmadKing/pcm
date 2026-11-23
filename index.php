@@ -103,7 +103,7 @@ try {
 
         // Batch load subcategories
         $subcatRows = dbGetAll("
-            SELECT rc.project_id, rs.volume, rs.unit_price, rs.ahsp_id
+            SELECT rc.project_id, rs.volume, rs.ahsp_id
             FROM rab_subcategories rs
             JOIN rab_categories rc ON rs.category_id = rc.id
             WHERE rc.project_id IN ($placeholders)
@@ -122,7 +122,7 @@ try {
             $vol = floatval($s['volume']);
             $unitPrice = ($s['ahsp_id'] && isset($ahspPrices[$s['ahsp_id']])) 
                 ? $ahspPrices[$s['ahsp_id']] 
-                : floatval($s['unit_price']);
+                : 0.0;
             $overheadPct = getProjectOverheadProfitPct($p, 'rab');
             $rabUnitPrice = $unitPrice * (1 + ($overheadPct / 100));
             $subRab = $vol * $rabUnitPrice;
@@ -151,21 +151,17 @@ try {
         }
     }
 
-    // Pending requests & total nominal (real-time)
+    // Pending requests & total nominal (real-time dynamic)
+    $itemTotalSql = sqlRequestItemTotalExpr('reqi');
     if (hasPermission('requests.approve')) {
         $pendingWhere = hasPermission('projects.edit') ? "req.status IN ('pending', 'pm_approved')" : "req.status = 'pending'";
         $pendingData = dbGetRow("
             SELECT 
                 COUNT(*) as cnt,
                 COALESCE(SUM(
-                    CASE 
-                        WHEN req.total_amount > 0 THEN req.total_amount
-                        ELSE (
-                            SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0)
-                            FROM request_items reqi 
-                            WHERE reqi.request_id = req.id
-                        )
-                    END
+                    (SELECT COALESCE(SUM($itemTotalSql), 0)
+                     FROM request_items reqi 
+                     WHERE reqi.request_id = req.id)
                 ), 0) as total_nominal
             FROM requests req
             WHERE $pendingWhere
@@ -175,14 +171,9 @@ try {
             SELECT 
                 COUNT(*) as cnt,
                 COALESCE(SUM(
-                    CASE 
-                        WHEN req.total_amount > 0 THEN req.total_amount
-                        ELSE (
-                            SELECT COALESCE(SUM(CASE WHEN req.request_type = 'non_rab' THEN reqi.quantity * reqi.unit_price ELSE reqi.total_price END), 0)
-                            FROM request_items reqi 
-                            WHERE reqi.request_id = req.id
-                        )
-                    END
+                    (SELECT COALESCE(SUM($itemTotalSql), 0)
+                     FROM request_items reqi 
+                     WHERE reqi.request_id = req.id)
                 ), 0) as total_nominal
             FROM requests req
             WHERE req.status IN ('pending', 'pm_approved') AND req.created_by = ?

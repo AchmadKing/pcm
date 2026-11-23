@@ -49,12 +49,14 @@ $output = fopen('php://output', 'w');
 // BOM for Excel UTF-8
 fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
+$rapUnitPrices = batchGetRapItemUnitPrices($projectId);
+
 // Get RAP items or RAB subcategories (fallback if RAP not generated yet)
-// Uses LEFT JOIN to get RAP data if available, otherwise falls back to RAB data
+// Dynamic unit price resolved via batchGetRapItemUnitPrices
 $rapItems = dbGetAll("
     SELECT 
+        rs.id as sub_id,
         COALESCE(rap.volume, rs.volume) as volume,
-        COALESCE(rap.unit_price, rs.unit_price) as base_price,
         rs.code as sub_code, rs.name as sub_name, rs.unit,
         rc.code as cat_code, rc.name as cat_name,
         pa.ahsp_code
@@ -141,8 +143,9 @@ if ($format === 'import') {
         
         $itemNum++;
         
-        // Apply overhead markup to unit price (same as rap.php calculation)
-        $unitPrice = $item['base_price'] * (1 + ($overheadPct / 100));
+        // Apply overhead markup to dynamic unit price (same as rap.php calculation)
+        $basePrice = floatval($rapUnitPrices[$item['sub_id']] ?? 0.0);
+        $unitPrice = $basePrice * (1 + ($overheadPct / 100));
         $totalPrice = $item['volume'] * $unitPrice;
         
         $catTotal += $totalPrice;

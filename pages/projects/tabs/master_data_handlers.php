@@ -107,7 +107,6 @@ try {
             ", [$projectId]);
             
             dbExecute("DELETE FROM project_items WHERE project_id = ?", [$projectId]);
-            dbExecute("UPDATE project_ahsp SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
             dbExecute("
                 DELETE d FROM project_ahsp_details_rap d
@@ -116,7 +115,6 @@ try {
             ", [$projectId]);
             
             dbExecute("DELETE FROM project_items_rap WHERE project_id = ?", [$projectId]);
-            dbExecute("UPDATE project_ahsp_rap SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
             setFlash('success', "Semua items RAB dan RAP berhasil dihapus!");
             break;
@@ -197,7 +195,6 @@ try {
             ", [$projectId]);
             
             dbExecute("DELETE FROM project_items_rap WHERE project_id = ?", [$projectId]);
-            dbExecute("UPDATE project_ahsp_rap SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
             dbExecute("
                 DELETE d FROM project_ahsp_details d
@@ -206,7 +203,6 @@ try {
             ", [$projectId]);
             
             dbExecute("DELETE FROM project_items WHERE project_id = ?", [$projectId]);
-            dbExecute("UPDATE project_ahsp SET unit_price = 0 WHERE project_id = ?", [$projectId]);
             
             setFlash('success', "Semua items RAP dan RAB berhasil dihapus!");
             break;
@@ -223,7 +219,7 @@ try {
                 if (isAhspCodeDuplicate($projectId, $ahspCode)) {
                     setFlash('error', 'Kode AHSP "' . $ahspCode . '" sudah digunakan dalam proyek ini!');
                 } else {
-                    dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit, unit_price) VALUES (?, ?, ?, ?, 0)",
+                    dbInsert("INSERT INTO project_ahsp (project_id, ahsp_code, work_name, unit) VALUES (?, ?, ?, ?)",
                         [$projectId, $ahspCode, $workName, $unit]);
                     syncAhspCodeRabToRap($projectId, $ahspCode);
                     setFlash('success', 'AHSP berhasil ditambahkan dan disinkronkan ke RAP!');
@@ -338,7 +334,7 @@ try {
                         [$projectId, $ahspCode]);
                     $rabAhspId = $rabAhsp ? $rabAhsp['id'] : null;
                     
-                    dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, unit_price, rab_ahsp_id) VALUES (?, ?, ?, ?, 0, ?)",
+                    dbInsert("INSERT INTO project_ahsp_rap (project_id, ahsp_code, work_name, unit, rab_ahsp_id) VALUES (?, ?, ?, ?, ?)",
                         [$projectId, $ahspCode, $workName, $unit, $rabAhspId]);
                     syncAhspCodeRapToRab($projectId, $ahspCode);
                     setFlash('success', 'AHSP RAP berhasil ditambahkan dan disinkronkan ke RAB!');

@@ -89,7 +89,7 @@ if ($isNonRab) {
 
     $totalAmount = 0;
     foreach ($items as $it) {
-        $totalAmount += floatval($it['quantity']) * floatval($it['unit_price']);
+        $totalAmount += getRequestItemTotal($it);
     }
 
     $requestAttachments = dbGetAll("SELECT * FROM request_attachments WHERE request_id = ? ORDER BY uploaded_at", [$requestId]);
@@ -109,7 +109,7 @@ if ($isNonRab) {
 
     $totalAmount = 0;
     foreach ($items as $it) {
-        $totalAmount += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+        $totalAmount += getRequestItemTotal($it);
     }
 
     // Get request attachments
@@ -129,7 +129,7 @@ if ($isNonRab) {
     $itemTotalsByCategory = dbGetAll("
         SELECT 
             COALESCE(pi.category, reqi.item_type, 'other') as item_category,
-            SUM(reqi.total_price) as total
+            SUM(" . sqlRequestItemTotalExpr('reqi') . ") as total
         FROM request_items reqi
         LEFT JOIN project_items pi ON pi.item_code = reqi.item_code AND pi.project_id = ?
         WHERE reqi.request_id = ?
@@ -448,11 +448,11 @@ require_once __DIR__ . '/../../includes/header.php';
         }
         $subtotalDirect = 0;
         foreach ($directItems as $it) {
-            $subtotalDirect += floatval($it['total_price'] ?: ($it['coefficient'] * $it['unit_price']));
+            $subtotalDirect += getRequestItemTotal($it);
         }
         $subtotalNonRab = 0;
         foreach ($nonRabItems as $it) {
-            $subtotalNonRab += floatval($it['total_price'] ?: ($it['quantity'] * $it['unit_price']));
+            $subtotalNonRab += getRequestItemTotal($it);
         }
         ?>
 
@@ -515,7 +515,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <span class="badge bg-light text-dark border"><?= sanitize($item['unit'] ?: ($item['work_billing_unit'] ?: 'OH')) ?></span>
                                 </td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
-                                <td class="text-end"><strong><?= formatRupiah($item['total_price'] ?: ($item['quantity'] * $item['unit_price']), false) ?></strong></td>
+                                <td class="text-end"><strong><?= formatRupiah(getRequestItemTotal($item), false) ?></strong></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -544,7 +544,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <td>
                                     <code><?= sanitize($item['item_code'] ?: ($item['code'] ?? '-')) ?></code>
                                     <?php if (!empty($item['code']) && !empty($item['item_code'])): ?>
-                                    <br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size:0.7rem;"><i class="mdi mdi-briefcase-outline"></i> <?= sanitize($item['code']) ?></span>
+                                     <br><span class="badge bg-soft-primary text-primary border border-primary-subtle" style="font-size:0.7rem;"><i class="mdi mdi-briefcase-outline"></i> <?= sanitize($item['code']) ?></span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -557,9 +557,9 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($item['unit']) ?></td>
-                                <td class="text-end"><?= formatVolume($item['coefficient']) ?></td>
+                                <td class="text-end"><?= formatVolume(getRequestItemEffectiveQty($item)) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
-                                <td class="text-end"><strong><?= formatRupiah($item['total_price'] ?: ($item['coefficient'] * $item['unit_price']), false) ?></strong></td>
+                                <td class="text-end"><strong><?= formatRupiah(getRequestItemTotal($item), false) ?></strong></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -597,7 +597,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             <?php 
                             $no = 1;
                             foreach ($nonRabItems as $item): 
-                                $subtotal = floatval($item['quantity'] ?: $item['coefficient'] ?: 1) * floatval($item['unit_price']);
+                                $subtotal = getRequestItemTotal($item);
                             ?>
                             <tr>
                                 <td class="text-center"><?= $no++ ?></td>
@@ -608,7 +608,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= sanitize($item['unit'] ?: 'ls') ?></td>
-                                <td class="text-end"><?= formatVolume($item['quantity'] ?: $item['coefficient'] ?: 1) ?></td>
+                                <td class="text-end"><?= formatVolume(getRequestItemEffectiveQty($item)) ?></td>
                                 <td class="text-end"><?= formatRupiah($item['unit_price'], false) ?></td>
                                 <td class="text-end"><strong><?= formatRupiah($subtotal, false) ?></strong></td>
                                 <td class="text-center">
