@@ -361,7 +361,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_ahsp_rap_html') {
     $ahspListRap = dbGetAll("SELECT * FROM project_ahsp_rap WHERE project_id = ? ORDER BY ahsp_code ASC, work_name ASC", [$projectId]);
     $rapBreakdowns = batchGetRapAhspComponentBreakdowns($projectId);
     foreach ($ahspListRap as &$rapItem) {
-        $rapItem['unit_price'] = $rapBreakdowns[$rapItem['id']]['unit_price'] ?? 0.0;
+        $code = $rapItem['ahsp_code'] ?? '';
+        $c = $rapBreakdowns[$code] ?? null;
+        $rapItem['unit_price'] = $c ? (floatval($c['upah'] ?? 0) + floatval($c['material'] ?? 0) + floatval($c['alat'] ?? 0)) : 0.0;
     }
     unset($rapItem);
     
@@ -1617,33 +1619,61 @@ if (isset($_GET['action']) && hasPermission('projects.edit')) {
     }
 }
 
-// Get summary data
-$itemCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
-$ahspCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
-$docCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
+// Get summary data with safe try-catch fallbacks to prevent HTTP 500 if DB migrations are pending
+$itemCount = 0;
+try {
+    $itemCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_items WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
+} catch (Throwable $e) {
+    $itemCount = 0;
+}
+
+$ahspCount = 0;
+try {
+    $ahspCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_ahsp WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
+} catch (Throwable $e) {
+    $ahspCount = 0;
+}
+
+$docCount = 0;
+try {
+    $docCount = dbGetRow("SELECT COUNT(*) as cnt FROM project_documents WHERE project_id = ?", [$projectId])['cnt'] ?? 0;
+} catch (Throwable $e) {
+    $docCount = 0;
+}
 
 // Load MC0 and CCO snapshots for dynamic tabs
-$mc0Snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'MC0' ORDER BY id DESC LIMIT 1", [$projectId]);
-$ccoSnapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'CCO' ORDER BY id DESC LIMIT 1", [$projectId]);
+$mc0Snapshot = null;
+$ccoSnapshot = null;
+try {
+    $mc0Snapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'MC0' ORDER BY id DESC LIMIT 1", [$projectId]);
+    $ccoSnapshot = dbGetRow("SELECT * FROM rab_snapshots WHERE project_id = ? AND UPPER(name) = 'CCO' ORDER BY id DESC LIMIT 1", [$projectId]);
+} catch (Throwable $e) {
+    $mc0Snapshot = null;
+    $ccoSnapshot = null;
+}
 
-// RAB Summary - base total
 // RAB Summary - base total dynamically from components
-$ahspBreakdowns = batchGetAhspComponentBreakdowns($projectId);
-
-$subcatRows = dbGetAll("
-    SELECT rs.volume, rs.ahsp_id
-    FROM rab_subcategories rs
-    JOIN rab_categories rc ON rs.category_id = rc.id
-    WHERE rc.project_id = ?
-", [$projectId]);
-
 $rabBaseTotal = 0;
-foreach ($subcatRows as $s) {
-    $vol = floatval($s['volume']);
-    $unitPrice = ($s['ahsp_id'] && isset($ahspBreakdowns[$s['ahsp_id']])) 
-        ? floatval($ahspBreakdowns[$s['ahsp_id']]['unit_price'] ?? 0) 
-        : 0.0;
-    $rabBaseTotal += ($vol * $unitPrice);
+try {
+    $ahspBreakdowns = batchGetAhspComponentBreakdowns($projectId);
+
+    $subcatRows = dbGetAll("
+        SELECT rs.volume, rs.ahsp_id
+        FROM rab_subcategories rs
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rc.project_id = ?
+    ", [$projectId]);
+
+    foreach ($subcatRows as $s) {
+        $vol = floatval($s['volume']);
+        $unitPrice = ($s['ahsp_id'] && isset($ahspBreakdowns[$s['ahsp_id']])) 
+            ? floatval($ahspBreakdowns[$s['ahsp_id']]['total'] ?? $ahspBreakdowns[$s['ahsp_id']]['unit_price'] ?? 0) 
+            : 0.0;
+        $rabBaseTotal += ($vol * $unitPrice);
+    }
+} catch (Throwable $e) {
+    error_log("RAB summary error for project $projectId: " . $e->getMessage());
+    $rabBaseTotal = 0;
 }
 
 // Apply overhead and PPN to get rounded total
@@ -1655,22 +1685,27 @@ $rabPpn = $rabWithOverhead * ($ppnPct / 100);
 $rabTotal = ceil(($rabWithOverhead + $rabPpn) / 10) * 10;
 
 // RAP Summary - base total dynamically from RAP helper
-$rapUnitPrices = batchGetRapItemUnitPrices($projectId);
-
-$rapItemsRows = dbGetAll("
-    SELECT rap.subcategory_id, rap.volume
-    FROM rap_items rap
-    JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
-    JOIN rab_categories rc ON rs.category_id = rc.id
-    WHERE rc.project_id = ?
-", [$projectId]);
-
 $rapBaseTotal = 0;
-foreach ($rapItemsRows as $r) {
-    $vol = floatval($r['volume']);
-    $subId = intval($r['subcategory_id']);
-    $unitPrice = floatval($rapUnitPrices[$subId] ?? 0.0);
-    $rapBaseTotal += ($vol * $unitPrice);
+try {
+    $rapUnitPrices = batchGetRapItemUnitPrices($projectId);
+
+    $rapItemsRows = dbGetAll("
+        SELECT rap.subcategory_id, rap.volume
+        FROM rap_items rap
+        JOIN rab_subcategories rs ON rap.subcategory_id = rs.id
+        JOIN rab_categories rc ON rs.category_id = rc.id
+        WHERE rc.project_id = ?
+    ", [$projectId]);
+
+    foreach ($rapItemsRows as $r) {
+        $vol = floatval($r['volume']);
+        $subId = intval($r['subcategory_id']);
+        $unitPrice = floatval($rapUnitPrices[$subId] ?? 0.0);
+        $rapBaseTotal += ($vol * $unitPrice);
+    }
+} catch (Throwable $e) {
+    error_log("RAP summary error for project $projectId: " . $e->getMessage());
+    $rapBaseTotal = 0;
 }
 
 // RAP total with overhead and PPN
@@ -1680,22 +1715,48 @@ $rapPpn = $rapWithOverhead * ($ppnPct / 100);
 $rapTotal = ceil(($rapWithOverhead + $rapPpn) / 10) * 10;
 
 // Actual Spending (Matches actual.php logic)
-$itemTotalSql = sqlRequestItemTotalExpr('reqi');
-$actualBaseTotal = floatval(dbGetRow("
-    SELECT COALESCE(SUM({$itemTotalSql}), 0) as total
-    FROM request_items reqi
-    JOIN requests req ON reqi.request_id = req.id
-    WHERE req.project_id = ? AND req.status = 'approved'
-", [$projectId])['total'] ?? 0);
+$actualBaseTotal = 0;
+try {
+    $itemTotalSql = sqlRequestItemTotalExpr('reqi');
+    $actualBaseTotal = floatval(dbGetRow("
+        SELECT COALESCE(SUM({$itemTotalSql}), 0) as total
+        FROM request_items reqi
+        JOIN requests req ON reqi.request_id = req.id
+        WHERE req.project_id = ? AND req.status = 'approved'
+    ", [$projectId])['total'] ?? 0);
+} catch (Throwable $e) {
+    // Fallback if work_type column does not exist on request_items
+    try {
+        $actualBaseTotal = floatval(dbGetRow("
+            SELECT COALESCE(SUM(reqi.quantity * reqi.unit_price), 0) as total
+            FROM request_items reqi
+            JOIN requests req ON reqi.request_id = req.id
+            WHERE req.project_id = ? AND req.status = 'approved'
+        ", [$projectId])['total'] ?? 0);
+    } catch (Throwable $e2) {
+        $actualBaseTotal = 0;
+    }
+}
 
 // Actual total with PPN and rounding
 $actualPpn = $actualBaseTotal * ($ppnPct / 100);
 $actualTotal = ceil(($actualBaseTotal + $actualPpn) / 10) * 10;
 
 // Pending Requests (pending PM review or pending final Admin approval)
-$pendingRequests = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status IN ('pending', 'pm_approved')", [$projectId])['cnt'] ?? 0;
+$pendingRequests = 0;
+try {
+    $pendingRequests = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status IN ('pending', 'pm_approved')", [$projectId])['cnt'] ?? 0;
+} catch (Throwable $e) {
+    $pendingRequests = 0;
+}
+
 // Unactualized approved requests count
-$unactualizedCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status = 'approved' AND (is_actualized = 0 OR is_actualized IS NULL) AND (request_type IN ('rab', 'mixed') OR request_type IS NULL)", [$projectId])['cnt'] ?? 0;
+$unactualizedCount = 0;
+try {
+    $unactualizedCount = dbGetRow("SELECT COUNT(*) as cnt FROM requests WHERE project_id = ? AND status = 'approved' AND (is_actualized = 0 OR is_actualized IS NULL) AND (request_type IN ('rab', 'mixed') OR request_type IS NULL)", [$projectId])['cnt'] ?? 0;
+} catch (Throwable $e) {
+    $unactualizedCount = 0;
+}
 
 // Sisa Anggaran = RAP Total - Actual
 $sisaAnggaran = $rapTotal - $actualTotal;
@@ -1929,6 +1990,11 @@ require_once __DIR__ . '/../../includes/header.php';
                 </a>
             </li>
             <?php endif; ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab == 'diagram' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=diagram">
+                    <i class="mdi mdi-chart-box-outline"></i> Diagram
+                </a>
+            </li>
             <?php if (hasPermission('documentation.view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $activeTab == 'documentation' ? 'active' : '' ?>" href="?id=<?= $projectId ?>&tab=documentation">
@@ -2010,6 +2076,13 @@ require_once __DIR__ . '/../../includes/header.php';
                     include __DIR__ . '/tabs/actual.php';
                 } else {
                     echo '<div class="alert alert-warning">Anda tidak memiliki akses ke Realisasi.</div>';
+                }
+                break;
+            case 'diagram':
+                if (file_exists(__DIR__ . '/tabs/diagram.php')) {
+                    include __DIR__ . '/tabs/diagram.php';
+                } else {
+                    echo '<div class="alert alert-info">Fitur diagram sedang disiapkan.</div>';
                 }
                 break;
             case 'documentation':

@@ -340,6 +340,33 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
         display: table-row-group !important;
     }
 }
+
+/* Head-Sub Expand / Collapse Button */
+.toggle-hs-rap-btn {
+    background-color: #ffc107 !important;
+    border: 1px solid #ffc107 !important;
+    color: #212529 !important;
+    font-weight: bold !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 24px !important;
+    min-width: 26px !important;
+    border-radius: 4px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    transition: all 0.15s ease-in-out !important;
+}
+.toggle-hs-rap-btn:hover {
+    background-color: #e0a800 !important;
+    border-color: #d39e00 !important;
+    color: #000 !important;
+}
+.toggle-hs-rap-btn i {
+    color: #212529 !important;
+    font-size: 16px !important;
+    font-weight: bold !important;
+    line-height: 1 !important;
+}
 </style>
 
 <!-- RAP Table -->
@@ -378,7 +405,7 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                 <tr class="table-dark head-sub-row-rap" data-hs-id="<?= $hsId ?>">
                     <td colspan="11" class="py-2">
                         <div class="d-flex align-items-center gap-2">
-                            <button type="button" class="btn btn-sm btn-outline-light p-0 px-2 toggle-hs-rap-btn" onclick="toggleHeadSubRap(<?= $hsId ?>)" title="Tutup / Buka Head-Sub">
+                            <button type="button" class="btn btn-sm btn-warning text-dark p-0 px-2 toggle-hs-rap-btn" onclick="toggleHeadSubRap(<?= $hsId ?>)" title="Tutup / Buka Head-Sub">
                                 <i class="mdi mdi-chevron-down font-size-16" id="hs-rap-chevron-<?= $hsId ?>"></i>
                             </button>
                             <strong class="font-size-14 text-uppercase text-warning">

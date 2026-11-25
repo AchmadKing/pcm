@@ -3,13 +3,18 @@
  * Detail Tab - Project Dashboard
  */
 
-$projectImages = dbGetAll("
-    SELECT pi.*, u.full_name as uploaded_by_name 
-    FROM project_images pi 
-    LEFT JOIN users u ON pi.uploaded_by = u.id 
-    WHERE pi.project_id = ? 
-    ORDER BY pi.created_at DESC
-", [$projectId]);
+$projectImages = [];
+try {
+    $projectImages = dbGetAll("
+        SELECT pi.*, u.full_name as uploaded_by_name 
+        FROM project_images pi 
+        LEFT JOIN users u ON pi.uploaded_by = u.id 
+        WHERE pi.project_id = ? 
+        ORDER BY pi.created_at DESC
+    ", [$projectId]);
+} catch (Throwable $e) {
+    $projectImages = [];
+}
 ?>
 
 

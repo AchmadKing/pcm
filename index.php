@@ -240,24 +240,101 @@ try {
     </div>
 </div>
 
+<?php
+// Calculate percentages for statistics
+$totalProj = intval($stats['total_projects']);
+$draftPct = $totalProj > 0 ? round(($stats['draft_projects'] / $totalProj) * 100, 1) : 0;
+$onProgressPct = $totalProj > 0 ? round(($stats['on_progress_projects'] / $totalProj) * 100, 1) : 0;
+$completedPct = $totalProj > 0 ? round(($stats['completed_projects'] / $totalProj) * 100, 1) : 0;
+?>
+
+<!-- ApexCharts CSS for Dashboard -->
+<link href="<?= $baseUrl ?>/dist/assets/libs/apexcharts/apexcharts.css" rel="stylesheet" type="text/css" />
+
+<style>
+.stat-card-widget {
+    transition: all 0.25s ease;
+}
+.stat-card-widget:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+}
+.btn-card-toggle {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    line-height: 28px;
+    text-align: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+.btn-card-toggle:hover {
+    background-color: #e9ecef;
+    color: #556ee6;
+}
+.card-stat-view {
+    transition: opacity 0.2s ease;
+}
+.mini-chart-container {
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+</style>
+
+<!-- Stats Section Header with Toggle -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h5 class="font-size-16 mb-0 fw-semibold text-dark">
+            <i class="mdi mdi-chart-box-outline text-primary me-1"></i> Ringkasan Statistik Proyek
+        </h5>
+        <span class="text-muted font-size-12">Pantau status proyek dan akumulasi anggaran RAB</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <span class="text-muted font-size-12 d-none d-sm-inline">Tampilan:</span>
+        <div class="btn-group btn-group-sm p-1 bg-light rounded-pill border" role="group" id="statsModeGroup">
+            <button type="button" class="btn btn-sm rounded-pill px-3 active fw-medium" id="btnModeCard" data-mode="card" title="Tampilkan Kartu Ringkasan Angka">
+                <i class="mdi mdi-view-grid-outline me-1"></i> Kartu
+            </button>
+            <button type="button" class="btn btn-sm rounded-pill px-3 fw-medium" id="btnModeChart" data-mode="chart" title="Tampilkan Tampilan Diagram">
+                <i class="mdi mdi-chart-donut me-1"></i> Diagram
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Stats Cards (Total Proyek, Draft, On Progress, Selesai) -->
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4" id="statsCardsContainer">
     <!-- 1. Total Proyek -->
     <div class="col-sm-6 col-xl-3">
-        <div class="card h-100 shadow-sm border-0 mb-0">
+        <div class="card h-100 shadow-sm border-0 mb-0 stat-card-widget" id="card-stat-total">
             <div class="card-heading p-4 h-100 d-flex flex-column justify-content-between">
                 <div>
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <h5 class="font-size-17 mb-0">Total Proyek</h5>
-                        <div class="mini-stat-icon">
-                            <i class="mdi mdi-briefcase bg-primary text-white"></i>
+                        <div class="d-flex align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-light text-muted btn-card-toggle" data-card="total" title="Ubah ke tampilan diagram">
+                                <i class="mdi mdi-chart-donut"></i>
+                            </button>
+                            <div class="mini-stat-icon">
+                                <i class="mdi mdi-briefcase bg-primary text-white"></i>
+                            </div>
                         </div>
                     </div>
-                    <h3 class="mb-1"><?= number_format($stats['total_projects'], 0, ',', '.') ?></h3>
-                    <p class="text-muted mb-0 font-size-13">Semua proyek</p>
+                    <!-- View 1: Numeric -->
+                    <div class="card-stat-view view-numeric">
+                        <h3 class="mb-1"><?= number_format($stats['total_projects'], 0, ',', '.') ?></h3>
+                        <p class="text-muted mb-0 font-size-13">Semua proyek terdaftar</p>
+                    </div>
+                    <!-- View 2: Diagram -->
+                    <div class="card-stat-view view-diagram d-none">
+                        <div id="miniChartTotal" class="mini-chart-container"></div>
+                        <p class="text-muted mb-0 font-size-12 text-center">Komposisi: <?= $stats['draft_projects'] ?> Draft, <?= $stats['on_progress_projects'] ?> Berjalan, <?= $stats['completed_projects'] ?> Selesai</p>
+                    </div>
                 </div>
-                <div class="mt-3">
-                    <div class="text-dark fw-bold font-size-20 text-truncate" title="Rp. <?= number_format($stats['total_projects_rab'], 0, ',', '.') ?>">
+                <div class="mt-3 pt-2 border-top border-light">
+                    <small class="text-muted font-size-11 d-block mb-1">Total Nilai RAB:</small>
+                    <div class="text-dark fw-bold font-size-18 text-truncate" title="Rp. <?= number_format($stats['total_projects_rab'], 0, ',', '.') ?>">
                         Rp. <?= number_format($stats['total_projects_rab'], 0, ',', '.') ?>
                     </div>
                 </div>
@@ -267,20 +344,34 @@ try {
 
     <!-- 2. Draft -->
     <div class="col-sm-6 col-xl-3">
-        <div class="card h-100 shadow-sm border-0 mb-0">
+        <div class="card h-100 shadow-sm border-0 mb-0 stat-card-widget" id="card-stat-draft">
             <div class="card-heading p-4 h-100 d-flex flex-column justify-content-between">
                 <div>
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <h5 class="font-size-17 mb-0">Draft</h5>
-                        <div class="mini-stat-icon">
-                            <i class="mdi mdi-file-document-edit-outline bg-secondary text-white"></i>
+                        <div class="d-flex align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-light text-muted btn-card-toggle" data-card="draft" title="Ubah ke tampilan diagram">
+                                <i class="mdi mdi-chart-donut"></i>
+                            </button>
+                            <div class="mini-stat-icon">
+                                <i class="mdi mdi-file-document-edit-outline bg-secondary text-white"></i>
+                            </div>
                         </div>
                     </div>
-                    <h3 class="mb-1"><?= number_format($stats['draft_projects'], 0, ',', '.') ?></h3>
-                    <p class="text-muted mb-0 font-size-13">Proyek draft</p>
+                    <!-- View 1: Numeric -->
+                    <div class="card-stat-view view-numeric">
+                        <h3 class="mb-1"><?= number_format($stats['draft_projects'], 0, ',', '.') ?></h3>
+                        <p class="text-muted mb-0 font-size-13">Proyek tahap draft (<?= $draftPct ?>%)</p>
+                    </div>
+                    <!-- View 2: Diagram -->
+                    <div class="card-stat-view view-diagram d-none">
+                        <div id="miniChartDraft" class="mini-chart-container"></div>
+                        <p class="text-muted mb-0 font-size-12 text-center"><?= $stats['draft_projects'] ?> dari <?= $stats['total_projects'] ?> proyek (<?= $draftPct ?>%)</p>
+                    </div>
                 </div>
-                <div class="mt-3">
-                    <div class="text-dark fw-bold font-size-20 text-truncate" title="Rp. <?= number_format($stats['draft_projects_rab'], 0, ',', '.') ?>">
+                <div class="mt-3 pt-2 border-top border-light">
+                    <small class="text-muted font-size-11 d-block mb-1">Nilai RAB Draft:</small>
+                    <div class="text-dark fw-bold font-size-18 text-truncate" title="Rp. <?= number_format($stats['draft_projects_rab'], 0, ',', '.') ?>">
                         Rp. <?= number_format($stats['draft_projects_rab'], 0, ',', '.') ?>
                     </div>
                 </div>
@@ -290,20 +381,34 @@ try {
 
     <!-- 3. On Progress -->
     <div class="col-sm-6 col-xl-3">
-        <div class="card h-100 shadow-sm border-0 mb-0">
+        <div class="card h-100 shadow-sm border-0 mb-0 stat-card-widget" id="card-stat-onprogress">
             <div class="card-heading p-4 h-100 d-flex flex-column justify-content-between">
                 <div>
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <h5 class="font-size-17 mb-0">On Progress</h5>
-                        <div class="mini-stat-icon">
-                            <i class="mdi mdi-progress-clock bg-info text-white"></i>
+                        <div class="d-flex align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-light text-muted btn-card-toggle" data-card="onprogress" title="Ubah ke tampilan diagram">
+                                <i class="mdi mdi-chart-donut"></i>
+                            </button>
+                            <div class="mini-stat-icon">
+                                <i class="mdi mdi-progress-clock bg-info text-white"></i>
+                            </div>
                         </div>
                     </div>
-                    <h3 class="mb-1"><?= number_format($stats['on_progress_projects'], 0, ',', '.') ?></h3>
-                    <p class="text-muted mb-0 font-size-13">Proyek berjalan</p>
+                    <!-- View 1: Numeric -->
+                    <div class="card-stat-view view-numeric">
+                        <h3 class="mb-1"><?= number_format($stats['on_progress_projects'], 0, ',', '.') ?></h3>
+                        <p class="text-muted mb-0 font-size-13">Proyek sedang berjalan (<?= $onProgressPct ?>%)</p>
+                    </div>
+                    <!-- View 2: Diagram -->
+                    <div class="card-stat-view view-diagram d-none">
+                        <div id="miniChartOnProgress" class="mini-chart-container"></div>
+                        <p class="text-muted mb-0 font-size-12 text-center"><?= $stats['on_progress_projects'] ?> dari <?= $stats['total_projects'] ?> proyek (<?= $onProgressPct ?>%)</p>
+                    </div>
                 </div>
-                <div class="mt-3">
-                    <div class="text-dark fw-bold font-size-20 text-truncate" title="Rp. <?= number_format($stats['on_progress_projects_rab'], 0, ',', '.') ?>">
+                <div class="mt-3 pt-2 border-top border-light">
+                    <small class="text-muted font-size-11 d-block mb-1">Nilai RAB Berjalan:</small>
+                    <div class="text-dark fw-bold font-size-18 text-truncate" title="Rp. <?= number_format($stats['on_progress_projects_rab'], 0, ',', '.') ?>">
                         Rp. <?= number_format($stats['on_progress_projects_rab'], 0, ',', '.') ?>
                     </div>
                 </div>
@@ -313,22 +418,65 @@ try {
 
     <!-- 4. Selesai -->
     <div class="col-sm-6 col-xl-3">
-        <div class="card h-100 shadow-sm border-0 mb-0">
+        <div class="card h-100 shadow-sm border-0 mb-0 stat-card-widget" id="card-stat-completed">
             <div class="card-heading p-4 h-100 d-flex flex-column justify-content-between">
                 <div>
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <h5 class="font-size-17 mb-0">Selesai</h5>
-                        <div class="mini-stat-icon">
-                            <i class="mdi mdi-check-circle-outline bg-success text-white"></i>
+                        <div class="d-flex align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-light text-muted btn-card-toggle" data-card="completed" title="Ubah ke tampilan diagram">
+                                <i class="mdi mdi-chart-donut"></i>
+                            </button>
+                            <div class="mini-stat-icon">
+                                <i class="mdi mdi-check-circle-outline bg-success text-white"></i>
+                            </div>
                         </div>
                     </div>
-                    <h3 class="mb-1"><?= number_format($stats['completed_projects'], 0, ',', '.') ?></h3>
-                    <p class="text-muted mb-0 font-size-13">Proyek selesai</p>
+                    <!-- View 1: Numeric -->
+                    <div class="card-stat-view view-numeric">
+                        <h3 class="mb-1"><?= number_format($stats['completed_projects'], 0, ',', '.') ?></h3>
+                        <p class="text-muted mb-0 font-size-13">Proyek telah selesai (<?= $completedPct ?>%)</p>
+                    </div>
+                    <!-- View 2: Diagram -->
+                    <div class="card-stat-view view-diagram d-none">
+                        <div id="miniChartCompleted" class="mini-chart-container"></div>
+                        <p class="text-muted mb-0 font-size-12 text-center"><?= $stats['completed_projects'] ?> dari <?= $stats['total_projects'] ?> proyek (<?= $completedPct ?>%)</p>
+                    </div>
                 </div>
-                <div class="mt-3">
-                    <div class="text-dark fw-bold font-size-20 text-truncate" title="Rp. <?= number_format($stats['completed_projects_rab'], 0, ',', '.') ?>">
+                <div class="mt-3 pt-2 border-top border-light">
+                    <small class="text-muted font-size-11 d-block mb-1">Nilai RAB Selesai:</small>
+                    <div class="text-dark fw-bold font-size-18 text-truncate" title="Rp. <?= number_format($stats['completed_projects_rab'], 0, ',', '.') ?>">
                         Rp. <?= number_format($stats['completed_projects_rab'], 0, ',', '.') ?>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Expanded Full Diagram Panel (Activated when toggled to Diagram) -->
+<div id="dashboardFullChartPanel" class="card shadow-sm border-0 mb-4 d-none">
+    <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h5 class="card-title mb-1"><i class="mdi mdi-chart-timeline-variant-shimmer text-primary me-1"></i> Analisis Diagram Statistik Proyek</h5>
+                <p class="text-muted font-size-12 mb-0">Perbandingan visual distribusi status proyek dan alokasi total anggaran RAB</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="btnToggleFullChart">
+                <i class="mdi mdi-chevron-up me-1"></i> Sembunyikan Panel
+            </button>
+        </div>
+        <div class="row g-4 align-items-center">
+            <div class="col-lg-5">
+                <div class="p-3 border rounded-3 bg-light bg-opacity-50">
+                    <h6 class="text-dark font-size-13 fw-semibold text-center mb-3">Distribusi Status Proyek (Jumlah)</h6>
+                    <div id="dashboardChartStatusDonut" style="min-height: 260px;"></div>
+                </div>
+            </div>
+            <div class="col-lg-7">
+                <div class="p-3 border rounded-3 bg-light bg-opacity-50">
+                    <h6 class="text-dark font-size-13 fw-semibold text-center mb-3">Total Nilai Anggaran RAB per Status Proyek (Rupiah)</h6>
+                    <div id="dashboardChartRabBar" style="min-height: 260px;"></div>
                 </div>
             </div>
         </div>
@@ -476,3 +624,332 @@ try {
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
+
+<!-- ApexCharts Script & Dashboard Card Toggle Logic -->
+<script src="<?= $baseUrl ?>/dist/assets/libs/apexcharts/apexcharts.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    function formatIDR(val) {
+        return 'Rp ' + Number(val || 0).toLocaleString('id-ID');
+    }
+
+    var chartsInitialized = false;
+    var charts = {};
+
+    var statsData = {
+        totalProjects: <?= (int)$stats['total_projects'] ?>,
+        draftProjects: <?= (int)$stats['draft_projects'] ?>,
+        onProgressProjects: <?= (int)$stats['on_progress_projects'] ?>,
+        completedProjects: <?= (int)$stats['completed_projects'] ?>,
+        draftPct: <?= $draftPct ?>,
+        onProgressPct: <?= $onProgressPct ?>,
+        completedPct: <?= $completedPct ?>,
+        totalRab: <?= round($stats['total_projects_rab']) ?>,
+        draftRab: <?= round($stats['draft_projects_rab']) ?>,
+        onProgressRab: <?= round($stats['on_progress_projects_rab']) ?>,
+        completedRab: <?= round($stats['completed_projects_rab']) ?>
+    };
+
+    function initCharts() {
+        if (chartsInitialized) return;
+        chartsInitialized = true;
+
+        // 1. Mini Chart Total Proyek (Donut)
+        var elTotal = document.querySelector("#miniChartTotal");
+        if (elTotal) {
+            charts.miniTotal = new ApexCharts(elTotal, {
+                series: [statsData.draftProjects, statsData.onProgressProjects, statsData.completedProjects],
+                labels: ['Draft', 'On Progress', 'Selesai'],
+                colors: ['#74788d', '#50a5f1', '#34c38f'],
+                chart: { type: 'donut', height: 110, sparkline: { enabled: true } },
+                stroke: { width: 1 },
+                tooltip: {
+                    fixed: { enabled: false },
+                    y: {
+                        formatter: function(val, opts) {
+                            return val + ' Proyek (' + opts.globals.labels[opts.seriesIndex] + ')';
+                        }
+                    }
+                }
+            });
+            charts.miniTotal.render();
+        }
+
+        // 2. Mini Chart Draft (Radial Bar)
+        var elDraft = document.querySelector("#miniChartDraft");
+        if (elDraft) {
+            charts.miniDraft = new ApexCharts(elDraft, {
+                series: [statsData.draftPct],
+                chart: { type: 'radialBar', height: 110, sparkline: { enabled: true } },
+                colors: ['#74788d'],
+                plotOptions: {
+                    radialBar: {
+                        hollow: { size: '52%' },
+                        track: { background: '#f2f2f2' },
+                        dataLabels: {
+                            name: { show: false },
+                            value: {
+                                offsetY: 5,
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                formatter: function(val) { return val + '%'; }
+                            }
+                        }
+                    }
+                }
+            });
+            charts.miniDraft.render();
+        }
+
+        // 3. Mini Chart On Progress (Radial Bar)
+        var elProg = document.querySelector("#miniChartOnProgress");
+        if (elProg) {
+            charts.miniProg = new ApexCharts(elProg, {
+                series: [statsData.onProgressPct],
+                chart: { type: 'radialBar', height: 110, sparkline: { enabled: true } },
+                colors: ['#50a5f1'],
+                plotOptions: {
+                    radialBar: {
+                        hollow: { size: '52%' },
+                        track: { background: '#eaf4fd' },
+                        dataLabels: {
+                            name: { show: false },
+                            value: {
+                                offsetY: 5,
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                formatter: function(val) { return val + '%'; }
+                            }
+                        }
+                    }
+                }
+            });
+            charts.miniProg.render();
+        }
+
+        // 4. Mini Chart Selesai (Radial Bar)
+        var elComp = document.querySelector("#miniChartCompleted");
+        if (elComp) {
+            charts.miniComp = new ApexCharts(elComp, {
+                series: [statsData.completedPct],
+                chart: { type: 'radialBar', height: 110, sparkline: { enabled: true } },
+                colors: ['#34c38f'],
+                plotOptions: {
+                    radialBar: {
+                        hollow: { size: '52%' },
+                        track: { background: '#e7f8f2' },
+                        dataLabels: {
+                            name: { show: false },
+                            value: {
+                                offsetY: 5,
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                formatter: function(val) { return val + '%'; }
+                            }
+                        }
+                    }
+                }
+            });
+            charts.miniComp.render();
+        }
+
+        // 5. Full Panel - Donut Distribusi Status
+        var elFullDonut = document.querySelector("#dashboardChartStatusDonut");
+        if (elFullDonut) {
+            charts.fullDonut = new ApexCharts(elFullDonut, {
+                series: [statsData.draftProjects, statsData.onProgressProjects, statsData.completedProjects],
+                labels: ['Draft', 'On Progress', 'Selesai'],
+                colors: ['#74788d', '#50a5f1', '#34c38f'],
+                chart: { type: 'donut', height: 260 },
+                legend: { position: 'bottom', horizontalAlign: 'center' },
+                dataLabels: {
+                    enabled: true,
+                    formatter: function(val) { return val.toFixed(1) + '%'; }
+                },
+                plotOptions: {
+                    pie: {
+                        donut: {
+                            size: '65%',
+                            labels: {
+                                show: true,
+                                total: {
+                                    show: true,
+                                    label: 'Total Proyek',
+                                    formatter: function() { return statsData.totalProjects; }
+                                }
+                            }
+                        }
+                    }
+                },
+                tooltip: {
+                    y: {
+                        formatter: function(val) { return val + ' Proyek'; }
+                    }
+                }
+            });
+            charts.fullDonut.render();
+        }
+
+        // 6. Full Panel - Bar Total Anggaran RAB per Status
+        var elFullBar = document.querySelector("#dashboardChartRabBar");
+        if (elFullBar) {
+            charts.fullBar = new ApexCharts(elFullBar, {
+                series: [{
+                    name: 'Nilai RAB',
+                    data: [statsData.totalRab, statsData.draftRab, statsData.onProgressRab, statsData.completedRab]
+                }],
+                chart: { type: 'bar', height: 260, toolbar: { show: false } },
+                colors: ['#556ee6', '#74788d', '#50a5f1', '#34c38f'],
+                plotOptions: {
+                    bar: {
+                        borderRadius: 5,
+                        columnWidth: '45%',
+                        distributed: true,
+                        dataLabels: { position: 'top' }
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    formatter: function(val) {
+                        if (val >= 1000000000) return (val / 1000000000).toFixed(1) + ' M';
+                        if (val >= 1000000) return (val / 1000000).toFixed(0) + ' Jt';
+                        return val.toLocaleString('id-ID');
+                    },
+                    offsetY: -20,
+                    style: { fontSize: '11px', colors: ['#304758'] }
+                },
+                legend: { show: false },
+                xaxis: {
+                    categories: ['Semua Proyek', 'Draft', 'On Progress', 'Selesai'],
+                    labels: { style: { fontSize: '12px', fontWeight: 600 } }
+                },
+                yaxis: {
+                    labels: {
+                        formatter: function(val) {
+                            if (val >= 1000000000) return (val / 1000000000).toFixed(1) + ' M';
+                            if (val >= 1000000) return (val / 1000000).toFixed(0) + ' Jt';
+                            return val.toLocaleString('id-ID');
+                        }
+                    }
+                },
+                tooltip: {
+                    y: {
+                        formatter: function(val) { return formatIDR(val); }
+                    }
+                },
+                grid: { borderColor: '#f1f1f1', padding: { top: 10 } }
+            });
+            charts.fullBar.render();
+        }
+    }
+
+    // Toggle individual card between numeric view and diagram view
+    function toggleSingleCard(cardElement, forceMode) {
+        var numView = cardElement.querySelector('.view-numeric');
+        var diaView = cardElement.querySelector('.view-diagram');
+        var toggleBtn = cardElement.querySelector('.btn-card-toggle');
+        if (!numView || !diaView) return;
+
+        var isDiagram;
+        if (forceMode !== undefined) {
+            isDiagram = (forceMode === 'diagram');
+        } else {
+            isDiagram = diaView.classList.contains('d-none');
+        }
+
+        if (isDiagram) {
+            numView.classList.add('d-none');
+            diaView.classList.remove('d-none');
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '<i class="mdi mdi-numeric"></i>';
+                toggleBtn.setAttribute('title', 'Ubah ke tampilan angka');
+            }
+        } else {
+            diaView.classList.add('d-none');
+            numView.classList.remove('d-none');
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '<i class="mdi mdi-chart-donut"></i>';
+                toggleBtn.setAttribute('title', 'Ubah ke tampilan diagram');
+            }
+        }
+
+        initCharts();
+        setTimeout(function() {
+            window.dispatchEvent(new Event('resize'));
+        }, 150);
+    }
+
+    // Set global view mode: 'card' or 'chart'
+    function setStatsMode(mode) {
+        var btnCard = document.getElementById('btnModeCard');
+        var btnChart = document.getElementById('btnModeChart');
+        var fullPanel = document.getElementById('dashboardFullChartPanel');
+        var allCards = document.querySelectorAll('.stat-card-widget');
+
+        if (mode === 'chart') {
+            btnCard.classList.remove('active');
+            btnChart.classList.add('active');
+            if (fullPanel) fullPanel.classList.remove('d-none');
+
+            allCards.forEach(function(card) {
+                toggleSingleCard(card, 'diagram');
+            });
+            localStorage.setItem('pcm_dashboard_stats_mode', 'chart');
+        } else {
+            btnChart.classList.remove('active');
+            btnCard.classList.add('active');
+            if (fullPanel) fullPanel.classList.add('d-none');
+
+            allCards.forEach(function(card) {
+                toggleSingleCard(card, 'numeric');
+            });
+            localStorage.setItem('pcm_dashboard_stats_mode', 'card');
+        }
+
+        initCharts();
+        setTimeout(function() {
+            window.dispatchEvent(new Event('resize'));
+        }, 150);
+    }
+
+    // Global Mode Toggle Buttons
+    var btnModeCard = document.getElementById('btnModeCard');
+    var btnModeChart = document.getElementById('btnModeChart');
+    if (btnModeCard) {
+        btnModeCard.addEventListener('click', function() { setStatsMode('card'); });
+    }
+    if (btnModeChart) {
+        btnModeChart.addEventListener('click', function() { setStatsMode('chart'); });
+    }
+
+    // Individual Card Toggle Buttons
+    document.querySelectorAll('.btn-card-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var card = this.closest('.stat-card-widget');
+            if (card) {
+                toggleSingleCard(card);
+            }
+        });
+    });
+
+    // Toggle Full Chart Panel Button
+    var btnToggleFull = document.getElementById('btnToggleFullChart');
+    if (btnToggleFull) {
+        btnToggleFull.addEventListener('click', function() {
+            var fullPanel = document.getElementById('dashboardFullChartPanel');
+            if (fullPanel) fullPanel.classList.toggle('d-none');
+            setTimeout(function() {
+                window.dispatchEvent(new Event('resize'));
+            }, 100);
+        });
+    }
+
+    // Restore user preference
+    var savedMode = localStorage.getItem('pcm_dashboard_stats_mode');
+    if (savedMode === 'chart') {
+        setStatsMode('chart');
+    }
+});
+</script>

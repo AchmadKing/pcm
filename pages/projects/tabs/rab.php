@@ -231,6 +231,33 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
         display: none !important;
     }
 }
+
+/* Head-Sub Expand / Collapse Button */
+.toggle-hs-btn {
+    background-color: #ffc107 !important;
+    border: 1px solid #ffc107 !important;
+    color: #212529 !important;
+    font-weight: bold !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 24px !important;
+    min-width: 26px !important;
+    border-radius: 4px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    transition: all 0.15s ease-in-out !important;
+}
+.toggle-hs-btn:hover {
+    background-color: #e0a800 !important;
+    border-color: #d39e00 !important;
+    color: #000 !important;
+}
+.toggle-hs-btn i {
+    color: #212529 !important;
+    font-size: 16px !important;
+    font-weight: bold !important;
+    line-height: 1 !important;
+}
 </style>
 
 <!-- RAB Table -->
@@ -270,7 +297,7 @@ $totalRounded = ceil($totalWithPpn / 10) * 10;
                     <td colspan="10" class="py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="d-flex align-items-center gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-light p-0 px-2 toggle-hs-btn" onclick="toggleHeadSub(<?= $hsId ?>)" title="Tutup / Buka Head-Sub">
+                                <button type="button" class="btn btn-sm btn-warning text-dark p-0 px-2 toggle-hs-btn" onclick="toggleHeadSub(<?= $hsId ?>)" title="Tutup / Buka Head-Sub">
                                     <i class="mdi mdi-chevron-down font-size-16" id="hs-chevron-<?= $hsId ?>"></i>
                                 </button>
                                 <strong class="font-size-14 text-uppercase text-warning">
