@@ -258,18 +258,70 @@ $completedPct = $totalProj > 0 ? round(($stats['completed_projects'] / $totalPro
 .stat-card-widget:hover {
     box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
 }
+/* Mode Tampilan Toggle Segmented Control */
+.stats-mode-wrapper {
+    background: #edf2f9;
+    border: 1px solid #c8d3e2 !important;
+    padding: 3px;
+    border-radius: 30px;
+    display: inline-flex;
+    align-items: center;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.stats-mode-wrapper .btn-mode-toggle {
+    border: none !important;
+    border-radius: 20px !important;
+    padding: 5px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #495057 !important;
+    background: transparent !important;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1.4;
+    cursor: pointer;
+}
+.stats-mode-wrapper .btn-mode-toggle i {
+    font-size: 14px;
+    color: #6c757d;
+    transition: color 0.2s ease;
+}
+.stats-mode-wrapper .btn-mode-toggle:hover {
+    color: #556ee6 !important;
+    background-color: rgba(85, 110, 230, 0.1) !important;
+}
+.stats-mode-wrapper .btn-mode-toggle:hover i {
+    color: #556ee6 !important;
+}
+.stats-mode-wrapper .btn-mode-toggle.active {
+    background-color: #556ee6 !important;
+    color: #ffffff !important;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(85, 110, 230, 0.35);
+}
+.stats-mode-wrapper .btn-mode-toggle.active i {
+    color: #ffffff !important;
+}
+/* Individual Card Toggle Button */
 .btn-card-toggle {
     width: 30px;
     height: 30px;
     padding: 0;
-    line-height: 28px;
-    text-align: center;
-    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: 1px solid #d0d7de !important;
+    background-color: #f8f9fa;
+    color: #556ee6 !important;
     transition: all 0.2s ease;
 }
 .btn-card-toggle:hover {
-    background-color: #e9ecef;
-    color: #556ee6;
+    background-color: #556ee6 !important;
+    border-color: #556ee6 !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 5px rgba(85, 110, 230, 0.3);
 }
 .card-stat-view {
     transition: opacity 0.2s ease;
@@ -291,12 +343,14 @@ $completedPct = $totalProj > 0 ? round(($stats['completed_projects'] / $totalPro
         <span class="text-muted font-size-12">Pantau status proyek dan akumulasi anggaran RAB</span>
     </div>
     <div class="d-flex align-items-center gap-2">
-        <span class="text-muted font-size-12 d-none d-sm-inline">Tampilan:</span>
-        <div class="btn-group btn-group-sm p-1 bg-light rounded-pill border" role="group" id="statsModeGroup">
-            <button type="button" class="btn btn-sm rounded-pill px-3 active fw-medium" id="btnModeCard" data-mode="card" title="Tampilkan Kartu Ringkasan Angka">
+        <span class="text-secondary fw-semibold font-size-13 d-none d-sm-inline">
+            <i class="mdi mdi-tune-variant me-1 text-primary"></i> Mode Tampilan:
+        </span>
+        <div class="stats-mode-wrapper btn-group" role="group" id="statsModeGroup">
+            <button type="button" class="btn btn-mode-toggle active" id="btnModeCard" data-mode="card" title="Tampilkan Kartu Ringkasan Angka">
                 <i class="mdi mdi-view-grid-outline me-1"></i> Kartu
             </button>
-            <button type="button" class="btn btn-sm rounded-pill px-3 fw-medium" id="btnModeChart" data-mode="chart" title="Tampilkan Tampilan Diagram">
+            <button type="button" class="btn btn-mode-toggle" id="btnModeChart" data-mode="chart" title="Tampilkan Tampilan Diagram">
                 <i class="mdi mdi-chart-donut me-1"></i> Diagram
             </button>
         </div>

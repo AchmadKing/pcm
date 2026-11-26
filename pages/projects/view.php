@@ -822,10 +822,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
     
     header('Content-Type: application/json');
     
-    $ahspCode = $_GET['ahsp_code'] ?? '';
+    $ahspCode = trim($_GET['ahsp_code'] ?? '');
+    $ahspId = intval($_GET['ahsp_id'] ?? 0);
     $pId = intval($_GET['id'] ?? 0);
     
-    if (!$ahspCode || !$pId) {
+    if ((!$ahspCode && !$ahspId) || !$pId) {
         echo json_encode(['success' => false, 'message' => 'Parameter tidak lengkap']);
         exit;
     }
@@ -835,23 +836,73 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_ahsp_rap_detail') {
     $overheadPct = getProjectOverheadProfitPct($project, 'rap');
     $overheadLabel = formatOverheadProfitLabel($project, 'rap');
     
-    // Find AHSP RAP by code
-    $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$pId, $ahspCode]);
+    // Find AHSP RAP by code or id
+    $ahspRap = null;
+    if ($ahspCode) {
+        $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND ahsp_code = ?", [$pId, $ahspCode]);
+    }
+    if (!$ahspRap && $ahspId) {
+        $ahspRap = dbGetRow("SELECT * FROM project_ahsp_rap WHERE project_id = ? AND (rab_ahsp_id = ? OR id = ?)", [$pId, $ahspId, $ahspId]);
+    }
+    
+    // Fallback: check project_ahsp (Master Data RAB) if not yet in project_ahsp_rap
+    $usingRabSource = false;
     if (!$ahspRap) {
-        echo json_encode(['success' => false, 'message' => 'AHSP RAP tidak ditemukan untuk kode: ' . $ahspCode]);
+        if ($ahspCode) {
+            $ahspRap = dbGetRow("SELECT * FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$pId, $ahspCode]);
+        }
+        if (!$ahspRap && $ahspId) {
+            $ahspRap = dbGetRow("SELECT * FROM project_ahsp WHERE project_id = ? AND id = ?", [$pId, $ahspId]);
+        }
+        if ($ahspRap) {
+            $usingRabSource = true;
+        }
+    }
+    
+    if (!$ahspRap) {
+        echo json_encode(['success' => false, 'message' => 'AHSP RAP tidak ditemukan untuk kode: ' . ($ahspCode ?: $ahspId)]);
         exit;
     }
     
-    // Get AHSP details (composition)
-    $details = dbGetAll("
-        SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, i.price as item_price,
-               COALESCE(d.unit_price, i.price) as effective_price,
-               (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
-        FROM project_ahsp_details_rap d
-        JOIN project_items_rap i ON d.item_id = i.id
-        WHERE d.ahsp_id = ?
-        ORDER BY i.category, i.name
-    ", [$ahspRap['id']]);
+    // Get AHSP details (composition) from Master Data RAP
+    $details = [];
+    if (!$usingRabSource && !empty($ahspRap['id'])) {
+        $details = dbGetAll("
+            SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, i.price as item_price,
+                   COALESCE(d.unit_price, i.price) as effective_price,
+                   (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
+            FROM project_ahsp_details_rap d
+            JOIN project_items_rap i ON d.item_id = i.id
+            WHERE d.ahsp_id = ?
+            ORDER BY i.category, i.name
+        ", [$ahspRap['id']]);
+    }
+    
+    // Fallback to project_ahsp_details (RAB) if RAP details are empty (preserves PCM fallback priority)
+    if (empty($details)) {
+        $rabAhspId = $ahspRap['rab_ahsp_id'] ?? null;
+        if (!$rabAhspId) {
+            $searchCode = $ahspRap['ahsp_code'] ?? $ahspCode;
+            if ($searchCode) {
+                $rabAhsp = dbGetRow("SELECT id FROM project_ahsp WHERE project_id = ? AND ahsp_code = ?", [$pId, $searchCode]);
+                $rabAhspId = $rabAhsp['id'] ?? null;
+            }
+            if (!$rabAhspId && $ahspId) {
+                $rabAhspId = $ahspId;
+            }
+        }
+        if ($rabAhspId) {
+            $details = dbGetAll("
+                SELECT d.*, i.item_code, i.name as item_name, i.category, i.unit, i.price as item_price,
+                       COALESCE(d.unit_price, i.price) as effective_price,
+                       (d.coefficient * COALESCE(d.unit_price, i.price)) as total_price
+                FROM project_ahsp_details d
+                JOIN project_items i ON d.item_id = i.id
+                WHERE d.ahsp_id = ?
+                ORDER BY i.category, i.name
+            ", [$rabAhspId]);
+        }
+    }
     
     // Group by category and calculate totals
     $detailsByCategory = ['upah' => [], 'material' => [], 'alat' => []];

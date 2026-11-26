@@ -64,9 +64,11 @@ $rabOverheadPct = ($usingSnapshot && $selectedSnapshot) ? getProjectOverheadProf
 foreach ($categories as $cat) {
     $subcats = dbGetAll("
         SELECT rs.id, rs.category_id, rs.ahsp_id, rs.code, rs.name, rs.unit, rs.volume, rs.sort_order,
-               rap.id as rap_id, rap.volume as rap_volume
+               rap.id as rap_id, rap.volume as rap_volume,
+               pa.ahsp_code
         FROM rab_subcategories rs
         LEFT JOIN rap_items rap ON rs.id = rap.subcategory_id
+        LEFT JOIN project_ahsp pa ON rs.ahsp_id = pa.id
         WHERE rs.category_id = ? 
         ORDER BY rs.sort_order, rs.code
     ", [$cat['id']]);
@@ -384,7 +386,7 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                 <th width="100" class="text-end">Bahan</th>
                 <th width="100" class="text-end">Peralatan</th>
                 <th width="100" class="text-end">Selisih RAB</th>
-                <th width="70">Aksi</th>
+                <th width="85" class="text-center">Aksi</th>
             </tr>
         </thead>
         <tbody>
@@ -490,10 +492,10 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                                 style="cursor: help;">
                                 <strong><?= ($selisih >= 0 ? '+' : '') . formatNumber($selisih) ?></strong>
                             </td>
-                            <td>
-                                <?php if ($sub['rap_id'] && !empty($sub['ahsp_code'])): ?>
-                                <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>')">
-                                    <i class="mdi mdi-file-table-outline"></i>
+                            <td class="text-center">
+                                <?php if (!empty($sub['ahsp_code'])): ?>
+                                <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>', <?= intval($sub['ahsp_id'] ?? 0) ?>)">
+                                    <i class="mdi mdi-file-table-outline"></i> AHSP
                                 </button>
                                 <?php else: ?>
                                 <span class="text-muted">-</span>
@@ -627,10 +629,10 @@ $selisihRounded = $rabTotalRounded - $totalRounded;
                             style="cursor: help;">
                             <strong><?= ($selisih >= 0 ? '+' : '') . formatNumber($selisih) ?></strong>
                         </td>
-                        <td>
-                            <?php if ($sub['rap_id'] && !empty($sub['ahsp_code'])): ?>
-                            <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>')">
-                                <i class="mdi mdi-file-table-outline"></i>
+                        <td class="text-center">
+                            <?php if (!empty($sub['ahsp_code'])): ?>
+                            <button type="button" class="btn btn-sm btn-secondary" title="Lihat AHSP RAP" onclick="showAhspRapModal('<?= addslashes($sub['ahsp_code']) ?>', <?= intval($sub['ahsp_id'] ?? 0) ?>)">
+                                <i class="mdi mdi-file-table-outline"></i> AHSP
                             </button>
                             <?php else: ?>
                             <span class="text-muted">-</span>
@@ -1155,14 +1157,18 @@ $(document).ready(function() {
 });
 
 // Show AHSP RAP Detail Modal (from Master Data RAP)
-function showAhspRapModal(ahspCode) {
+function showAhspRapModal(ahspCode, ahspId) {
     var modalEl = document.getElementById('ahspRapDetailModal');
     var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     document.getElementById('ahspRapDetailBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info" role="status"></div><p class="mt-2 text-muted">Memuat data AHSP RAP...</p></div>';
     document.getElementById('ahspRapDetailModalLabel').textContent = 'Detail AHSP RAP';
     modal.show();
     
-    fetch('view.php?id=<?= $projectId ?>&ajax=get_ahsp_rap_detail&ahsp_code=' + encodeURIComponent(ahspCode))
+    var url = 'view.php?id=<?= $projectId ?>&ajax=get_ahsp_rap_detail&ahsp_code=' + encodeURIComponent(ahspCode || '');
+    if (ahspId) {
+        url += '&ahsp_id=' + encodeURIComponent(ahspId);
+    }
+    fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) {
